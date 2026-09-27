@@ -435,11 +435,42 @@ async fn verify_through_third_party(rpc: &JsonRpc, signature: &str) -> Result<()
         println!("{}", serde_json::to_string_pretty(instruction)?);
     }
 
+    // Everything below depends on the RPC having parsed the instruction. An
+    // unparsed one comes back as base58, whose alphabet has no `0`, so a
+    // decimal amount could never appear in it and the check below would pass
+    // for a wholly transparent transfer. Better to refuse to answer.
+    let parsed = token_instructions[0]["parsed"].as_object().ok_or_else(|| {
+        anyhow!(
+            "{} returned the Token-2022 instruction unparsed, so there is nothing here to \
+             check an amount against. Rerun with SPIKE_VERIFY_RPC_URL pointed at an RPC that \
+             parses Token-2022 — this is inconclusive, not a pass",
+            rpc.url()
+        )
+    })?;
+
+    let instruction_type = parsed["type"].as_str().unwrap_or_default();
+    if instruction_type != "confidentialTransfer" {
+        bail!("expected a confidentialTransfer instruction, the RPC parsed a {instruction_type}");
+    }
+
+    let info = parsed["info"]
+        .as_object()
+        .ok_or_else(|| anyhow!("the parsed confidentialTransfer carries no info"))?;
+
+    // A confidential transfer has no amount to report; what it does carry is
+    // the sender's re-encrypted balance. If that is missing, the instruction is
+    // not shaped the way this check assumes and the result means nothing.
+    if !info.contains_key("newSourceDecryptableAvailableBalance") {
+        bail!(
+            "the parsed confidentialTransfer has no newSourceDecryptableAvailableBalance, \
+             so this is not the instruction shape the check was written against"
+        );
+    }
+
     // The point of the whole exercise: an ordinary SPL transfer parses to
     // `"amount": "4200000"`. This one has no plaintext amount anywhere.
-    let rendered = serde_json::to_string(&token_instructions)?;
     let transfer_amount = TRANSFER_AMOUNT.to_string();
-    if rendered.contains(&transfer_amount) {
+    if serde_json::to_string(&parsed)?.contains(&transfer_amount) {
         bail!(
             "the amount {transfer_amount} appears in plaintext in the fetched instruction — \
              the transfer is not confidential"
@@ -447,17 +478,9 @@ async fn verify_through_third_party(rpc: &JsonRpc, signature: &str) -> Result<()
     }
 
     println!("\namount           {transfer_amount} does not appear in the instruction");
-    match token_instructions[0]["parsed"]["info"].as_object() {
-        Some(info) => {
-            println!("                 what is there instead:");
-            for (field, value) in info {
-                println!("                   {field}: {value}");
-            }
-        }
-        None => {
-            println!("                 the RPC did not parse it; the opaque data is:");
-            println!("                   {}", token_instructions[0]["data"]);
-        }
+    println!("                 what is there instead:");
+    for (field, value) in info {
+        println!("                   {field}: {value}");
     }
 
     Ok(())
