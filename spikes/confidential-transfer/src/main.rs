@@ -535,7 +535,7 @@ fn load_payer() -> Result<Keypair> {
 
     if !std::path::Path::new(&path).exists() {
         let keypair = Keypair::new();
-        std::fs::write(&path, serde_json::to_string(&keypair.to_bytes().to_vec())?)
+        write_secret(&path, &serde_json::to_string(&keypair.to_bytes().to_vec())?)
             .with_context(|| format!("could not write a new keypair to {path}"))?;
         println!("generated a new devnet keypair at {path}");
         return Ok(keypair);
@@ -547,6 +547,29 @@ fn load_payer() -> Result<Keypair> {
         serde_json::from_str(&contents).with_context(|| format!("{path} is not a keypair file"))?;
 
     Keypair::try_from(bytes.as_slice()).map_err(|e| anyhow!("{path} is not a valid keypair: {e}"))
+}
+
+/// Writes a new file readable only by its owner.
+///
+/// `std::fs::write` takes whatever the umask allows, which usually leaves a
+/// secret key world-readable. Harmless for a disposable devnet key, but this
+/// crate is the closest thing to a template the proof service has, and B19
+/// asks for more than this of the ElGamal secrets it will hold.
+#[cfg(unix)]
+fn write_secret(path: &str, contents: &str) -> std::io::Result<()> {
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)?
+        .write_all(contents.as_bytes())
+}
+
+#[cfg(not(unix))]
+fn write_secret(path: &str, contents: &str) -> std::io::Result<()> {
+    std::fs::write(path, contents)
 }
 
 /// Tops the payer up if devnet will oblige. It often will not, so the failure
