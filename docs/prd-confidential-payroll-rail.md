@@ -1,7 +1,19 @@
-# Cadence — foreign employers run payroll to Brazil in one approval, without publishing what anyone earns
+# ~~Cadence — foreign employers run payroll to Brazil in one approval, without publishing what anyone earns~~
 
-Status: draft
-Date: 2026-09-27 · Owner: João · Delivery plan: not yet
+> **Superseded 2026-09-27 by [PRD — confidential USDC payments](prd-confidential-usdc-payments.md).**
+>
+> The recipient in this version still had to sell USDC on an exchange to reach
+> reais, so the product improved the payer's experience and not theirs. The
+> replacement serves people who hold dollars by preference, which removes the
+> last mile instead of deferring it.
+>
+> Kept rather than deleted: the Brazilian licensing analysis becomes live again
+> unchanged the moment a fiat corridor is added. The Context section of the
+> [ADR](decisions/2026-09-27-confidential-payroll-rail-architecture.md) carries
+> the same material in maintained form — prefer that over this file.
+
+Status: superseded
+Date: 2026-09-27 · Owner: João
 Architecture decisions: [ADR 2026-09-27](decisions/2026-09-27-confidential-payroll-rail-architecture.md)
 
 ## The problem
