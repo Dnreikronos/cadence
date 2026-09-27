@@ -27,10 +27,19 @@ use {
 /// The parts of a confidential account this spike needs.
 pub struct Balances {
     /// How many `Deposit` and `Transfer` instructions have credited the
-    /// pending balance. `ApplyPendingBalance` has to name this number, so that
-    /// a credit arriving mid-flight invalidates the instruction rather than
-    /// being silently swallowed.
+    /// pending balance. `ApplyPendingBalance` names this number, but naming it
+    /// does not protect anything — the program does not compare it. It folds in
+    /// whatever pending balance exists at execution time, stores the AES
+    /// balance it was handed, and writes the expected and actual counters into
+    /// separate fields for the caller to compare afterwards.
+    ///
+    /// So a credit landing between the read and the apply produces a
+    /// transaction that succeeds with an AES balance that no longer matches the
+    /// ElGamal one, and the next proof built from it fails. `applied_cleanly`
+    /// is how you find out.
     pub pending_balance_credit_counter: u64,
+    expected_pending_balance_credit_counter: u64,
+    actual_pending_balance_credit_counter: u64,
     pending_balance_lo: solana_zk_sdk_pod::encryption::elgamal::PodElGamalCiphertext,
     pending_balance_hi: solana_zk_sdk_pod::encryption::elgamal::PodElGamalCiphertext,
     available_balance: solana_zk_sdk_pod::encryption::elgamal::PodElGamalCiphertext,
@@ -41,11 +50,27 @@ impl Balances {
     pub fn read(account: &ConfidentialTransferAccount) -> Self {
         Self {
             pending_balance_credit_counter: account.pending_balance_credit_counter.into(),
+            expected_pending_balance_credit_counter: account
+                .expected_pending_balance_credit_counter
+                .into(),
+            actual_pending_balance_credit_counter: account
+                .actual_pending_balance_credit_counter
+                .into(),
             pending_balance_lo: account.pending_balance_lo,
             pending_balance_hi: account.pending_balance_hi,
             available_balance: account.available_balance,
             decryptable_available_balance: account.decryptable_available_balance,
         }
+    }
+
+    /// Whether the last `ApplyPendingBalance` folded in exactly what its caller
+    /// thought it would.
+    ///
+    /// Read this after every apply. False means a credit arrived in flight, the
+    /// AES and ElGamal balances have diverged, and the AES one has to be
+    /// rewritten from the real total before anything else is built on it.
+    pub fn applied_cleanly(&self) -> bool {
+        self.expected_pending_balance_credit_counter == self.actual_pending_balance_credit_counter
     }
 
     /// The spendable balance, read the cheap way.

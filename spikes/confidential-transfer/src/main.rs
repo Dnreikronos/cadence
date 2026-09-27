@@ -307,6 +307,15 @@ async fn fund_confidential_balance(
     send(rpc, &[apply], payer, &[], "apply pending balance").await?;
 
     let applied = read_balances(rpc, &sender.account).await?;
+    // The program does not reject an apply whose expected counter was stale, it
+    // just records both numbers and moves on. Comparing them afterwards is the
+    // only way to learn that the AES balance now disagrees with the ElGamal one.
+    if !applied.applied_cleanly() {
+        bail!(
+            "a credit landed while the apply was in flight, so the sender's AES balance no \
+             longer matches the real one. Rerun — the spike does not handle the resync"
+        );
+    }
     println!(
         "\nsender balance   {} units available, {} pending\n",
         applied.available(&sender.aes_key)?,
