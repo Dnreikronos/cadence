@@ -431,16 +431,36 @@ async fn verify_through_third_party(rpc: &JsonRpc, signature: &str) -> Result<()
         println!("{}", serde_json::to_string_pretty(instruction)?);
     }
 
-    // Everything below depends on the RPC having parsed the instruction. An
-    // unparsed one comes back as base58, whose alphabet has no `0`, so a
-    // decimal amount could never appear in it and the check below would pass
-    // for a wholly transparent transfer. Better to refuse to answer.
-    let parsed = token_instructions[0]["parsed"].as_object().ok_or_else(|| {
-        anyhow!(
-            "{} returned the Token-2022 instruction unparsed, so there is nothing here to \
-             check an amount against. Rerun with SPIKE_VERIFY_RPC_URL pointed at an RPC that \
-             parses Token-2022 — this is inconclusive, not a pass",
+    let info = check_no_plaintext_amount(token_instructions[0]).with_context(|| {
+        format!(
+            "checked against {}; rerun with SPIKE_VERIFY_RPC_URL elsewhere if that RPC is the \
+             problem",
             rpc.url()
+        )
+    })?;
+
+    println!("\namount           {TRANSFER_AMOUNT} does not appear in the parsed instruction");
+    println!("                 what is there instead:");
+    for (field, value) in &info {
+        println!("                   {field}: {value}");
+    }
+
+    show_amount_ciphertext(rpc, signature).await
+}
+
+/// Confirms a fetched Token-2022 instruction exposes no plaintext amount, and
+/// returns what it does expose.
+///
+/// Split out from the fetch so it can be tested, because the interesting cases
+/// are the ones a happy devnet run never produces. It previously searched the
+/// whole instruction for the decimal amount, which quietly passed anything the
+/// RPC had not parsed — unparsed data is base58, and base58 has no `0` in its
+/// alphabet, so a decimal amount could never appear there.
+fn check_no_plaintext_amount(instruction: &Value) -> Result<serde_json::Map<String, Value>> {
+    let parsed = instruction["parsed"].as_object().ok_or_else(|| {
+        anyhow!(
+            "the Token-2022 instruction came back unparsed, so there is nothing here to check \
+             an amount against — this is inconclusive, not a pass"
         )
     })?;
 
@@ -463,23 +483,15 @@ async fn verify_through_third_party(rpc: &JsonRpc, signature: &str) -> Result<()
         );
     }
 
-    // The point of the whole exercise: an ordinary SPL transfer parses to
-    // `"amount": "4200000"`. This one has no plaintext amount anywhere.
-    let transfer_amount = TRANSFER_AMOUNT.to_string();
-    if serde_json::to_string(&parsed)?.contains(&transfer_amount) {
+    // An ordinary SPL transfer parses to `"amount": "4200000"`.
+    if serde_json::to_string(parsed)?.contains(&TRANSFER_AMOUNT.to_string()) {
         bail!(
-            "the amount {transfer_amount} appears in plaintext in the fetched instruction — \
+            "the amount {TRANSFER_AMOUNT} appears in plaintext in the fetched instruction — \
              the transfer is not confidential"
         );
     }
 
-    println!("\namount           {transfer_amount} does not appear in the parsed instruction");
-    println!("                 what is there instead:");
-    for (field, value) in info {
-        println!("                   {field}: {value}");
-    }
-
-    show_amount_ciphertext(rpc, signature).await
+    Ok(info.clone())
 }
 
 /// Reads the transfer amount off the wire, as ciphertext.
@@ -490,13 +502,6 @@ async fn verify_through_third_party(rpc: &JsonRpc, signature: &str) -> Result<()
 /// two ElGamal ciphertexts the parser does not surface, so the only way to see
 /// them is to read the bytes.
 async fn show_amount_ciphertext(rpc: &JsonRpc, signature: &str) -> Result<()> {
-    // TransferInstructionData, in declaration order: two discriminant bytes,
-    // the AES balance, then the two halves of the amount.
-    const AES_BALANCE: usize = 2 + 36;
-    const AUDITOR_LO: usize = AES_BALANCE + 64;
-    const AUDITOR_HI: usize = AUDITOR_LO + 64;
-    const INSTRUCTION_LEN: usize = AUDITOR_HI + 3;
-
     let transaction = rpc.get_transaction_raw(signature).await?;
     let message = &transaction["transaction"]["message"];
     let account_keys = message["accountKeys"]
@@ -520,6 +525,26 @@ async fn show_amount_ciphertext(rpc: &JsonRpc, signature: &str) -> Result<()> {
     let bytes = bs58::decode(data)
         .into_vec()
         .context("the instruction data was not base58")?;
+    let (lo, hi) = amount_ciphertext(&bytes)?;
+
+    println!("\namount on the wire");
+    println!("                 lo {}", hex(lo));
+    println!("                 hi {}", hex(hi));
+    println!("                 64 bytes each, ElGamal, and no plaintext anywhere in the 169");
+
+    Ok(())
+}
+
+/// Picks the two halves of the encrypted amount out of a raw `Transfer`
+/// instruction, and confirms the plaintext is not sitting beside them.
+///
+/// `TransferInstructionData`, in declaration order: two discriminant bytes, the
+/// sender's AES balance, the two auditor ciphertexts, three proof offsets.
+fn amount_ciphertext(bytes: &[u8]) -> Result<(&[u8], &[u8])> {
+    const AES_BALANCE: usize = 2 + 36;
+    const AUDITOR_LO: usize = AES_BALANCE + 64;
+    const AUDITOR_HI: usize = AUDITOR_LO + 64;
+    const INSTRUCTION_LEN: usize = AUDITOR_HI + 3;
 
     if bytes.len() != INSTRUCTION_LEN {
         bail!(
@@ -534,18 +559,10 @@ async fn show_amount_ciphertext(rpc: &JsonRpc, signature: &str) -> Result<()> {
         bail!("the transfer amount appears in the instruction data in the clear");
     }
 
-    println!("\namount on the wire");
-    println!(
-        "                 lo {}",
-        hex(&bytes[AES_BALANCE..AUDITOR_LO])
-    );
-    println!(
-        "                 hi {}",
-        hex(&bytes[AUDITOR_LO..AUDITOR_HI])
-    );
-    println!("                 64 bytes each, ElGamal, and no plaintext anywhere in the 169");
-
-    Ok(())
+    Ok((
+        &bytes[AES_BALANCE..AUDITOR_LO],
+        &bytes[AUDITOR_LO..AUDITOR_HI],
+    ))
 }
 
 fn hex(bytes: &[u8]) -> String {
