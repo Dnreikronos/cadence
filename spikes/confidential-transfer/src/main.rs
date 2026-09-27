@@ -708,7 +708,124 @@ async fn ensure_funded(rpc: &JsonRpc, payer: &Address) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use solana_zk_sdk::encryption::elgamal::ElGamalCiphertext;
+
+    /// What a successful run gets back.
+    fn confidential_instruction() -> Value {
+        json!({
+            "program": "spl-token",
+            "programId": TOKEN_2022.to_string(),
+            "parsed": {
+                "type": "confidentialTransfer",
+                "info": {
+                    "source": "8GYk41ncpvnfbrF5S7DwDrmdFLCu3ZbQC6mWQwmp4oU8",
+                    "destination": "BfvfMyNNFykyeCy1gxisg4uBtom7cx6pFdbA9fS4K9vt",
+                    "newSourceDecryptableAvailableBalance": "eG8AO9PE5KPLUklL2O23f4qKMF1qUQij5BNoyGmjt66OR8Ay",
+                    "equalityProofInstructionOffset": 1,
+                    "ciphertextValidityProofInstructionOffset": 2,
+                    "rangeProofInstructionOffset": 3,
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn a_confidential_transfer_exposes_no_amount() {
+        let info = check_no_plaintext_amount(&confidential_instruction()).expect("should pass");
+        assert!(info.contains_key("newSourceDecryptableAvailableBalance"));
+        assert!(!info.contains_key("amount"));
+    }
+
+    /// The regression that matters. An RPC which does not parse Token-2022
+    /// returns base58, whose alphabet has no `0`, so searching it for a decimal
+    /// amount always came up empty and every transfer passed — including a
+    /// transparent one.
+    #[test]
+    fn an_unparsed_instruction_is_inconclusive_not_a_pass() {
+        let transparent_amount_in_base58 =
+            bs58::encode(TRANSFER_AMOUNT.to_le_bytes()).into_string();
+        assert!(
+            !transparent_amount_in_base58.contains('0'),
+            "base58 cannot contain a zero, which is what made the old check useless"
+        );
+
+        let unparsed = json!({
+            "programId": TOKEN_2022.to_string(),
+            "data": transparent_amount_in_base58,
+        });
+
+        let error = check_no_plaintext_amount(&unparsed)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("inconclusive"), "got {error}");
+    }
+
+    #[test]
+    fn a_transparent_transfer_is_rejected() {
+        let transparent = json!({
+            "programId": TOKEN_2022.to_string(),
+            "parsed": {
+                "type": "confidentialTransfer",
+                "info": {
+                    "newSourceDecryptableAvailableBalance": "whatever",
+                    "amount": TRANSFER_AMOUNT.to_string(),
+                }
+            }
+        });
+
+        let error = check_no_plaintext_amount(&transparent)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("plaintext"), "got {error}");
+    }
+
+    #[test]
+    fn an_unexpected_instruction_shape_is_rejected() {
+        let mut wrong_type = confidential_instruction();
+        wrong_type["parsed"]["type"] = json!("transfer");
+        assert!(check_no_plaintext_amount(&wrong_type).is_err());
+
+        let mut no_balance = confidential_instruction();
+        no_balance["parsed"]["info"]
+            .as_object_mut()
+            .unwrap()
+            .remove("newSourceDecryptableAvailableBalance");
+        assert!(check_no_plaintext_amount(&no_balance).is_err());
+    }
+
+    /// A real 169-byte `Transfer`, with the amount ciphertexts where the struct
+    /// says they are.
+    fn transfer_instruction_bytes() -> Vec<u8> {
+        let mut bytes = vec![27u8, 7];
+        bytes.extend([0xAA; 36]); // AES balance
+        bytes.extend([0xBB; 64]); // auditor ciphertext lo
+        bytes.extend([0xCC; 64]); // auditor ciphertext hi
+        bytes.extend([1, 2, 3]); // proof offsets
+        bytes
+    }
+
+    #[test]
+    fn the_amount_ciphertext_is_where_the_struct_says() {
+        let bytes = transfer_instruction_bytes();
+        let (lo, hi) = amount_ciphertext(&bytes).expect("should parse");
+        assert_eq!(lo, [0xBB; 64]);
+        assert_eq!(hi, [0xCC; 64]);
+    }
+
+    #[test]
+    fn a_plaintext_amount_in_the_raw_bytes_is_rejected() {
+        let mut bytes = transfer_instruction_bytes();
+        bytes[40..48].copy_from_slice(&TRANSFER_AMOUNT.to_le_bytes());
+        let error = amount_ciphertext(&bytes).unwrap_err().to_string();
+        assert!(error.contains("in the clear"), "got {error}");
+    }
+
+    #[test]
+    fn a_wrong_length_instruction_is_rejected() {
+        assert!(amount_ciphertext(&[27, 7]).is_err());
+        assert!(amount_ciphertext(&transfer_instruction_bytes()[..168]).is_err());
+    }
 
     /// Builds the real transfer — real proofs, real instruction encoding — over
     /// a synthetic balance, and measures the wire size of the v1 transaction it
