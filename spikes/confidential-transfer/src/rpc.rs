@@ -44,18 +44,38 @@ impl JsonRpc {
             "params": params,
         });
 
-        let response: Value = self
+        let response = self
             .http
             .post(&self.url)
             .json(&body)
             .send()
             .await
-            .with_context(|| format!("{method} request to {} failed", self.url))?
+            .with_context(|| format!("{method} request to {} failed", self.url))?;
+
+        // Before touching the body. A gateway rejecting the request for rate
+        // does not have to answer in JSON, and usually doesn't — decode first
+        // and the retry never sees it, it just sees malformed JSON.
+        let status = response.status();
+        if status.as_u16() == 429 || status.is_server_error() {
+            let detail = response.text().await.unwrap_or_default();
+            return Err(Transient(format!(
+                "{method} on {} returned HTTP {status} {}",
+                self.url,
+                detail.chars().take(200).collect::<String>()
+            ))
+            .into());
+        }
+
+        let response: Value = response
             .json()
             .await
             .with_context(|| format!("{method} response from {} was not JSON", self.url))?;
 
         if let Some(error) = response.get("error").filter(|e| !e.is_null()) {
+            let message = error["message"].as_str().unwrap_or_default();
+            if is_rate_limit_message(message) {
+                return Err(Transient(format!("{method} on {} returned {error}", self.url)).into());
+            }
             return Err(anyhow!("{method} on {} returned {error}", self.url));
         }
 
@@ -255,8 +275,31 @@ impl JsonRpc {
     }
 }
 
-/// Whether an error is worth waiting out rather than giving up on.
+/// An error worth waiting out rather than giving up on.
+///
+/// A marker type rather than a phrase to grep the message for, because the
+/// message is whatever the endpoint felt like sending and the retry should not
+/// depend on guessing at it.
+#[derive(Debug)]
+pub struct Transient(pub String);
+
+impl std::fmt::Display for Transient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for Transient {}
+
 fn is_transient(error: &anyhow::Error) -> bool {
-    let text = error.to_string().to_lowercase();
-    text.contains("too many requests") || text.contains("rate limit") || text.contains("429")
+    error.chain().any(|cause| cause.is::<Transient>())
+}
+
+/// A JSON-RPC error that is really a rate limit wearing an error code. The
+/// codes differ per provider, so the wording is all there is to go on here.
+fn is_rate_limit_message(message: &str) -> bool {
+    let message = message.to_lowercase();
+    message.contains("too many requests")
+        || message.contains("rate limit")
+        || message.contains("429")
 }
