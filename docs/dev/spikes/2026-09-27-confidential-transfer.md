@@ -20,7 +20,7 @@ Five steps, every one of them sent as a transaction v1 against devnet:
 
 1. A Token-2022 mint carrying `ConfidentialTransferMint` — `auto_approve_new_accounts: true`, auditor `None`. The extension instruction has to precede `InitializeMint2`, which is what freezes the extension set.
 2. Two auxiliary token accounts sized for `ConfidentialTransferAccount`, each configured with its pubkey validity proof in the same transaction. Auxiliary rather than associated: an ATA is sized from the mint's extensions alone and has no room for the account extension.
-3. `MintToChecked` + `Deposit` in one transaction, then `ApplyPendingBalance` in a second. Applying has to name the credit counter it expects, so the account must be re-read in between — the two cannot be bundled.
+3. `MintToChecked` + `Deposit` in one transaction, then `ApplyPendingBalance` in a second, with the account re-read in between to get the credit counter. Two transactions by choice, not by necessity — see the counter finding below.
 4. One `Transfer` with its equality, ciphertext validity and range proofs inline at instruction offsets 1, 2 and 3. Four instructions, one transaction.
 5. `getTransaction` with `encoding: jsonParsed` and `maxSupportedTransactionVersion: 1`, against a *different* RPC provider from the one that sent it. R2 is only demonstrated by an endpoint with no part in the send.
 
@@ -55,7 +55,7 @@ Environment, since none of these numbers are portable across versions:
 | Against the legacy cap | 1,232 | it would not have fit; v1 is load-bearing, not a convenience |
 | Instructions in the transaction | 4 | transfer, equality, ciphertext validity, range |
 | Amount visible to a third party | none | no `amount` field in the parsed instruction |
-| Amount visible to the recipient | 4,200,000 units | AES decrypt of their pending balance |
+| Amount visible to the recipient | 4,200,000 units | ElGamal decrypt of their pending balance |
 | Successful transfers | n = 1 | |
 
 The 2,395 figure is the same number in `cargo test` and on chain, to the byte. It is **smaller** than the 2,897 the ADR quotes for the Foundation's reference transaction, mostly because v1 carries the compute budget in the message config rather than in two `ComputeBudget` instructions.
@@ -97,6 +97,10 @@ Addresses, yes. Where an ordinary SPL transfer carries `"amount": "4200000"`, th
 What survives of B18 is the part that mattered. Proofs still come from `spl-token-confidential-transfer-proof-generation` — the same crate `spl-token-client` itself calls — and instructions from `spl-token-2022-interface`. Nothing cryptographic is hand-rolled. What *is* ours, and what the proof service will have to own until upstream ships a v1-aware client, is two small modules: `src/v1.rs`, about eighty lines of message compilation and signing, and `src/balances.rs`, the bookkeeping around reading and re-encrypting a confidential balance.
 
 **A v1 message defaults every budget field it does not carry to zero**, where a legacy transaction got 200k CU per instruction and a 64 MiB account-data allowance for free. This cost real time in the spike: the account-data one fails simulation with `MaxLoadedAccountsDataSizeExceeded`, which reads like the transaction is too large and is nothing of the kind — the declared allowance was zero and the Token-2022 program account alone exceeds it. Whatever wraps transaction assembly in the service should set both centrally, because a call site that forgets fails in a way that points at the wrong problem.
+
+**`ApplyPendingBalance` does not validate the credit counter it is given.** The instruction takes an expected counter, which reads like a guard and is not one. The program folds in whatever pending balance exists when it runs, stores the AES balance it was handed, and writes the expected and actual counters into two separate fields. Comparing them is the caller's job, after the fact. A credit landing in flight therefore produces a transaction that succeeds while leaving the AES balance out of step with the ElGamal one, and the damage only surfaces later as a proof that will not verify. `balances.rs` exposes the comparison and the flow stops on it, but a service doing this at payroll volume needs a real resync path, not a stop.
+
+A side effect worth knowing: since nothing is validated, deposit and apply *can* go in one transaction. You know the counter will be current plus one and you know the resulting balance, so neither has to be read back. This spike keeps them apart because it is easier to follow, not because it has to.
 
 **Two `solana-instruction` majors have to coexist.** Token-2022 emits 3.5.1, `solana-message` 5.x consumes 4.0.0. The structs are field-identical and a nine-line copy bridges them. Harmless, and it resolves itself when Token-2022 moves up.
 
