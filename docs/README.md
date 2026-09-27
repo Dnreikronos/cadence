@@ -15,8 +15,9 @@ repo's paths instead of these.
 
 ## Product
 
-- [Cadence](prd-confidential-payroll-rail.md) — foreign employers run payroll to Brazil in one approval, without publishing what anyone earns. Status: draft.
+- [Cadence — confidential USDC payments](prd-confidential-usdc-payments.md) — companies pay their team and suppliers in dollars without showing the amounts to the world. Status: draft.
+- ~~[Payroll rail for Brazil](prd-confidential-payroll-rail.md)~~ — superseded 2026-09-27. Kept for the Brazilian licensing analysis, which applies again if a fiat corridor is ever added.
 
 ## Decisions
 
-- [Cadence stops at the worker's wallet; the regulated last mile belongs to the exchange they already use](decisions/2026-09-27-confidential-payroll-rail-architecture.md) — 2026-09-27. The three licensing walls between a foreign employer and reais in a Brazilian bank account, why v1 stops short of all of them, and why the confidential mint is a forked `token-wrap`. Status: accepted.
+- [Cadence pays people who already hold dollars, so no part of the product is a regulated activity](decisions/2026-09-27-confidential-payroll-rail-architecture.md) — 2026-09-27, decision log. Why the Brazil corridor was abandoned, why proof generation moved to the browser, and what is still open on the wrapped mint. Status: accepted.
