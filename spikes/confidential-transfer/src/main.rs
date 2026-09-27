@@ -471,13 +471,83 @@ async fn verify_through_third_party(rpc: &JsonRpc, signature: &str) -> Result<()
         );
     }
 
-    println!("\namount           {transfer_amount} does not appear in the instruction");
+    println!("\namount           {transfer_amount} does not appear in the parsed instruction");
     println!("                 what is there instead:");
     for (field, value) in info {
         println!("                   {field}: {value}");
     }
 
+    show_amount_ciphertext(rpc, signature).await
+}
+
+/// Reads the transfer amount off the wire, as ciphertext.
+///
+/// The parsed view above proves no plaintext amount is exposed, but it renders
+/// only some of the instruction, so on its own it cannot show what the amount
+/// *is*. The amount rides in `transfer_amount_auditor_ciphertext_lo` and `_hi`,
+/// two ElGamal ciphertexts the parser does not surface, so the only way to see
+/// them is to read the bytes.
+async fn show_amount_ciphertext(rpc: &JsonRpc, signature: &str) -> Result<()> {
+    // TransferInstructionData, in declaration order: two discriminant bytes,
+    // the AES balance, then the two halves of the amount.
+    const AES_BALANCE: usize = 2 + 36;
+    const AUDITOR_LO: usize = AES_BALANCE + 64;
+    const AUDITOR_HI: usize = AUDITOR_LO + 64;
+    const INSTRUCTION_LEN: usize = AUDITOR_HI + 3;
+
+    let transaction = rpc.get_transaction_raw(signature).await?;
+    let message = &transaction["transaction"]["message"];
+    let account_keys = message["accountKeys"]
+        .as_array()
+        .ok_or_else(|| anyhow!("no account keys in the unparsed transaction"))?;
+
+    let data = message["instructions"]
+        .as_array()
+        .ok_or_else(|| anyhow!("no instructions in the unparsed transaction"))?
+        .iter()
+        .find(|ix| {
+            ix["programIdIndex"]
+                .as_u64()
+                .and_then(|i| account_keys.get(i as usize))
+                .and_then(Value::as_str)
+                == Some(&TOKEN_2022.to_string())
+        })
+        .and_then(|ix| ix["data"].as_str())
+        .ok_or_else(|| anyhow!("no Token-2022 instruction in the unparsed transaction"))?;
+
+    let bytes = bs58::decode(data)
+        .into_vec()
+        .context("the instruction data was not base58")?;
+
+    if bytes.len() != INSTRUCTION_LEN {
+        bail!(
+            "expected a {INSTRUCTION_LEN}-byte transfer instruction, got {}",
+            bytes.len()
+        );
+    }
+
+    // The check the parsed view cannot make. A transparent transfer puts the
+    // amount here as a little-endian u64.
+    if bytes.windows(8).any(|w| w == TRANSFER_AMOUNT.to_le_bytes()) {
+        bail!("the transfer amount appears in the instruction data in the clear");
+    }
+
+    println!("\namount on the wire");
+    println!(
+        "                 lo {}",
+        hex(&bytes[AES_BALANCE..AUDITOR_LO])
+    );
+    println!(
+        "                 hi {}",
+        hex(&bytes[AUDITOR_LO..AUDITOR_HI])
+    );
+    println!("                 64 bytes each, ElGamal, and no plaintext anywhere in the 169");
+
     Ok(())
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Reads the confidential extension off a token account.

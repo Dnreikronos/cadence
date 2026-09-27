@@ -194,10 +194,22 @@ impl JsonRpc {
         ))
     }
 
+    /// Fetches a transaction with the parsed encoding. This is the call that
+    /// fails outright on a client that has not declared v1 support.
+    pub async fn get_transaction(&self, signature: &str) -> Result<Value> {
+        self.fetch_transaction(signature, "jsonParsed").await
+    }
+
+    /// Fetches the same transaction unparsed, so the instruction data can be
+    /// read as bytes instead of as whatever the RPC chose to render.
+    pub async fn get_transaction_raw(&self, signature: &str) -> Result<Value> {
+        self.fetch_transaction(signature, "json").await
+    }
+
     /// Fetches a transaction, waiting out the two things a free third-party
     /// endpoint reliably does: lag a slot or two behind the sending node, and
     /// rate-limit a second request that follows too closely on the first.
-    pub async fn get_transaction(&self, signature: &str) -> Result<Value> {
+    async fn fetch_transaction(&self, signature: &str, encoding: &str) -> Result<Value> {
         let mut last_error = None;
 
         for attempt in 0..RPC_FETCH_ATTEMPTS {
@@ -205,7 +217,7 @@ impl JsonRpc {
                 tokio::time::sleep(Duration::from_secs(2)).await;
             }
 
-            match self.get_transaction_once(signature).await {
+            match self.fetch_transaction_once(signature, encoding).await {
                 Ok(Some(transaction)) => return Ok(transaction),
                 Ok(None) => last_error = Some(anyhow!("{} has not seen {signature}", self.url)),
                 Err(e) if is_transient(&e) => last_error = Some(e),
@@ -217,14 +229,18 @@ impl JsonRpc {
     }
 
     /// `Ok(None)` means the RPC answered and has not seen it yet.
-    async fn get_transaction_once(&self, signature: &str) -> Result<Option<Value>> {
+    async fn fetch_transaction_once(
+        &self,
+        signature: &str,
+        encoding: &str,
+    ) -> Result<Option<Value>> {
         let result = self
             .call(
                 "getTransaction",
                 json!([
                     signature,
                     {
-                        "encoding": "jsonParsed",
+                        "encoding": encoding,
                         "commitment": "confirmed",
                         "maxSupportedTransactionVersion": 1,
                     }
