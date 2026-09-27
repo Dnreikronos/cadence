@@ -181,7 +181,7 @@ async fn create_mint(rpc: &JsonRpc, payer: &Keypair) -> Result<Address> {
         )?,
     ];
 
-    send(rpc, &instructions, payer, &[payer, &mint], "create mint").await?;
+    send(rpc, &instructions, payer, &[&mint], "create mint").await?;
     println!("mint             {}", mint.pubkey());
     Ok(mint.pubkey())
 }
@@ -245,7 +245,7 @@ async fn configure_account(
         rpc,
         &instructions,
         payer,
-        &[payer, &account, owner],
+        &[&account, owner],
         &format!("configure {label}"),
     )
     .await?;
@@ -291,7 +291,7 @@ async fn fund_confidential_balance(
             &[],
         )?,
     ];
-    send(rpc, &instructions, payer, &[payer], "mint and deposit").await?;
+    send(rpc, &instructions, payer, &[], "mint and deposit").await?;
 
     let pending = read_balances(rpc, &sender.account).await?;
     let apply = confidential_transfer::instruction::apply_pending_balance(
@@ -304,7 +304,7 @@ async fn fund_confidential_balance(
         &sender.owner,
         &[],
     )?;
-    send(rpc, &[apply], payer, &[payer], "apply pending balance").await?;
+    send(rpc, &[apply], payer, &[], "apply pending balance").await?;
 
     let applied = read_balances(rpc, &sender.account).await?;
     println!(
@@ -369,7 +369,7 @@ async fn send_confidential_transfer(
     println!("amount           {TRANSFER_AMOUNT} units");
     println!("instructions     {} in one transaction", instructions.len());
 
-    let sent = send(rpc, &instructions, payer, &[payer], "confidential transfer").await?;
+    let sent = send(rpc, &instructions, payer, &[], "confidential transfer").await?;
     println!(
         "size             {} bytes of {MAX_TRANSACTION_SIZE}",
         sent.size
@@ -633,7 +633,7 @@ mod tests {
 
         assert_eq!(instructions.len(), 4, "transfer plus its three proofs");
 
-        let signers: Vec<&dyn Signer> = vec![&payer];
+        let signers: Vec<&dyn Signer> = vec![];
         let transaction = v1::compile_and_sign(
             &instructions,
             &payer,

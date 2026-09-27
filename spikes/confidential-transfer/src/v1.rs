@@ -47,6 +47,9 @@ pub fn to_v1(instruction: &TokenInstruction) -> V1Instruction {
 /// because the signers here are `solana-signer` 3.x — the version Token-2022
 /// and the ZK SDK hand out — and `try_new` wants 4.x. The signed payload is
 /// identical either way: the serialized message, version prefix included.
+///
+/// `signers` covers everyone *besides* the payer; the payer signs by virtue of
+/// being the payer.
 pub fn compile_and_sign(
     instructions: &[TokenInstruction],
     payer: &dyn Signer,
@@ -64,11 +67,13 @@ pub fn compile_and_sign(
     let message = VersionedMessage::V1(message);
     let payload = message.serialize();
 
+    // The fee payer is always a required signature, so look it up alongside
+    // `signers` rather than making every caller pass it twice.
     let signatures = signer_keys
         .iter()
         .map(|key| {
-            signers
-                .iter()
+            std::iter::once(&payer)
+                .chain(signers.iter())
                 .find(|signer| signer.pubkey() == *key)
                 .ok_or_else(|| anyhow!("no signer supplied for required signature {key}"))
                 .map(|signer| signer.sign_message(&payload))
