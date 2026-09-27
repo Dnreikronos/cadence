@@ -262,9 +262,11 @@ async fn configure_account(
 
 /// Mints, deposits into the confidential balance, then applies it.
 ///
-/// A deposit lands in the pending balance. Only an applied balance can be
-/// spent, and applying has to name the credit counter it expects, so it cannot
-/// be bundled with the deposit — the account has to be re-read in between.
+/// A deposit lands in the pending balance and only an applied balance can be
+/// spent. Applying names the credit counter it expects, which is why the
+/// account is re-read in between here — but the program does not check that
+/// number, so the two could be bundled by predicting it. Kept apart because it
+/// reads better, not because it has to be.
 async fn fund_confidential_balance(
     rpc: &JsonRpc,
     payer: &Keypair,
