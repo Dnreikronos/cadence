@@ -401,25 +401,10 @@ async fn verify_through_third_party(rpc: &JsonRpc, signature: &str) -> Result<()
     println!("\n--- what a third party sees ---");
     println!("via              {}", rpc.url());
 
-    // Third-party RPCs lag the sending node by a slot or two.
-    let mut transaction = None;
-    for _ in 0..20 {
-        match rpc.get_transaction(signature).await {
-            Ok(value) => {
-                transaction = Some(value);
-                break;
-            }
-            Err(e) if e.to_string().contains("has not seen") => {
-                tokio::time::sleep(std::time::Duration::from_millis(1_000)).await;
-            }
-            Err(e) => return Err(e.context(
-                "getTransaction failed — if the error mentions a transaction version, that RPC \
-                 has not declared maxSupportedTransactionVersion: 1 (ADR B7)",
-            )),
-        }
-    }
-    let transaction =
-        transaction.ok_or_else(|| anyhow!("{} never returned {signature}", rpc.url()))?;
+    let transaction = rpc.get_transaction(signature).await.context(
+        "getTransaction failed — if the error mentions a transaction version, that RPC has \
+         not declared maxSupportedTransactionVersion: 1 (ADR B7)",
+    )?;
 
     let version = &transaction["version"];
     println!("version          {version}");

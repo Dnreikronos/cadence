@@ -16,6 +16,9 @@ use {
     std::{str::FromStr, time::Duration},
 };
 
+/// How long to keep waiting on a third-party RPC before giving up.
+const RPC_FETCH_ATTEMPTS: u32 = 20;
+
 pub struct JsonRpc {
     url: String,
     http: reqwest::Client,
@@ -191,9 +194,30 @@ impl JsonRpc {
         ))
     }
 
-    /// Fetches a transaction with the parsed encoding. This is the call that
-    /// fails outright on a client that has not declared v1 support.
+    /// Fetches a transaction, waiting out the two things a free third-party
+    /// endpoint reliably does: lag a slot or two behind the sending node, and
+    /// rate-limit a second request that follows too closely on the first.
     pub async fn get_transaction(&self, signature: &str) -> Result<Value> {
+        let mut last_error = None;
+
+        for attempt in 0..RPC_FETCH_ATTEMPTS {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+
+            match self.get_transaction_once(signature).await {
+                Ok(Some(transaction)) => return Ok(transaction),
+                Ok(None) => last_error = Some(anyhow!("{} has not seen {signature}", self.url)),
+                Err(e) if is_transient(&e) => last_error = Some(e),
+                Err(e) => return Err(e),
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| anyhow!("{} never returned {signature}", self.url)))
+    }
+
+    /// `Ok(None)` means the RPC answered and has not seen it yet.
+    async fn get_transaction_once(&self, signature: &str) -> Result<Option<Value>> {
         let result = self
             .call(
                 "getTransaction",
@@ -209,11 +233,14 @@ impl JsonRpc {
             .await?;
 
         if result.is_null() {
-            return Err(anyhow!(
-                "{} has not seen {signature} yet — third-party RPCs lag the sending node",
-                self.url
-            ));
+            return Ok(None);
         }
-        Ok(result)
+        Ok(Some(result))
     }
+}
+
+/// Whether an error is worth waiting out rather than giving up on.
+fn is_transient(error: &anyhow::Error) -> bool {
+    let text = error.to_string().to_lowercase();
+    text.contains("too many requests") || text.contains("rate limit") || text.contains("429")
 }
