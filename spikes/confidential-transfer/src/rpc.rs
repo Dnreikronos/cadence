@@ -303,3 +303,32 @@ fn is_rate_limit_message(message: &str) -> bool {
         || message.contains("rate limit")
         || message.contains("429")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_transient_error_is_retried_through_any_wrapping() {
+        let error = anyhow!(Transient("HTTP 429".into())).context("fetching a transaction");
+        assert!(is_transient(&error));
+    }
+
+    #[test]
+    fn an_ordinary_error_is_not_retried() {
+        assert!(!is_transient(&anyhow!("transaction not found")));
+        // The old check keyed off wording, so this used to retry forever.
+        assert!(!is_transient(&anyhow!(
+            "response was not JSON: rate limit in the body text"
+        )));
+    }
+
+    #[test]
+    fn rate_limit_wording_is_recognised_whatever_the_code() {
+        assert!(is_rate_limit_message(
+            "Too Many Requests, Please apply an OnFinality API key"
+        ));
+        assert!(is_rate_limit_message("You have hit your rate limit"));
+        assert!(!is_rate_limit_message("Transaction simulation failed"));
+    }
+}
