@@ -1,108 +1,118 @@
-# Cadence stops at the worker's wallet; the regulated last mile belongs to the exchange they already use
+# Cadence pays people who already hold dollars, so no part of the product is a regulated activity
 
-Status: accepted
+Status: accepted · Shape: decision log
 Date: 2026-09-27 · Decided by: João · Consulted: three teammates on the client side — TODO(João): names
 
-Team shape, which drives several decisions below: João on Solana and Rust, three on the frontend. The seam between them is deliberate — nobody but João touches Token-2022.
+Team shape, which drives several decisions below: João on Solana and the wrapped mint, three on the frontend. Proof generation and signing both moved to the browser, so the client team owns more of the transfer path than the original split assumed.
+
+Product definition: [PRD — confidential USDC payments](../prd-confidential-usdc-payments.md)
 
 ## Context
 
-Three separate licensing walls stand between a foreign employer and reais in a Brazilian worker's bank account, and only one of them is about crypto.
+The first version of this product paid Brazilian workers and ended in reais. That ran into three separate licensing walls, only one of which was about crypto. Pushing a Pix payment requires participation in the Banco Central's SPI, open to banks and authorized payment institutions. Converting dollar-denominated value into reais is a câmbio operation, restricted to institutions authorized in the FX market. And Resolução BCB 561/2026, effective 2026-10-01, rewrites art. 50 of Res. BCB 277/2022 so that settlement between a Brazilian eFX provider and its foreign counterparty must run through câmbio or a non-resident BRL account, "sendo vedado o uso de ativos virtuais." Authorization under Res. BCB 519/520/521 needs roughly R$10.8M–R$37.2M in capital with filings due 2026-10-30.
 
-Pushing a Pix payment requires participation in the Banco Central's SPI, which is open to banks and authorized payment institutions. Converting dollar-denominated value into reais is a câmbio operation, restricted to institutions authorized to operate in the FX market. TODO(João): confirm both with the legal review, including whether any indirect-participation route changes the picture — these are stated from general knowledge, not from a primary source.
+Cutting the fiat leg left a product whose recipients still had to sell USDC on an exchange to get money they could spend. The friction was not removed, only pushed outside the product boundary — which is legitimate only if the recipient does not mind holding dollars.
 
-On top of those, Resolução BCB 561/2026 takes effect **2026-10-01** and rewrites art. 50 of Res. BCB 277/2022 so that settlement between a Brazilian eFX provider and its foreign counterparty must run through a câmbio operation or a non-resident BRL account, "sendo vedado o uso de ativos virtuais." Authorization under Res. BCB 519/520/521 requires roughly R$10.8M–R$37.2M in capital with filings due **2026-10-30**, and from that date BCB-supervised institutions may not facilitate virtual-asset operations with unauthorized VASP counterparties. The framework attaches to who the users are, not where the company is incorporated.
+That is the pivot. Serve people for whom holding USDC is already normal, and the last mile disappears rather than being deferred: no exchange, no Pix, no câmbio, no Res. 561, no VASP question. The Brazilian analysis stays in this document because it becomes live again the moment a fiat corridor is added.
 
-Cadence has no licensed partner and no path to a licence. Strip the crypto out entirely and build this as a wire-based payroll product and the first two walls still stand.
+Meanwhile the technical window is narrow and recent. The ZK ElGamal Proof program was disabled 2025-06-11 after a Fiat-Shamir transcript bug, re-enabled at epoch 982 in June 2026, with Token-2022 redeployed carrying the confidential instructions on 2026-06-17. Transaction v1 (SIMD-0385, raising the size cap from 1,232 to 4,096 bytes per SIMD-0296) activated at mainnet epoch 1035 on 2026-09-15. The Foundation's reference confidential transfer is 2,897 bytes, so it now fits one atomic transaction. Adoption is close to zero.
 
-Meanwhile the technical opportunity is narrow and recent. The ZK ElGamal Proof program was disabled 2025-06-11 after a Fiat-Shamir transcript bug, re-enabled at epoch 982 in June 2026, with Token-2022 redeployed carrying the confidential instructions on 2026-06-17. Transaction v1 (SIMD-0385, raising the size cap from 1,232 to 4,096 bytes per SIMD-0296) activated at mainnet epoch 1035 on **2026-09-15**. The Foundation's reference confidential transfer is 2,897 bytes, so it fits in one atomic transaction as of twelve days before this decision. Adoption is close to zero.
-
-The question was whether to spend the build window acquiring a partner or building the product.
-
-## Decision
-
-Cadence delivers USDC to the worker's wallet and stops there. The worker converts to reais on the exchange where they are already a customer. We never hold BRL, never execute a câmbio operation, and never initiate a Pix payment, so none of the three walls apply to us.
-
-### Area A — product and regulatory boundary
+## Area A — product and regulatory boundary
 
 | # | Decision | Why |
 |---|---|---|
-| A1 | Delivery is USDC to the worker's wallet. The BRL last mile is out of scope. | All three licensing walls sit on the far side of that line. Crossing it requires a licence or a partner; we have neither. |
-| A2 | Employers fund in USDC. No USD fiat on-ramp. | Removes the inbound leg from scope and avoids US money-transmission exposure. |
-| A3 | We integrate no exchange. At most we document or deep-link the off-ramp the worker already uses. | An integration makes us a party to the conversion. A link does not. |
-| A4 | Target users are Brazil-resident workers paid by foreign companies. No Brazilian-domestic payroll. | *Folha* carries FGTS, INSS and eSocial obligations and sells to a different buyer. |
-| A5 | Partner acquisition runs in parallel with the build, never on its critical path. | A partner upgrades the last mile later. Nothing ships or slips on their timeline. |
+| A1 | Delivery is USDC to the recipient's wallet, and the product ends there | Everything past that line is someone else's regulated activity |
+| A2 | Companies fund in USDC. No fiat on-ramp | Keeps the inbound leg out of scope and avoids money-transmission exposure |
+| A3 | We integrate no exchange. Documenting or linking is fine | An integration makes us a party to a conversion; a link does not |
+| ~~A4~~ | ~~Target users are Brazil-resident workers paid by foreign companies~~ | Superseded by A6 |
+| ~~A5~~ | ~~Partner acquisition runs in parallel, never on the critical path~~ | Superseded by A7 — with no fiat leg there is nothing for a partner to do |
+| A6 | Target users are crypto companies, projects and DAOs already paying team, freelancers and suppliers in USDC | Their recipients hold dollars by preference, so there is no last mile to be friction. It also moves the market from one corridor to anywhere USDC is paid |
+| A7 | No licensed partner is required for any part of v1 | The three walls in Context all sit past A1. Removing the dependency removes the largest risk the earlier design carried |
+| A8 | Revenue is a software subscription. Never a spread on the amount transferred, never yield on held balances | A flat software fee is unambiguously software. Charging on value moved, or earning on float, changes what kind of business this is and reopens everything A1 closed |
 
-### Area B — technical
+## Area B — technical
 
 | # | Decision | Why |
 |---|---|---|
-| B1 | Wrapped USDC via a **forked** `token-wrap` with a `MintCustomizer` that sets both an auditor ElGamal key and a confidential-transfer authority. | Stock `token-wrap` sets authority `None` and auditor `None`, immutably. The authority is what makes the auditor key rotatable later. TODO(João): confirm the `UpdateMint` path actually permits rotating `auditor_elgamal_pubkey`. |
-| B2 | One atomic confidential transfer using transaction v1. | The 2,897-byte reference transaction fits the 4,096-byte cap. |
-| B3 | Balance display reads the AES `decryptable_available_balance`. | Decrypting the ElGamal `available_balance` is a discrete-log solve (~1s on mobile). AES is constant time. |
-| B4 | Develop against devnet or a mainnet-forking validator (Surfpool). | A stock `solana-test-validator` does not enable `ZkE1Gama1Proof11111111111111111111111111111`. |
-| B5 | No custom Anchor program in v1. | Token-2022 instructions plus a Rust orchestrator cover the flow. |
-| B6 | Embedded wallet provider chosen on **custody model first**, signing ergonomics second. | With the partner gone, whether we look like a custodian is the main residual regulatory question. A provider holding key shares in a TEE is a different posture than one where the worker holds the key. See Open items. |
-| B7 | All RPC clients pin `maxSupportedTransactionVersion: 1`. | One v1 transaction in a block breaks `getBlock` for the whole block on clients that have not declared it. |
-| B8 | Use `spl-token-client` (Rust) for the confidential helpers. Do not hand-assemble proofs. | The helpers sequence proof accounts, transfer and closes. Matches João's existing Token-2022 experience, which is Rust-side. |
-| B9 | The Rust service builds **unsigned** transactions. The employer's wallet signs in the browser. | Language and custody are independent choices. No Solana signing key ever reaches our infrastructure, which keeps the Q2 answer short. |
-| B10 | Proof generation runs server-side in Rust, which means the service holds employers' ElGamal secrets. | Proofs require the sender's ElGamal secret and the plaintext amounts. This grants Cadence decryption capability — but B1 already does, via the auditor key, so it costs nothing additional *under the current auditor decision*. Coupled to O1. |
-| B11 | State lives in Supabase Postgres. Schema and RLS policies are migrations in the repo, applied by CLI. | No dashboard click-ops; the schema is reviewable and reproducible. Local `supabase start` gives three frontend devs a real database without a shared environment. |
-| B12 | Postgres never stores a plaintext amount. | Encrypting amounts on-chain and mirroring them into a column would make the privacy claim theater. Roster, run status and timestamps only. |
-| B13 | RLS policies are the authorization boundary, not a hardening pass. | The client talks to Postgres directly, so there is no API tier to enforce anything. Every table ships with policies and a test proving cross-tenant reads fail. |
+| B1 | Wrapped USDC via `token-wrap`. Whether the mint carries an auditor key, and whose, is open — see O1 | Stock `token-wrap` adds `ConfidentialTransferMint` to every wrapped mint with authority `None` and **auditor `None`**, immutably. That is a decision rather than a default, and B16 changed what it costs |
+| B2 | One atomic confidential transfer using transaction v1 | The 2,897-byte reference transaction fits the 4,096-byte cap |
+| B3 | Balance display reads the AES `decryptable_available_balance` | Decrypting the ElGamal balance is a discrete-log solve, roughly a second on mobile. AES is constant time |
+| B4 | Develop against devnet or a mainnet-forking validator such as Surfpool | A stock `solana-test-validator` does not enable `ZkE1Gama1Proof11111111111111111111111111111` |
+| B5 | No custom on-chain program in v1 | Token-2022 instructions plus an orchestrator cover the flow |
+| B6 | Embedded wallet provider chosen on custody model first | B9 and B16 narrow the exposure but do not close it — the provider still handles key material for users who arrive without a wallet |
+| B7 | All RPC clients pin `maxSupportedTransactionVersion: 1` | One v1 transaction in a block breaks `getBlock` for that whole block on clients that have not declared it |
+| ~~B8~~ | ~~Use `spl-token-client` (Rust) for the confidential helpers~~ | Superseded by B15 |
+| B9 | Transactions are signed in the browser by the user's own wallet | No Solana signing key reaches our infrastructure. Survives B17 deliberately — the server can read amounts but can never move funds. Two separate claims; keep the one that still holds |
+| ~~B10~~ | ~~Proof generation runs server-side in Rust~~ | Superseded by B16, reinstated by B17 |
+| B11 | State lives in Supabase Postgres. Schema and RLS policies are migrations in the repo, applied by CLI | No dashboard click-ops; the schema stays reviewable and reproducible, and `supabase start` gives each frontend dev a real database |
+| B12 | Postgres never stores a plaintext amount | Encrypting on-chain and mirroring into a column would make the privacy claim theater |
+| B13 | RLS policies are the authorization boundary, not a hardening pass | The client reads Postgres directly, so there is no API tier to enforce anything. Every table ships with policies and a test proving cross-tenant reads fail |
+| ~~B15~~ | ~~Use `@solana-program/token-2022` and `getConfidentialTransferInstructionPlan` in the browser~~ | Superseded by B18 |
+| ~~B16~~ | ~~Proof generation runs in the browser~~ | Superseded by B17 |
+| B17 | **Proof generation runs server-side in a Rust service, which therefore holds customers' ElGamal secrets** | Browser crypto is re-delivered on every page load, so a compromised CDN, an XSS or one malicious transitive dependency can exfiltrate the secret. A server is one audited runtime with memory-safe handling and secrets that can be zeroed. Accepted cost: Cadence can decrypt customer amounts, and the product claim changes from "we cannot see" to "we do not expose" — see Consequences |
+| B18 | Use `spl-token-client` (Rust) for the confidential helpers. Do not hand-assemble proofs | Follows from B17, and matches João's existing Token-2022 experience, which is Rust-side |
+| B19 | ElGamal secrets are encrypted at rest under a KMS key, decryption is access-controlled, and every decryption is logged with actor and reason | B17 makes this service the highest-value target in the system. If it is going to hold every customer's viewing capability, that has to be operationally real rather than a promise |
 
 ## Alternatives considered
 
-**Partner with a licensed VASP or PSP to deliver BRL — rejected for v1, not rejected in principle.** This is the better product: reais land in a bank account and the worker does nothing. It lost on availability. We have no partner, a two-week-old company asking a licensed institution for production access is a relationship problem measured in weeks, and making the demo depend on someone else saying yes puts the single largest risk on the critical path. A5 keeps it alive as an upgrade.
+### Who the customer is
 
-**Become the licensed entity — rejected.** R$10.8M–R$37.2M in capital, filings due 2026-10-30. Not a question of ambition.
+**Brazilian workers paid by foreign companies — superseded.** Better founder-market fit and a story that travels with these judges, and it is where the project started. It lost because the recipient still has to reach reais and every route there is licensed. Cutting the fiat leg left them selling on an exchange by hand, which is what they already do — so the product improved the payer's life and not the recipient's. A6 fixes that by choosing recipients who want dollars.
 
-**Settle cross-border without a licence — rejected, and the exposure is concrete.** From 2026-10-30 BCB-supervised institutions may not facilitate virtual-asset operations with unauthorized VASP counterparties, so any Brazilian PSP would be obliged to drop us. Incorporating offshore does not help, because the framework attaches to who the users are.
+**Become the licensed entity — rejected.** R$10.8M–R$37.2M in capital and a filing by 2026-10-30.
 
-**Do nothing — evaluated and rejected.** The status quo is that the employer sends USDC ad hoc and the worker sells it manually. It works. What it lacks is the employer side: no payroll run, no records, and every amount on a public ledger. That gap is the product, and it survives intact without the last mile.
+**Settle cross-border without a licence — rejected, concretely.** From 2026-10-30 BCB-supervised institutions may not facilitate virtual-asset operations with unauthorized VASP counterparties, so any Brazilian PSP would be obliged to drop us. Incorporating offshore does not help; the framework attaches to who the users are.
 
-There is a contested reading of 561 — Thiago Amaral of Barcellos Tucunduva argued it reinforces traceability rather than prohibiting stablecoin use, though the same firm later acknowledged express restrictions on virtual assets. We do not rely on the permissive reading, and under this decision we do not need to.
+### Where proofs are generated
+
+This reversed twice in one day. The record of why matters more than the outcome.
+
+**Browser-side — considered and rejected (B16, superseded by B17).** With proofs generated client-side, Cadence genuinely cannot read customer amounts, which would make "nobody but the payer, the recipient and the auditor sees this" literally true rather than a promise. It also distributes risk: compromising one browser exposes one user, while compromising the service exposes everyone.
+
+It lost on delivery integrity. Browser code is re-shipped on every page load, so a compromised CDN, an XSS, or a single malicious transitive dependency can exfiltrate the ElGamal secret — and secrets in JS memory cannot be reliably zeroed. A server is one runtime you audit, deploy and control. Mitigations exist (strict CSP, subresource integrity, a vendored and pinned dependency tree, reproducible builds with published hashes) but they harden a weaker foundation rather than replacing it.
+
+**Server-side in Rust — chosen (B17).** Better per-user cryptographic hygiene, a controlled runtime, and the transfer path stays in the language the team knows best for this API, which matters with fifteen days.
+
+The costs are real and named: Cadence becomes able to decrypt every customer's amounts, the service becomes the single highest-value target in the system, and the marketing claim has to weaken accordingly. B19 exists because the first two are operational obligations, not footnotes.
+
+**A custom circuit for proof-of-income — deferred, not rejected.** Proving "I earned at least X over six months" without revealing amounts needs a circuit over summed ciphertexts. Out of reach in this window. The achievable version is proving a decryption is correct against the on-chain ciphertext.
 
 ## Consequences
 
-**We accept a worse last mile.** "Reais in your bank account in a minute" becomes "USDC in your wallet in a second, then the four steps you already know." For Brazilian developers taking foreign contracts this is a small delta, since most already hold an exchange account — but it is a real one, and it is the first thing a judge will poke at.
+**Privacy is bounded by the wrap.** Deposits and withdrawals are public; only what happens between them is hidden. A recipient who withdraws their exact salary on payday defeats it entirely, which is why the warning in R6b is a requirement rather than a nicety.
 
-**We accept that the off-ramp's cost and reliability are invisible to us.** We cannot quote the worker an all-in rate, because we do not control the leg where the spread happens. Any figure we show is the employer-side cost only, and the UI must say so.
+**Wallets cannot display hidden balances.** Recipients read their real balance in our dashboard, and Phantom shows it only after a withdrawal. Non-supporting wallets degrade gracefully rather than breaking, but this is a standing product weakness until wallet vendors move.
 
-**We accept an unresolved question about our own classification.** Orchestrating non-custodial transfers may or may not constitute a VASP activity under Res. 519/520, and the answer depends partly on the embedded-wallet provider's custody model. This is the residual risk of the whole design and it is why B6 exists.
+**We lose the Brazil narrative.** Founder-market fit was a genuine edge with these judges, and A6 trades it for a larger market and no regulatory overhang. Superteam stays a distribution channel, not a moat.
 
-**We accept an auditor key we hold ourselves for now**, with no partner to hand it to, which means Cadence can decrypt amounts on the shared mint. The authority in B1 exists so this is reversible.
+**Cadence can read every customer's amounts**, as a direct result of B17. The product therefore cannot claim "nobody including us can see this." The honest claim is that the public cannot see it and Cadence does not expose it — the same posture as any payment processor, and weaker than the one B16 would have allowed. Every piece of copy has to match that, including the competitor comparison against custodians.
 
-**We accept that server-side proof generation deepens that same exposure** — the service holds employers' ElGamal secrets as well. The two are coupled: reversing B1 toward per-employer auditor keys without also moving proof generation to the client would leave the privacy claim false. That is a transfer-path rewrite, not a key rotation, and O1 has to be decided with that price in view.
+**The proof service is the highest-value target in the system.** One compromise exposes every company's payroll, where a browser compromise would have exposed one person's. B19 is the mitigation and it is not optional.
 
-**We gain a product with no licensing dependency and no partner on the critical path**, which is compliant on 2026-10-01 by construction rather than by argument, and which can ship and acquire real users without anyone's permission.
+**We gain a product with no licensed counterparty, no corridor and no regulated activity anywhere in it**, and a transfer path in the language the team is fastest in — which is what makes it shippable in this window.
 
-**This obligates** auditor-key custody and a documented disclosure procedure, monitoring of the `disable_zk_elgamal_proof_program` feature gate, and explicit product copy stating that the off-ramp is the worker's own and that confidentiality covers amounts only.
+**This obligates** an honest in-product statement that this is confidentiality and not anonymity *and* that Cadence holds viewing capability; KMS-backed encryption at rest with access control and decryption audit logging (B19); monitoring of the `disable_zk_elgamal_proof_program` gate; and keeping the Brazilian analysis above current enough to act on if a fiat corridor is added.
 
 ## Revisit when
 
-- A licensed partner signs. Trigger: the BRL last mile comes into scope and the auditor key transfers to them. This is the intended upgrade path, not a reversal.
-- The legal review finds that orchestrating transfers is a VASP activity. Trigger: reopen the entire structure, including whether the product can operate at all in its current form.
-- The `disable_zk_elgamal_proof_program` gate activates. Both it and `reenable_zk_elgamal_proof_program` remain ordinary feature gates activated at epoch boundaries after 95% stake adoption. Trigger: fall back to transparent transfers; the product still pays people.
-- Upstream `token-wrap` adds a configurable auditor and authority. Trigger: drop the fork.
+- A fiat corridor is added. Trigger: the entire Context section becomes live again, unchanged.
+- Wallets ship confidential-balance display. Trigger: a standing weakness closes and the dashboard stops being the only place a recipient can see their balance.
+- Upstream `token-wrap` supports a configurable auditor and per-caller mints. Trigger: O1 resolves without a fork.
+- The `disable_zk_elgamal_proof_program` gate activates. Both gates remain ordinary feature gates at epoch boundaries after 95% stake adoption. Trigger: fall back to transparent transfers; payments continue.
 
 ## Open items
 
 | # | Item | Owner | Needed by |
 |---|---|---|---|
-| O1 | Who holds the auditor key long-term, now that there is no partner. Per-employer mints with the employer's own auditor is the privacy-maximal answer; it deepens the fork **and** forces proof generation back to the client (B10). | João | Before the mint is created |
-| O2 | Does the embedded-wallet provider's custody model make us look like a custodian under Res. 519/520? B9 narrows this but does not close it. | TODO(João): assign | Before the wallet provider is locked |
-| O3 | Confirm SPI participation and câmbio authorization rules against a primary source | João | With the legal review |
-| O4 | Verify browser-side bulletproof range-proof cost, if O1 ever forces proof generation client-side. Unmeasured — it could be fine or several seconds per transfer. | João | Only if O1 moves |
+| O1 | Auditor access through an app-level grant on a shared mint, or a mint per company with its own auditor key. The second is better and needs custom PDA derivation; moving from the first to the second is a migration, not a rotation | João | Before the wrapped mint is created |
+| O2 | Does the embedded-wallet provider's custody model still expose us after B9 and B16? | TODO(João): assign | Before the provider is locked |
+| O3 | Can a Squads multisig originate a confidential transfer? Proof generation needs the sender's ElGamal secret and a vault is a PDA with no private key | João | Before the Company tier is sold |
+| O4 | Measure browser proof-generation time at a 100-recipient run, the largest case the Company tier advertises | João | Before unlimited recipients is advertised |
 
 ## References
 
-- [Res. BCB 561/2026 — Machado Meyer](https://www.machadomeyer.com.br/pt/inteligencia-juridica/publicacoes-ij/bancario-seguros-e-financeiro-ij/banco-central-altera-regras-do-efx) · [ABBC](https://abbc.org.br/resolucao-bcb-561-2026-amplia-regras-para-efx-e-abre-debates-sobre-cripto-tributacao-e-integracao-tecnologica/) · [Ledger Insights](https://www.ledgerinsights.com/brazil-imposes-partial-ban-on-stablecoins-crypto-for-cross-border-payments-and-fx/)
-- [Brazil VASP licence rules and deadlines — FCM Law](https://fcm.law/brazil-vasp-license/)
 - [ZK ElGamal Proof program post-mortem](https://solana.com/news/post-mortem-june-25-2025) · [re-enabling issue](https://github.com/solana-program/token-2022/issues/657)
 - [Confidential Balances integration guide](https://solana.com/docs/tokens/extensions/confidential-transfer/integration-guide)
 - [Token Wrap program](https://www.solana-program.com/docs/token-wrap) · [source](https://github.com/solana-program/token-wrap)
-- [Agave 4.2 / transaction v1](https://solana.com/upgrades/larger-transaction-sizes)
-- [Proof compute costs](https://xroot.dev/blog/solana-confidential-transfers-kill-switch-proof-cost)
-
-Product definition: [PRD — Cadence](../prd-confidential-payroll-rail.md)
+- [Agave 4.2 / transaction v1](https://solana.com/upgrades/larger-transaction-sizes) · [proof compute costs](https://xroot.dev/blog/solana-confidential-transfers-kill-switch-proof-cost)
+- [Res. BCB 561/2026 — Machado Meyer](https://www.machadomeyer.com.br/pt/inteligencia-juridica/publicacoes-ij/bancario-seguros-e-financeiro-ij/banco-central-altera-regras-do-efx) · [Brazil VASP rules — FCM Law](https://fcm.law/brazil-vasp-license/)
