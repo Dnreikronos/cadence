@@ -54,7 +54,8 @@ Environment, since none of these numbers are portable across versions:
 | Against the v1 cap | 4,096 | SIMD-0296 |
 | Against the legacy cap | 1,232 | it would not have fit; v1 is load-bearing, not a convenience |
 | Instructions in the transaction | 4 | transfer, equality, ciphertext validity, range |
-| Amount visible to a third party | none | no `amount` field in the parsed instruction |
+| Amount as a third party gets it | 2 × 64 bytes of ElGamal ciphertext | `transfer_amount_auditor_ciphertext_lo` and `_hi`, read out of the raw instruction |
+| Plaintext amount anywhere in the instruction | none | no `amount` field parsed, and no little-endian 4,200,000 in the 169 raw bytes |
 | Amount visible to the recipient | 4,200,000 units | ElGamal decrypt of their pending balance |
 | Successful transfers | n = 1 | |
 
@@ -88,7 +89,13 @@ Fetched back from OnFinality, the transfer parses to this and nothing more:
 }
 ```
 
-Addresses, yes. Where an ordinary SPL transfer carries `"amount": "4200000"`, there is no amount field at all — the only balance on the wire is the sender's new AES ciphertext. The recipient's own key decrypts their pending balance to 4,200,000 in the same run.
+Addresses, yes. Where an ordinary SPL transfer carries `"amount": "4200000"`, the parsed view has no amount field at all.
+
+That absence is not the same as the amount being ciphertext, so the spike also pulls the instruction back unparsed from the same RPC. The 169 bytes are exactly `TransferInstructionData` — two discriminants, the sender's 36-byte AES balance, then `transfer_amount_auditor_ciphertext_lo` and `_hi` at 64 bytes each, then the three proof offsets. Those two are the transfer amount, encrypted. The little-endian `4200000` a transparent transfer would carry is not anywhere in the 169 bytes, and the run checks for it.
+
+One wrinkle, since the mint has no auditor. The second half of each of those ciphertexts is the decrypt handle under the auditor key, and with no auditor that key is the default, so the handle comes back as 32 zero bytes. The first half is still a Pedersen commitment to the amount and still hides it. Nobody can read the amount from these, which is what R2 needs — but do not read them as evidence that an auditor *could*. That is R4 and it is untested here.
+
+The recipient's own key decrypts their pending balance to 4,200,000 in the same run.
 
 ## What we learned
 
@@ -110,7 +117,7 @@ A side effect worth knowing: since nothing is validated, deposit and apply *can*
 
 ## Verdict
 
-**Go.** R2 and R3 both hold, on chain, from an unrelated observer's view. B2's single atomic transfer is real and B7's `maxSupportedTransactionVersion: 1` is not optional — it is what makes the reading half work.
+**Go.** R2 and R3 both hold, on chain, from an unrelated observer's view. The amount comes back as two ElGamal ciphertexts with no plaintext beside them, which is the criterion, and the transfer is one v1 transaction well inside the cap. B2's single atomic transfer is real and B7's `maxSupportedTransactionVersion: 1` is not optional — it is what makes the reading half work.
 
 Conditional on one thing: **B18 has to be superseded.** It names a client that cannot build the transaction it was chosen for. The replacement is not a different library, it is an accepted cost — the proof service owns transaction assembly and balance bookkeeping itself, using library proofs, until upstream catches up. That is a decision for João, not a finding of this spike; see *Next*.
 
