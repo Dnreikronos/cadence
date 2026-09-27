@@ -575,3 +575,85 @@ async fn ensure_funded(rpc: &JsonRpc, payer: &Address) -> Result<()> {
          Fund it from https://faucet.solana.com and run again."
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solana_zk_sdk::encryption::elgamal::ElGamalCiphertext;
+
+    /// Builds the real transfer — real proofs, real instruction encoding — over
+    /// a synthetic balance, and measures the wire size of the v1 transaction it
+    /// compiles to.
+    ///
+    /// This is the half of the "done when" that can be checked without a funded
+    /// key. Nothing here touches a network.
+    #[test]
+    fn one_confidential_transfer_fits_in_a_v1_transaction() {
+        let sender_keys = ElGamalKeypair::new_rand();
+        let recipient_keys = ElGamalKeypair::new_rand();
+        let aes_key = AeKey::new_rand();
+
+        let available: ElGamalCiphertext = sender_keys.pubkey().encrypt(FUNDING_AMOUNT);
+        let decryptable = aes_key.encrypt(FUNDING_AMOUNT);
+
+        let TransferProofData {
+            equality_proof_data,
+            ciphertext_validity_proof_data_with_ciphertext,
+            range_proof_data,
+        } = spl_token_confidential_transfer_proof_generation::transfer::transfer_split_proof_data(
+            &available,
+            &decryptable,
+            TRANSFER_AMOUNT,
+            &sender_keys,
+            &aes_key,
+            recipient_keys.pubkey(),
+            None,
+        )
+        .expect("proof generation");
+
+        let payer = Keypair::new();
+        let instructions = confidential_transfer::instruction::transfer(
+            &TOKEN_2022,
+            &Keypair::new().pubkey(),
+            &Keypair::new().pubkey(),
+            &Keypair::new().pubkey(),
+            &aes_key.encrypt(FUNDING_AMOUNT - TRANSFER_AMOUNT).into(),
+            &ciphertext_validity_proof_data_with_ciphertext.ciphertext_lo,
+            &ciphertext_validity_proof_data_with_ciphertext.ciphertext_hi,
+            &payer.pubkey(),
+            &[],
+            ProofLocation::InstructionOffset(NonZeroI8::new(1).unwrap(), &equality_proof_data),
+            ProofLocation::InstructionOffset(
+                NonZeroI8::new(2).unwrap(),
+                &ciphertext_validity_proof_data_with_ciphertext.proof_data,
+            ),
+            ProofLocation::InstructionOffset(NonZeroI8::new(3).unwrap(), &range_proof_data),
+        )
+        .expect("instruction assembly");
+
+        assert_eq!(instructions.len(), 4, "transfer plus its three proofs");
+
+        let signers: Vec<&dyn Signer> = vec![&payer];
+        let transaction = v1::compile_and_sign(
+            &instructions,
+            &payer,
+            &signers,
+            solana_hash::Hash::new_from_array(Keypair::new().pubkey().to_bytes()),
+            BUDGET,
+        )
+        .expect("v1 compilation");
+        let size = v1::serialize(&transaction).expect("serialization").len();
+
+        println!("one confidential transfer is {size} bytes of {MAX_TRANSACTION_SIZE}");
+        assert!(
+            size <= MAX_TRANSACTION_SIZE,
+            "{size} bytes is over the {MAX_TRANSACTION_SIZE}-byte v1 cap"
+        );
+        // And the reason the old cap is not enough, stated as a test rather
+        // than a claim in a comment.
+        assert!(
+            size > 1_232,
+            "{size} bytes would have fit a legacy transaction — check the proofs are inline"
+        );
+    }
+}
