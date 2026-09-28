@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds upstream token-wrap at a pinned release with one change: the program
-# ID.
+# ID. See README.md for why Cadence deploys its own copy at all.
 #
 # The logic is not modified. The whole fork is the sed below, and the script
 # refuses to continue if the patch touched anything else.
