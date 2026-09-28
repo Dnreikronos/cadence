@@ -6,6 +6,7 @@
 mod mint;
 mod rpc;
 mod token_wrap;
+mod v1;
 
 fn main() -> anyhow::Result<()> {
     anyhow::bail!("usage: cadence-mint")
