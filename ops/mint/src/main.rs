@@ -3,9 +3,10 @@
 //! ```text
 //! cargo run -- inspect       read the mint and check its confidential config
 //! cargo run -- create        create the mint and its escrow, idempotently
+//! cargo run -- wrap <units>  wrap devnet USDC into the payer's wrapped account
 //! ```
 //!
-//! `inspect` needs no key. `create` signs with `OPS_KEYPAIR`.
+//! `inspect` needs no key. `create` and `wrap` sign with `OPS_KEYPAIR`.
 //!
 //! The wrap program is Cadence's deployment of upstream token-wrap
 //! (ops/token-wrap), because the canonical one is not on any cluster.
@@ -19,15 +20,16 @@ use {
     anyhow::{anyhow, bail, Context, Result},
     mint::WrappedMint,
     rpc::JsonRpc,
+    solana_address::Address,
     solana_instruction::Instruction,
     solana_keypair::Keypair,
     solana_message::v1::TransactionConfig,
     solana_signer::Signer,
     spl_token_2022_interface::{
-        extension::ExtensionType,
-        state::Mint,
+        extension::{ExtensionType, StateWithExtensionsOwned},
+        state::{Account, Mint},
     },
-    token_wrap::Addresses,
+    token_wrap::{Addresses, TOKEN, TOKEN_2022},
 };
 
 /// A v1 message defaults every budget field it does not carry to zero, so both
@@ -51,7 +53,13 @@ async fn main() -> Result<()> {
             create(&rpc, &addresses, &load_payer()?).await?;
             inspect(&rpc, &addresses).await
         }
-        _ => bail!("usage: cadence-mint inspect | create"),
+        ["wrap", amount] => {
+            let amount = amount
+                .parse()
+                .with_context(|| format!("{amount} is not a number of base units"))?;
+            wrap(&rpc, &addresses, &load_payer()?, amount).await
+        }
+        _ => bail!("usage: cadence-mint inspect | create | wrap <base units>"),
     }
 }
 
@@ -156,6 +164,65 @@ async fn create(rpc: &JsonRpc, addresses: &Addresses, payer: &Keypair) -> Result
     let signature = send(rpc, &instructions, payer).await?;
     println!("created          {signature}\n");
     Ok(())
+}
+
+/// Wraps `amount` base units of the payer's devnet USDC into the payer's
+/// wrapped account, then checks the escrow still covers the whole supply.
+async fn wrap(rpc: &JsonRpc, addresses: &Addresses, payer: &Keypair, amount: u64) -> Result<()> {
+    let source = token_wrap::associated_token_address(&payer.pubkey(), &addresses.unwrapped_mint, &TOKEN);
+    let recipient =
+        token_wrap::associated_token_address(&payer.pubkey(), &addresses.wrapped_mint, &TOKEN_2022);
+
+    let held = token_balance(rpc, &source)
+        .await?
+        .ok_or_else(|| anyhow!("the payer has no devnet USDC account at {source}"))?;
+    if held < amount {
+        bail!("the payer holds {held} units of devnet USDC, not {amount}");
+    }
+
+    let instructions = vec![
+        // An ordinary ATA is enough here. It holds the wrapped token
+        // transparently; the confidential account is a different one, sized
+        // for the extension, and is the spike's job.
+        token_wrap::create_associated_token_account_idempotent(
+            &payer.pubkey(),
+            &payer.pubkey(),
+            &addresses.wrapped_mint,
+            &TOKEN_2022,
+        ),
+        token_wrap::wrap(addresses, &recipient, &source, &payer.pubkey(), amount),
+    ];
+    let signature = send(rpc, &instructions, payer).await?;
+
+    let wrapped = token_balance(rpc, &recipient).await?.unwrap_or_default();
+    let escrowed = token_balance(rpc, &addresses.escrow).await?.unwrap_or_default();
+    let (owner, data) = rpc
+        .account(&addresses.wrapped_mint)
+        .await?
+        .ok_or_else(|| anyhow!("the wrapped mint disappeared"))?;
+    let supply = WrappedMint::read(owner, data)?.supply;
+
+    println!("wrapped          {amount} units in {signature}");
+    println!("payer holds      {wrapped} wrapped, {} USDC", held - amount);
+    println!("escrow holds     {escrowed} USDC");
+    println!("wrapped supply   {supply}");
+
+    // The one invariant a wrap has: every wrapped token is backed by one
+    // unwrapped token sitting in escrow.
+    if escrowed != supply {
+        bail!("the escrow holds {escrowed} but the wrapped supply is {supply}");
+    }
+    println!("\nok — the escrow covers the wrapped supply exactly");
+    Ok(())
+}
+
+async fn token_balance(rpc: &JsonRpc, account: &Address) -> Result<Option<u64>> {
+    let Some((_, data)) = rpc.account(account).await? else {
+        return Ok(None);
+    };
+    let state = StateWithExtensionsOwned::<Account>::unpack(data)
+        .with_context(|| format!("{account} is not a token account"))?;
+    Ok(Some(state.base.amount))
 }
 
 async fn send(rpc: &JsonRpc, instructions: &[Instruction], payer: &Keypair) -> Result<String> {
