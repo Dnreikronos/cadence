@@ -3,6 +3,8 @@
 //! The wrap program is Cadence's deployment of upstream token-wrap
 //! (ops/token-wrap), because the canonical one is not on any cluster.
 
+mod token_wrap;
+
 fn main() -> anyhow::Result<()> {
     anyhow::bail!("usage: cadence-mint")
 }
