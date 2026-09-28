@@ -34,7 +34,7 @@ Meanwhile the technical window is narrow and recent. The ZK ElGamal Proof progra
 
 | # | Decision | Why |
 |---|---|---|
-| B1 | Wrapped USDC via `token-wrap`. Whether the mint carries an auditor key, and whose, is open — see O1 | Stock `token-wrap` adds `ConfidentialTransferMint` to every wrapped mint with authority `None` and **auditor `None`**, immutably. That is a decision rather than a default, and B16 changed what it costs |
+| B1 | Wrapped USDC via `token-wrap`, deployed by Cadence because no canonical deployment exists on any cluster — see [ops/token-wrap](../../ops/token-wrap/README.md). The mint carries no auditor key; auditors get access through app-level grants — see O1 | Stock `token-wrap` adds `ConfidentialTransferMint` to every wrapped mint with authority `None` and **auditor `None`**, immutably. Verified on chain 2026-09-28 against the devnet mint in [ops/mint](../../ops/mint/README.md). That is a decision rather than a default, and B16 changed what it costs |
 | B2 | One atomic confidential transfer using transaction v1 | The 2,897-byte reference transaction fits the 4,096-byte cap |
 | B3 | Balance display reads the AES `decryptable_available_balance` | Decrypting the ElGamal balance is a discrete-log solve, roughly a second on mobile. AES is constant time |
 | B4 | Develop against devnet or a mainnet-forking validator such as Surfpool | A stock `solana-test-validator` does not enable `ZkE1Gama1Proof11111111111111111111111111111` |
@@ -89,6 +89,8 @@ The costs are real and named: Cadence becomes able to decrypt every customer's a
 
 **The proof service is the highest-value target in the system.** One compromise exposes every company's payroll, where a browser compromise would have exposed one person's. B19 is the mitigation and it is not optional.
 
+**Circle can freeze wrapped USDC.** The wrapped mint inherits USDC's freeze authority, and Circle can freeze the escrow holding the USDC behind every wrapped token. That is the exposure of holding USDC at all, concentrated in one account: freezing the escrow stops every unwrap at once.
+
 **We gain a product with no licensed counterparty, no corridor and no regulated activity anywhere in it**, and a transfer path in the language the team is fastest in — which is what makes it shippable in this window.
 
 **This obligates** an honest in-product statement that this is confidentiality and not anonymity *and* that Cadence holds viewing capability; KMS-backed encryption at rest with access control and decryption audit logging (B19); monitoring of the `disable_zk_elgamal_proof_program` gate; and keeping the Brazilian analysis above current enough to act on if a fiat corridor is added.
@@ -98,14 +100,15 @@ The costs are real and named: Cadence becomes able to decrypt every customer's a
 - **B18 is contradicted by measurement. Trigger fired 2026-09-27** — `spl-token-client` 0.19.1 builds only legacy transactions and cannot be resolved into the same binary as a v1-capable `solana-message`. See [the confidential transfer spike](../dev/spikes/2026-09-27-confidential-transfer.md), which also measures the transfer at 2,395 bytes rather than the 2,897 quoted in Context and B2. B18 needs superseding; TODO(João).
 - A fiat corridor is added. Trigger: the entire Context section becomes live again, unchanged.
 - Wallets ship confidential-balance display. Trigger: a standing weakness closes and the dashboard stops being the only place a recipient can see their balance.
-- Upstream `token-wrap` supports a configurable auditor and per-caller mints. Trigger: O1 resolves without a fork.
+- ~~Upstream `token-wrap` supports a configurable auditor and per-caller mints. Trigger: O1 resolves without a fork.~~ Moot 2026-09-28 — O1 resolved without a fork.
+- Upstream deploys `token-wrap`. Trigger: its wrapped USDC is a different mint from ours, because the address derives from the program ID, so moving to it migrates every balance. Decide whether sharing a mint with the rest of the ecosystem is worth that.
 - The `disable_zk_elgamal_proof_program` gate activates. Both gates remain ordinary feature gates at epoch boundaries after 95% stake adoption. Trigger: fall back to transparent transfers; payments continue.
 
 ## Open items
 
 | # | Item | Owner | Needed by |
 |---|---|---|---|
-| O1 | Auditor access through an app-level grant on a shared mint, or a mint per company with its own auditor key. The second is better and needs custom PDA derivation; moving from the first to the second is a migration, not a rotation | João | Before the wrapped mint is created |
+| ~~O1~~ | ~~Auditor access through an app-level grant on a shared mint, or a mint per company with its own auditor key. The second is better and needs custom PDA derivation; moving from the first to the second is a migration, not a rotation~~ **Resolved 2026-09-28: app-level grants on one shared mint**, by the rule [#47](https://github.com/Dnreikronos/cadence/issues/47) set — stock `token-wrap` produced the mint B1 describes, so no fork of its logic is needed. One premise moved underneath it: sharing the canonical wrapped USDC was what made "no fork" cheap, and there is no canonical deployment to share, so we deploy the program either way and a customizer with an auditor would cost little on top. TODO(João): confirm the resolution with that in view, before the mainnet mint is created | João | Before the mainnet mint is created |
 | O2 | Does the embedded-wallet provider's custody model still expose us after B9 and B16? | TODO(João): assign | Before the provider is locked |
 | O3 | Can a Squads multisig originate a confidential transfer? Proof generation needs the sender's ElGamal secret and a vault is a PDA with no private key | João | Before the Company tier is sold |
 | O4 | Measure browser proof-generation time at a 100-recipient run, the largest case the Company tier advertises | João | Before unlimited recipients is advertised |

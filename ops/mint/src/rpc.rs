@@ -1,7 +1,7 @@
-//! Minimal JSON-RPC client.
+//! Minimal JSON-RPC client, cut down from the spike's.
 //!
 //! `solana-rpc-client` is not in this tree — see the note in Cargo.toml — so
-//! every call the spike makes goes out as plain HTTP from here.
+//! every call goes out as plain HTTP from here.
 //!
 //! Every request that can carry it sets `maxSupportedTransactionVersion: 1`
 //! (ADR B7). One v1 transaction in a block breaks `getBlock` for that whole
@@ -16,8 +16,6 @@ use {
     std::{str::FromStr, time::Duration},
 };
 
-/// How long to keep waiting on a third-party RPC before giving up.
-const RPC_FETCH_ATTEMPTS: u32 = 20;
 
 pub struct JsonRpc {
     url: String,
@@ -104,28 +102,6 @@ impl JsonRpc {
             .ok_or_else(|| anyhow!("getMinimumBalanceForRentExemption returned {result}"))
     }
 
-    pub async fn balance(&self, address: &Address) -> Result<u64> {
-        let result = self
-            .call(
-                "getBalance",
-                json!([address.to_string(), { "commitment": "confirmed" }]),
-            )
-            .await?;
-        result["value"]
-            .as_u64()
-            .ok_or_else(|| anyhow!("getBalance returned {result}"))
-    }
-
-    pub async fn request_airdrop(&self, address: &Address, lamports: u64) -> Result<String> {
-        let result = self
-            .call("requestAirdrop", json!([address.to_string(), lamports]))
-            .await?;
-        result
-            .as_str()
-            .map(str::to_owned)
-            .ok_or_else(|| anyhow!("requestAirdrop returned {result}"))
-    }
-
     /// The account's owner and raw data, or `None` if it does not exist yet.
     pub async fn account(&self, address: &Address) -> Result<Option<(Address, Vec<u8>)>> {
         let result = self
@@ -156,30 +132,17 @@ impl JsonRpc {
         Ok(Some((owner, data)))
     }
 
-    /// Raw account data, or `None` if the account does not exist yet.
-    pub async fn account_data(&self, address: &Address) -> Result<Option<Vec<u8>>> {
+    /// Lamports held, zero if the account does not exist.
+    pub async fn lamports(&self, address: &Address) -> Result<u64> {
         let result = self
             .call(
-                "getAccountInfo",
-                json!([
-                    address.to_string(),
-                    { "encoding": "base64", "commitment": "confirmed" }
-                ]),
+                "getBalance",
+                json!([address.to_string(), { "commitment": "confirmed" }]),
             )
             .await?;
-
-        let value = &result["value"];
-        if value.is_null() {
-            return Ok(None);
-        }
-
-        let encoded = value["data"][0]
-            .as_str()
-            .ok_or_else(|| anyhow!("getAccountInfo returned unexpected data for {address}"))?;
-        BASE64
-            .decode(encoded)
-            .map(Some)
-            .with_context(|| format!("account data for {address} was not base64"))
+        result["value"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("getBalance returned {result}"))
     }
 
     /// Submits a base64-encoded transaction. Preflight stays on: a v1
@@ -243,66 +206,6 @@ impl JsonRpc {
             self.url
         ))
     }
-
-    /// Fetches a transaction with the parsed encoding. This is the call that
-    /// fails outright on a client that has not declared v1 support.
-    pub async fn get_transaction(&self, signature: &str) -> Result<Value> {
-        self.fetch_transaction(signature, "jsonParsed").await
-    }
-
-    /// Fetches the same transaction unparsed, so the instruction data can be
-    /// read as bytes instead of as whatever the RPC chose to render.
-    pub async fn get_transaction_raw(&self, signature: &str) -> Result<Value> {
-        self.fetch_transaction(signature, "json").await
-    }
-
-    /// Fetches a transaction, waiting out the two things a free third-party
-    /// endpoint reliably does: lag a slot or two behind the sending node, and
-    /// rate-limit a second request that follows too closely on the first.
-    async fn fetch_transaction(&self, signature: &str, encoding: &str) -> Result<Value> {
-        let mut last_error = None;
-
-        for attempt in 0..RPC_FETCH_ATTEMPTS {
-            if attempt > 0 {
-                tokio::time::sleep(Duration::from_secs(2)).await;
-            }
-
-            match self.fetch_transaction_once(signature, encoding).await {
-                Ok(Some(transaction)) => return Ok(transaction),
-                Ok(None) => last_error = Some(anyhow!("{} has not seen {signature}", self.url)),
-                Err(e) if is_transient(&e) => last_error = Some(e),
-                Err(e) => return Err(e),
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| anyhow!("{} never returned {signature}", self.url)))
-    }
-
-    /// `Ok(None)` means the RPC answered and has not seen it yet.
-    async fn fetch_transaction_once(
-        &self,
-        signature: &str,
-        encoding: &str,
-    ) -> Result<Option<Value>> {
-        let result = self
-            .call(
-                "getTransaction",
-                json!([
-                    signature,
-                    {
-                        "encoding": encoding,
-                        "commitment": "confirmed",
-                        "maxSupportedTransactionVersion": 1,
-                    }
-                ]),
-            )
-            .await?;
-
-        if result.is_null() {
-            return Ok(None);
-        }
-        Ok(Some(result))
-    }
 }
 
 /// An error worth waiting out rather than giving up on.
@@ -321,10 +224,6 @@ impl std::fmt::Display for Transient {
 
 impl std::error::Error for Transient {}
 
-fn is_transient(error: &anyhow::Error) -> bool {
-    error.chain().any(|cause| cause.is::<Transient>())
-}
-
 /// A JSON-RPC error that is really a rate limit wearing an error code. The
 /// codes differ per provider, so the wording is all there is to go on here.
 fn is_rate_limit_message(message: &str) -> bool {
@@ -337,21 +236,6 @@ fn is_rate_limit_message(message: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_transient_error_is_retried_through_any_wrapping() {
-        let error = anyhow!(Transient("HTTP 429".into())).context("fetching a transaction");
-        assert!(is_transient(&error));
-    }
-
-    #[test]
-    fn an_ordinary_error_is_not_retried() {
-        assert!(!is_transient(&anyhow!("transaction not found")));
-        // The old check keyed off wording, so this used to retry forever.
-        assert!(!is_transient(&anyhow!(
-            "response was not JSON: rate limit in the body text"
-        )));
-    }
 
     #[test]
     fn rate_limit_wording_is_recognised_whatever_the_code() {

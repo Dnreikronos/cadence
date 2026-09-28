@@ -43,7 +43,7 @@ use {
     },
     spl_token_confidential_transfer_proof_extraction::instruction::ProofLocation,
     spl_token_confidential_transfer_proof_generation::transfer::TransferProofData,
-    std::num::NonZeroI8,
+    std::{num::NonZeroI8, str::FromStr},
 };
 
 /// Token-2022, the program carrying the confidential instructions since the
@@ -53,8 +53,10 @@ const TOKEN_2022: Address = spl_token_2022_interface::ID;
 /// USDC's decimals, so the numbers below read like the real thing.
 const DECIMALS: u8 = 6;
 
-/// Minted to the sender, then deposited whole into the confidential balance.
-const FUNDING_AMOUNT: u64 = 25_000_000;
+/// Put in the sender's account, then deposited whole into the confidential
+/// balance. Ten tokens, so the 20 devnet USDC Circle's faucet hands out covers
+/// it when running against wrapped USDC.
+const FUNDING_AMOUNT: u64 = 10_000_000;
 
 /// The amount that has to come back as ciphertext. 4.2 tokens.
 const TRANSFER_AMOUNT: u64 = 4_200_000;
@@ -106,7 +108,23 @@ async fn main() -> Result<()> {
     ensure_funded(&rpc, &payer.pubkey()).await?;
 
     // --- step 1: a mint with the confidential extension ------------------
-    let mint = create_mint(&rpc, &payer).await?;
+    // SPIKE_MINT runs against an existing mint instead, such as the wrapped
+    // USDC from ops/mint. Nobody can mint that one but the wrap program, so
+    // the sender is funded out of the payer's own wrapped tokens.
+    let (mint, funding) = match std::env::var("SPIKE_MINT") {
+        Ok(mint) => {
+            let mint = Address::from_str(&mint).context("SPIKE_MINT is not an address")?;
+            let (owner, data) = rpc
+                .account(&mint)
+                .await?
+                .ok_or_else(|| anyhow!("SPIKE_MINT {mint} does not exist"))?;
+            check_existing_mint(&owner, data)?;
+            println!("mint             {mint} (existing)");
+            let source = associated_token_address(&payer.pubkey(), &mint);
+            (mint, Funding::TransferFrom(source))
+        }
+        Err(_) => (create_mint(&rpc, &payer).await?, Funding::MintTo),
+    };
 
     // --- step 2: two token accounts configured for confidential transfers -
     let recipient_owner = Keypair::new();
@@ -114,7 +132,7 @@ async fn main() -> Result<()> {
     let recipient = configure_account(&rpc, &payer, &mint, &recipient_owner, "recipient").await?;
 
     // --- step 3: deposit, then apply --------------------------------------
-    fund_confidential_balance(&rpc, &payer, &mint, &sender).await?;
+    fund_confidential_balance(&rpc, &payer, &mint, &sender, &funding).await?;
 
     // --- step 4: one confidential transfer, one v1 transaction ------------
     let signature = send_confidential_transfer(&rpc, &payer, &mint, &sender, &recipient).await?;
@@ -260,7 +278,50 @@ async fn configure_account(
     })
 }
 
-/// Mints, deposits into the confidential balance, then applies it.
+/// Confirms an existing mint can take the spike's fixed amounts, before any
+/// rent is spent on token accounts for it.
+///
+/// The amounts are raw units and the funding transfer is checked against
+/// `DECIMALS`, so a mint of any other precision fails there, two accounts in.
+/// A legacy SPL Token mint has the same base layout and would read as six
+/// decimals just the same, so the owner is checked first.
+fn check_existing_mint(owner: &Address, data: Vec<u8>) -> Result<()> {
+    if *owner != TOKEN_2022 {
+        bail!("SPIKE_MINT is owned by {owner}, not Token-2022");
+    }
+    let state = StateWithExtensionsOwned::<Mint>::unpack(data)
+        .context("SPIKE_MINT is not a Token-2022 mint")?;
+    if state.base.decimals != DECIMALS {
+        bail!(
+            "SPIKE_MINT has {} decimals, and the spike's amounts assume {DECIMALS}",
+            state.base.decimals
+        );
+    }
+    Ok(())
+}
+
+/// Where the sender's tokens come from.
+enum Funding {
+    /// The spike's own mint, where the payer is the mint authority.
+    MintTo,
+    /// A mint the payer cannot mint, like wrapped USDC. The tokens come out of
+    /// this account, which the payer owns.
+    TransferFrom(Address),
+}
+
+/// The payer's associated Token-2022 account for `mint`, which is where
+/// ops/mint puts wrapped tokens.
+fn associated_token_address(owner: &Address, mint: &Address) -> Address {
+    const ASSOCIATED_TOKEN: Address =
+        Address::from_str_const("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+    Address::find_program_address(
+        &[owner.as_ref(), TOKEN_2022.as_ref(), mint.as_ref()],
+        &ASSOCIATED_TOKEN,
+    )
+    .0
+}
+
+/// Funds the sender, deposits into the confidential balance, then applies it.
 ///
 /// A deposit lands in the pending balance and only an applied balance can be
 /// spent. Applying names the credit counter it expects, which is why the
@@ -272,9 +333,10 @@ async fn fund_confidential_balance(
     payer: &Keypair,
     mint: &Address,
     sender: &ConfidentialAccount,
+    funding: &Funding,
 ) -> Result<()> {
-    let instructions = vec![
-        token_instruction::mint_to_checked(
+    let fund = match funding {
+        Funding::MintTo => token_instruction::mint_to_checked(
             &TOKEN_2022,
             mint,
             &sender.account,
@@ -283,6 +345,19 @@ async fn fund_confidential_balance(
             FUNDING_AMOUNT,
             DECIMALS,
         )?,
+        Funding::TransferFrom(source) => token_instruction::transfer_checked(
+            &TOKEN_2022,
+            source,
+            mint,
+            &sender.account,
+            &payer.pubkey(),
+            &[],
+            FUNDING_AMOUNT,
+            DECIMALS,
+        )?,
+    };
+    let instructions = vec![
+        fund,
         confidential_transfer::instruction::deposit(
             &TOKEN_2022,
             &sender.account,
@@ -293,7 +368,7 @@ async fn fund_confidential_balance(
             &[],
         )?,
     ];
-    send(rpc, &instructions, payer, &[], "mint and deposit").await?;
+    send(rpc, &instructions, payer, &[], "fund and deposit").await?;
 
     let pending = read_balances(rpc, &sender.account).await?;
     let apply = confidential_transfer::instruction::apply_pending_balance(
@@ -710,6 +785,45 @@ mod tests {
     use super::*;
     use serde_json::json;
     use solana_zk_sdk::encryption::elgamal::ElGamalCiphertext;
+    use spl_token_2022_interface::extension::StateWithExtensionsMut;
+
+    /// A bare mint with the given precision, laid out as either token program
+    /// would store it.
+    fn mint_data(decimals: u8) -> Vec<u8> {
+        let mut data = vec![0; ExtensionType::try_calculate_account_len::<Mint>(&[]).unwrap()];
+        let mut state = StateWithExtensionsMut::<Mint>::unpack_uninitialized(&mut data).unwrap();
+        state.base = Mint {
+            decimals,
+            is_initialized: true,
+            ..Mint::default()
+        };
+        state.pack_base();
+        data
+    }
+
+    #[test]
+    fn a_six_decimal_token_2022_mint_is_accepted() {
+        check_existing_mint(&TOKEN_2022, mint_data(DECIMALS)).expect("should pass");
+    }
+
+    #[test]
+    fn a_mint_of_another_precision_is_rejected() {
+        let error = check_existing_mint(&TOKEN_2022, mint_data(9))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("9 decimals"), "got {error}");
+    }
+
+    /// Same bytes, wrong program: the funding transfer goes through
+    /// Token-2022, so a legacy mint would fail there.
+    #[test]
+    fn a_legacy_spl_token_mint_is_rejected() {
+        let legacy = Address::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+        let error = check_existing_mint(&legacy, mint_data(DECIMALS))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not Token-2022"), "got {error}");
+    }
 
     /// What a successful run gets back.
     fn confidential_instruction() -> Value {
