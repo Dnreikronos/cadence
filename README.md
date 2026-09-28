@@ -50,7 +50,8 @@ off-chain, and viewing keys are encrypted at rest with every decryption logged.
 
 ## Status
 
-Pre-implementation. No application code yet. Open items are tracked in the ADR —
-O1 (auditor key on a shared mint or a mint per company) gates the wrapped mint,
-and O3 (whether a Squads multisig can originate a confidential transfer) gates a
+Pre-implementation. No application code yet. The wrapped USDC mint is live on
+devnet with no auditor key, and auditors get access through app-level grants
+(ADR O1, see [ops/mint](ops/mint/README.md)). Open items are tracked in the ADR —
+O3 (whether a Squads multisig can originate a confidential transfer) gates a
 paid tier.
