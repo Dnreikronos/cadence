@@ -65,13 +65,31 @@ async fn inspect(rpc: &JsonRpc, addresses: &Addresses) -> Result<()> {
         );
     }
 
-    let problems = mint.problems(&addresses.authority);
+    let mut problems = mint.problems(&addresses.authority);
+    problems.extend(check_backpointer(rpc, addresses).await?);
 
     if !problems.is_empty() {
         bail!("the wrapped mint is not what the design assumes:\n  {}", problems.join("\n  "));
     }
-    println!("\nok — no auditor, no authority, auto-approve on");
+    println!("\nok — no auditor, no authority, auto-approve on, and the backpointer names USDC");
     Ok(())
+}
+
+/// The backpointer is how anyone holding the wrapped token finds out what it
+/// wraps. It has to be the wrap program's, and it has to name USDC.
+async fn check_backpointer(rpc: &JsonRpc, addresses: &Addresses) -> Result<Vec<String>> {
+    let Some((owner, data)) = rpc.account(&addresses.backpointer).await? else {
+        return Ok(vec!["the backpointer does not exist".into()]);
+    };
+
+    let mut problems = vec![];
+    if owner != addresses.program {
+        problems.push(format!("the backpointer is owned by {owner}, not the wrap program"));
+    }
+    if data.as_slice() != addresses.unwrapped_mint.as_ref() {
+        problems.push("the backpointer does not name devnet USDC".into());
+    }
+    Ok(problems)
 }
 
 fn display<T: std::fmt::Display>(value: Option<T>) -> String {
