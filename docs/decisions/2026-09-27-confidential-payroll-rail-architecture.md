@@ -98,7 +98,7 @@ The costs are real and named: Cadence becomes able to decrypt every customer's a
 - **B18 is contradicted by measurement. Trigger fired 2026-09-27** — `spl-token-client` 0.19.1 builds only legacy transactions and cannot be resolved into the same binary as a v1-capable `solana-message`. See [the confidential transfer spike](../dev/spikes/2026-09-27-confidential-transfer.md), which also measures the transfer at 2,395 bytes rather than the 2,897 quoted in Context and B2. B18 needs superseding; TODO(João).
 - A fiat corridor is added. Trigger: the entire Context section becomes live again, unchanged.
 - Wallets ship confidential-balance display. Trigger: a standing weakness closes and the dashboard stops being the only place a recipient can see their balance.
-- Upstream `token-wrap` supports a configurable auditor and per-caller mints. Trigger: O1 resolves without a fork.
+- ~~Upstream `token-wrap` supports a configurable auditor and per-caller mints. Trigger: O1 resolves without a fork.~~ Moot 2026-09-28 — O1 resolved without a fork.
 - The `disable_zk_elgamal_proof_program` gate activates. Both gates remain ordinary feature gates at epoch boundaries after 95% stake adoption. Trigger: fall back to transparent transfers; payments continue.
 
 ## Open items
