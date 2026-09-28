@@ -59,3 +59,8 @@ settles at about 2.35 SOL once the buffer is closed.
   ID. Stock `token-wrap` therefore gives exactly one Token-2022 wrapped USDC
   per deployment, shared by everyone who uses it. A mint per company needs a
   fork.
+- **"No fork needed" lost its main benefit.** The point of using stock
+  `token-wrap` was to share the canonical wrapped USDC with everyone else. With
+  no canonical deployment there is nothing to share, and we run our own copy
+  either way. Swapping in a customizer with an auditor is a small change on top
+  of that.
