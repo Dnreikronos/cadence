@@ -22,6 +22,13 @@ else.
 | Upgrade authority | `DLk4sKdCznkrXX7QP51vQEcLRtgTuTv5P3pG86kKo1cY`, the spike's devnet payer |
 | Deployed | 2026-09-28, slot 505168490 |
 
+The hash is of the program as dumped back from devnet, and it matches a local
+build. To check it yourself:
+
+```bash
+solana program dump -u devnet 8vc29A8ztm3pE5qJ43paHTMGtBTnf5jXvyqcPQcTjJZc deployed.so && shasum -a 256 deployed.so
+```
+
 ## Building and deploying
 
 Needs the Solana 2.3.4 CLI on `PATH` and `program-keypair.json` beside this
