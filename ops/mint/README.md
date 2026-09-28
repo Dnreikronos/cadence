@@ -55,3 +55,24 @@ against upstream's own CLI output, so the addresses cannot quietly drift.
 
 Nothing here is secret, and nothing has to be kept in sync by hand: all of it
 follows from the two addresses at the top, and `inspect` derives it again.
+
+## What the mint turned out to be
+
+```text
+extensions       [ConfidentialTransferMint, MetadataPointer]
+
+ConfidentialTransferMint
+  authority                None
+  auto_approve_new_accounts true
+  auditor_elgamal_pubkey   None
+```
+
+That is ADR B1 exactly. With no authority the config can never change, so no
+auditor can ever be set on this mint, by us or anyone. OnFinality's own
+Token-2022 parser reads the account the same way.
+
+The spike ran against it on 2026-09-28 with `SPIKE_MINT`: 4.2 wrapped USDC in
+one 2,395-byte v1 transaction,
+[`4hiDmtgT…yHgdPV`](https://explorer.solana.com/tx/4hiDmtgTyS4dhh37zje5cejKUGfRx32dBx5wgnpexrq2SLC5EusUgDq7Ba3sX7As9iyhQxLgyqSVUAKXcNyHgdPV?cluster=devnet),
+the same size as on the spike's own mint. An unrelated RPC sees no amount, and
+the recipient decrypts 4,200,000.
