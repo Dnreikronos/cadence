@@ -34,7 +34,7 @@ Meanwhile the technical window is narrow and recent. The ZK ElGamal Proof progra
 
 | # | Decision | Why |
 |---|---|---|
-| B1 | Wrapped USDC via `token-wrap`, deployed by Cadence because no canonical deployment exists on any cluster — see [ops/token-wrap](../../ops/token-wrap/README.md). Whether the mint carries an auditor key, and whose, is open — see O1 | Stock `token-wrap` adds `ConfidentialTransferMint` to every wrapped mint with authority `None` and **auditor `None`**, immutably. That is a decision rather than a default, and B16 changed what it costs |
+| B1 | Wrapped USDC via `token-wrap`, deployed by Cadence because no canonical deployment exists on any cluster — see [ops/token-wrap](../../ops/token-wrap/README.md). Whether the mint carries an auditor key, and whose, is open — see O1 | Stock `token-wrap` adds `ConfidentialTransferMint` to every wrapped mint with authority `None` and **auditor `None`**, immutably. Verified on chain 2026-09-28 against the devnet mint in [ops/mint](../../ops/mint/README.md). That is a decision rather than a default, and B16 changed what it costs |
 | B2 | One atomic confidential transfer using transaction v1 | The 2,897-byte reference transaction fits the 4,096-byte cap |
 | B3 | Balance display reads the AES `decryptable_available_balance` | Decrypting the ElGamal balance is a discrete-log solve, roughly a second on mobile. AES is constant time |
 | B4 | Develop against devnet or a mainnet-forking validator such as Surfpool | A stock `solana-test-validator` does not enable `ZkE1Gama1Proof11111111111111111111111111111` |
