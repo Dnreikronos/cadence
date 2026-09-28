@@ -53,7 +53,8 @@ const TOKEN_2022: Address = spl_token_2022_interface::ID;
 /// USDC's decimals, so the numbers below read like the real thing.
 const DECIMALS: u8 = 6;
 
-/// Minted to the sender, then deposited whole into the confidential balance.
+/// Put in the sender's account, then deposited whole into the confidential
+/// balance.
 const FUNDING_AMOUNT: u64 = 25_000_000;
 
 /// The amount that has to come back as ciphertext. 4.2 tokens.
@@ -114,7 +115,7 @@ async fn main() -> Result<()> {
     let recipient = configure_account(&rpc, &payer, &mint, &recipient_owner, "recipient").await?;
 
     // --- step 3: deposit, then apply --------------------------------------
-    fund_confidential_balance(&rpc, &payer, &mint, &sender).await?;
+    fund_confidential_balance(&rpc, &payer, &mint, &sender, &Funding::MintTo).await?;
 
     // --- step 4: one confidential transfer, one v1 transaction ------------
     let signature = send_confidential_transfer(&rpc, &payer, &mint, &sender, &recipient).await?;
@@ -260,7 +261,13 @@ async fn configure_account(
     })
 }
 
-/// Mints, deposits into the confidential balance, then applies it.
+/// Where the sender's tokens come from.
+enum Funding {
+    /// The spike's own mint, where the payer is the mint authority.
+    MintTo,
+}
+
+/// Funds the sender, deposits into the confidential balance, then applies it.
 ///
 /// A deposit lands in the pending balance and only an applied balance can be
 /// spent. Applying names the credit counter it expects, which is why the
@@ -272,9 +279,10 @@ async fn fund_confidential_balance(
     payer: &Keypair,
     mint: &Address,
     sender: &ConfidentialAccount,
+    funding: &Funding,
 ) -> Result<()> {
-    let instructions = vec![
-        token_instruction::mint_to_checked(
+    let fund = match funding {
+        Funding::MintTo => token_instruction::mint_to_checked(
             &TOKEN_2022,
             mint,
             &sender.account,
@@ -283,6 +291,9 @@ async fn fund_confidential_balance(
             FUNDING_AMOUNT,
             DECIMALS,
         )?,
+    };
+    let instructions = vec![
+        fund,
         confidential_transfer::instruction::deposit(
             &TOKEN_2022,
             &sender.account,
@@ -293,7 +304,7 @@ async fn fund_confidential_balance(
             &[],
         )?,
     ];
-    send(rpc, &instructions, payer, &[], "mint and deposit").await?;
+    send(rpc, &instructions, payer, &[], "fund and deposit").await?;
 
     let pending = read_balances(rpc, &sender.account).await?;
     let apply = confidential_transfer::instruction::apply_pending_balance(
