@@ -10,3 +10,13 @@ deployed". So this directory deploys our own copy.
 The copy is upstream `program@v1.0.0` with one line changed, the program ID.
 `build.sh` is the whole fork and refuses to build if the patch touched anything
 else.
+
+## Building and deploying
+
+Needs the Solana 2.3.4 CLI on `PATH` and `program-keypair.json` beside this
+file. That keypair is gitignored, and after the first deploy it only fixes the
+address; upgrades go through the upgrade authority.
+
+```bash
+ops/token-wrap/build.sh
+```
