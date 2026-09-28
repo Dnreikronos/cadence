@@ -40,6 +40,17 @@ if [ "$changed" != "$(printf '1\t1\tprogram/src/lib.rs')" ]; then
     git -C "$src" diff >&2
     exit 1
 fi
+
+# The checkout is reused between runs, and checkout --force resets tracked files
+# but leaves untracked ones alone. A stray build.rs or .cargo/config.toml would
+# change the build without showing in the diff above. Upstream ignores .cargo,
+# so ignored files count too; only Cargo's own target directory is expected.
+stray="$(git -C "$src" ls-files --others --exclude=/target/)"
+if [ -n "$stray" ]; then
+    echo "the checkout has files that are not in upstream:" >&2
+    printf '%s\n' "$stray" >&2
+    exit 1
+fi
 git -C "$src" diff
 
 cargo-build-sbf --manifest-path "$src/program/Cargo.toml" --sbf-out-dir "$here/target"
