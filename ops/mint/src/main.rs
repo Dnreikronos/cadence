@@ -125,9 +125,11 @@ async fn check_backpointer(rpc: &JsonRpc, addresses: &Addresses) -> Result<Vec<S
 /// creates the mint, all in one transaction. Idempotent: running it against a
 /// mint that already exists changes nothing.
 async fn create(rpc: &JsonRpc, addresses: &Addresses, payer: &Keypair) -> Result<()> {
-    if rpc.account(&addresses.wrapped_mint).await?.is_some() {
-        println!("the wrapped mint already exists, nothing to create\n");
-        return Ok(());
+    if let Some((owner, data)) = rpc.account(&addresses.wrapped_mint).await? {
+        if mint::is_created(&owner, &data) {
+            println!("the wrapped mint already exists, nothing to create\n");
+            return Ok(());
+        }
     }
 
     // What DefaultToken2022Customizer allocates. TokenMetadata is not in it;
