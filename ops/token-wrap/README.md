@@ -51,3 +51,11 @@ solana program deploy -u devnet -k <payer> --program-id ops/token-wrap/program-k
 to grow. An upgrade to a bigger binary needs `solana program extend` first. The
 deploy peaks at about 4.7 SOL (the program account plus the upload buffer) and
 settles at about 2.35 SOL once the buffer is closed.
+
+## What this changes about O1
+
+- **Wrapped mints are one per deployment.** The wrapped mint is a PDA over
+  the unwrapped mint and the wrapped token program, under the wrap program's
+  ID. Stock `token-wrap` therefore gives exactly one Token-2022 wrapped USDC
+  per deployment, shared by everyone who uses it. A mint per company needs a
+  fork.
