@@ -1,10 +1,14 @@
 //! The parts of token-wrap this tool calls, written out by hand.
 //!
-//! Mirrors upstream `program@v1.0.0`: the PDA seeds in `lib.rs`. The one
-//! difference is the program ID, which is Cadence's own deployment
-//! (ops/token-wrap) because the canonical one is not on any cluster.
+//! Mirrors upstream `program@v1.0.0`: the PDA seeds in `lib.rs` and the account
+//! lists in `instruction.rs`. The one difference is the program ID, which is
+//! Cadence's own deployment (ops/token-wrap) because the canonical one is not
+//! on any cluster.
 
-use solana_address::Address;
+use {
+    solana_address::Address,
+    solana_instruction::{AccountMeta, Instruction},
+};
 
 /// Cadence's deployment of upstream token-wrap on devnet.
 pub const PROGRAM: Address = Address::from_str_const("8vc29A8ztm3pE5qJ43paHTMGtBTnf5jXvyqcPQcTjJZc");
@@ -17,6 +21,7 @@ pub const TOKEN: Address = Address::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCW
 pub const TOKEN_2022: Address = spl_token_2022_interface::ID;
 pub const ASSOCIATED_TOKEN: Address =
     Address::from_str_const("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+const SYSTEM: Address = solana_system_interface::program::ID;
 
 /// Every address a wrapped mint involves, derived the way the program derives
 /// them. All of it follows from the unwrapped mint and the two token programs,
@@ -66,6 +71,29 @@ pub fn associated_token_address(owner: &Address, mint: &Address, token_program: 
         &ASSOCIATED_TOKEN,
     )
     .0
+}
+
+/// `CreateIdempotent` on the associated token account program. Written out
+/// because the interface crate is on a different `solana-pubkey` major from
+/// the rest of this tree.
+pub fn create_associated_token_account_idempotent(
+    payer: &Address,
+    owner: &Address,
+    mint: &Address,
+    token_program: &Address,
+) -> Instruction {
+    Instruction {
+        program_id: ASSOCIATED_TOKEN,
+        accounts: vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(associated_token_address(owner, mint, token_program), false),
+            AccountMeta::new_readonly(*owner, false),
+            AccountMeta::new_readonly(*mint, false),
+            AccountMeta::new_readonly(SYSTEM, false),
+            AccountMeta::new_readonly(*token_program, false),
+        ],
+        data: vec![1],
+    }
 }
 
 #[cfg(test)]
