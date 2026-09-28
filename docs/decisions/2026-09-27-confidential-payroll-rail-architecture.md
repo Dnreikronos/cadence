@@ -50,7 +50,7 @@ Meanwhile the technical window is narrow and recent. The ZK ElGamal Proof progra
 | ~~B15~~ | ~~Use `@solana-program/token-2022` and `getConfidentialTransferInstructionPlan` in the browser~~ | Superseded by B18 |
 | ~~B16~~ | ~~Proof generation runs in the browser~~ | Superseded by B17 |
 | B17 | **Proof generation runs server-side in a Rust service, which therefore holds customers' ElGamal secrets** | Browser crypto is re-delivered on every page load, so a compromised CDN, an XSS or one malicious transitive dependency can exfiltrate the secret. A server is one audited runtime with memory-safe handling and secrets that can be zeroed. Accepted cost: Cadence can decrypt customer amounts, and the product claim changes from "we cannot see" to "we do not expose" — see Consequences |
-| B18 | Use `spl-token-client` (Rust) for the confidential helpers. Do not hand-assemble proofs | Follows from B17, and matches João's existing Token-2022 experience, which is Rust-side |
+| B18 | Use `spl-token-client` (Rust) for the confidential helpers, with a pinned local patch exposing unsigned transfer instructions and making its legacy RPC client optional. The service assembles transaction v1; the browser signs it. Do not hand-assemble proofs | Confirmed with João 2026-09-28 for #48. The stock 0.19.1 client cannot package our transfer or coexist with the required v1 dependency graph unchanged. The [proof service](../../services/proof/README.md) preserves its proof and balance helpers and documents the patch maintenance cost. A 2,395-byte transfer through the patched helper confirmed on devnet |
 | B19 | ElGamal secrets are encrypted at rest under a KMS key, decryption is access-controlled, and every decryption is logged with actor and reason | B17 makes this service the highest-value target in the system. If it is going to hold every customer's viewing capability, that has to be operationally real rather than a promise |
 
 ## Alternatives considered
@@ -97,7 +97,7 @@ The costs are real and named: Cadence becomes able to decrypt every customer's a
 
 ## Revisit when
 
-- **B18 is contradicted by measurement. Trigger fired 2026-09-27** — `spl-token-client` 0.19.1 builds only legacy transactions and cannot be resolved into the same binary as a v1-capable `solana-message`. See [the confidential transfer spike](../dev/spikes/2026-09-27-confidential-transfer.md), which also measures the transfer at 2,395 bytes rather than the 2,897 quoted in Context and B2. B18 needs superseding; TODO(João).
+- **B18 compatibility decision resolved 2026-09-28** — retain `spl-token-client` through the [documented service patch](../../services/proof/vendor/spl-token-client/CADENCE.md). Revisit when upstream supports unsigned instruction building with a v1-compatible dependency graph, so the patch can be removed. The original [spike finding](../dev/spikes/2026-09-27-confidential-transfer.md) still applies to the unmodified release.
 - A fiat corridor is added. Trigger: the entire Context section becomes live again, unchanged.
 - Wallets ship confidential-balance display. Trigger: a standing weakness closes and the dashboard stops being the only place a recipient can see their balance.
 - ~~Upstream `token-wrap` supports a configurable auditor and per-caller mints. Trigger: O1 resolves without a fork.~~ Moot 2026-09-28 — O1 resolved without a fork.
