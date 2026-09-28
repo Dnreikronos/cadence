@@ -4,6 +4,7 @@
 //! (ops/token-wrap), because the canonical one is not on any cluster.
 
 mod mint;
+mod rpc;
 mod token_wrap;
 
 fn main() -> anyhow::Result<()> {
