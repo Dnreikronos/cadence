@@ -20,3 +20,12 @@ address; upgrades go through the upgrade authority.
 ```bash
 ops/token-wrap/build.sh
 ```
+
+```bash
+solana program deploy -u devnet -k <payer> --program-id ops/token-wrap/program-keypair.json --max-len 462120 ops/token-wrap/target/spl_token_wrap.so
+```
+
+`--max-len` is the exact size of the binary, so the program account has no room
+to grow. An upgrade to a bigger binary needs `solana program extend` first. The
+deploy peaks at about 4.7 SOL (the program account plus the upload buffer) and
+settles at about 2.35 SOL once the buffer is closed.
