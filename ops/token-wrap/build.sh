@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks out upstream token-wrap at a pinned release and rewrites its program
+# Builds upstream token-wrap at a pinned release with one change: the program
 # ID.
 #
 # The logic is not modified. The whole fork is the sed below, and the script
@@ -33,3 +33,10 @@ if [ "$changed" != "$(printf '1\t1\tprogram/src/lib.rs')" ]; then
     exit 1
 fi
 git -C "$src" diff
+
+cargo-build-sbf --manifest-path "$src/program/Cargo.toml" --sbf-out-dir "$here/target"
+
+echo
+echo "built   $here/target/spl_token_wrap.so"
+echo "id      $program_id"
+shasum -a 256 "$here/target/spl_token_wrap.so"
