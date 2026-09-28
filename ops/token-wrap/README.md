@@ -64,3 +64,8 @@ settles at about 2.35 SOL once the buffer is closed.
   no canonical deployment there is nothing to share, and we run our own copy
   either way. Swapping in a customizer with an auditor is a small change on top
   of that.
+- **Circle can freeze wrapped USDC.** The default customizer copies USDC's
+  freeze authority onto the wrapped mint. Circle can also freeze the escrow
+  that holds the real USDC, under any deployment. Upstream `main` expects this.
+  Its unreleased `SetCanonicalPointer` lets a mint authority point at a
+  preferred fork and freeze the escrow of the others.
