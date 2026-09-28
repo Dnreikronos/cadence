@@ -45,7 +45,7 @@ usually dry.
 | `SPIKE_KEYPAIR` | `./devnet-payer.json` | payer, generated if absent |
 | `SPIKE_RPC_URL` | `https://api.devnet.solana.com` | sends the transactions |
 | `SPIKE_VERIFY_RPC_URL` | `https://solana-devnet.api.onfinality.io/public` | reads the transfer back |
-| `SPIKE_MINT` | unset | an existing mint to run against instead, such as the wrapped USDC in [ops/mint](../../ops/mint/README.md). The sender is funded from the payer's associated account for it, so wrap into that first |
+| `SPIKE_MINT` | unset | an existing mint to run against instead, such as the wrapped USDC in [ops/mint](../../ops/mint/README.md). It has to be a six-decimal Token-2022 mint, and the spike checks before spending anything. The sender is funded from the payer's associated account for it, so wrap into that first |
 
 A stock `solana-test-validator` will not work: it does not enable
 `ZkE1Gama1Proof11111111111111111111111111111` and every proof instruction
