@@ -96,6 +96,22 @@ pub fn create_associated_token_account_idempotent(
     }
 }
 
+/// `CreateMint`. The program does not create the two accounts itself, it
+/// allocates them, so both have to hold their rent before this runs.
+pub fn create_mint(addresses: &Addresses, idempotent: bool) -> Instruction {
+    Instruction {
+        program_id: addresses.program,
+        accounts: vec![
+            AccountMeta::new(addresses.wrapped_mint, false),
+            AccountMeta::new(addresses.backpointer, false),
+            AccountMeta::new_readonly(addresses.unwrapped_mint, false),
+            AccountMeta::new_readonly(SYSTEM, false),
+            AccountMeta::new_readonly(TOKEN_2022, false),
+        ],
+        data: vec![0, idempotent.into()],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
