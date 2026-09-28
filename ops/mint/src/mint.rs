@@ -63,4 +63,91 @@ impl WrappedMint {
             confidential,
         })
     }
+
+    /// Everything that is not what stock token-wrap produces. Empty means the
+    /// mint is fit to use.
+    pub fn problems(&self, expected_mint_authority: &Address) -> Vec<String> {
+        let mut problems = vec![];
+
+        if self.owner != spl_token_2022_interface::ID {
+            problems.push(format!("owned by {}, not Token-2022", self.owner));
+        }
+        if self.mint_authority != Some(*expected_mint_authority) {
+            problems.push(format!(
+                "mint authority is {:?}, expected the wrap program's PDA {expected_mint_authority}",
+                self.mint_authority
+            ));
+        }
+        if self.decimals != USDC_DECIMALS {
+            problems.push(format!(
+                "{} decimals, USDC has {USDC_DECIMALS}",
+                self.decimals
+            ));
+        }
+
+        problems
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        spl_token_2022_interface::extension::{
+            metadata_pointer::MetadataPointer, BaseStateWithExtensionsMut,
+            StateWithExtensionsMut,
+        },
+    };
+
+    const AUTHORITY: Address = Address::from_str_const("5oAMC4VEuA1rx5KUy9w9iBJ1gQMrPtTEFnXweTNSdSGQ");
+
+    /// A mint laid out the way `DefaultToken2022Customizer` leaves one, with
+    /// the confidential config supplied by the test.
+    fn mint_with(configure: impl FnOnce(&mut ConfidentialTransferMint)) -> Vec<u8> {
+        let space = ExtensionType::try_calculate_account_len::<Mint>(&[
+            ExtensionType::ConfidentialTransferMint,
+            ExtensionType::MetadataPointer,
+        ])
+        .unwrap();
+        let mut data = vec![0; space];
+        let mut state = StateWithExtensionsMut::<Mint>::unpack_uninitialized(&mut data).unwrap();
+
+        let confidential = state
+            .init_extension::<ConfidentialTransferMint>(true)
+            .unwrap();
+        confidential.auto_approve_new_accounts = true.into();
+        configure(confidential);
+        state.init_extension::<MetadataPointer>(true).unwrap();
+
+        state.base = Mint {
+            mint_authority: Some(AUTHORITY).into(),
+            supply: 0,
+            decimals: USDC_DECIMALS,
+            is_initialized: true,
+            freeze_authority: None.into(),
+        };
+        state.pack_base();
+        state.init_account_type().unwrap();
+        data
+    }
+
+    fn problems(data: Vec<u8>) -> Vec<String> {
+        WrappedMint::read(spl_token_2022_interface::ID, data)
+            .unwrap()
+            .problems(&AUTHORITY)
+    }
+
+    #[test]
+    fn a_stock_wrapped_mint_passes() {
+        assert_eq!(problems(mint_with(|_| {})), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_mint_from_another_program_is_reported() {
+        let other = Address::from_str_const("TwRapQCDhWkZRrDaHfZGuHxkZ91gHDRkyuzNqeU5MgR");
+        let found = WrappedMint::read(spl_token_2022_interface::ID, mint_with(|_| {}))
+            .unwrap()
+            .problems(&other);
+        assert!(found.iter().any(|p| p.contains("mint authority")), "{found:?}");
+    }
 }
