@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Checks out upstream token-wrap at a pinned release and rewrites its program
 # ID.
+#
+# The logic is not modified. The whole fork is the sed below, and the script
+# refuses to continue if the patch touched anything else.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -22,3 +25,11 @@ git -C "$src" checkout --quiet --force "$COMMIT"
 
 sed -i.orig "s/declare_id!(\"$CANONICAL_ID\")/declare_id!(\"$program_id\")/" "$src/program/src/lib.rs"
 rm "$src/program/src/lib.rs.orig"
+
+changed="$(git -C "$src" diff --numstat)"
+if [ "$changed" != "$(printf '1\t1\tprogram/src/lib.rs')" ]; then
+    echo "the patch changed more than the one declare_id! line:" >&2
+    git -C "$src" diff >&2
+    exit 1
+fi
+git -C "$src" diff
