@@ -99,6 +99,7 @@ The costs are real and named: Cadence becomes able to decrypt every customer's a
 - A fiat corridor is added. Trigger: the entire Context section becomes live again, unchanged.
 - Wallets ship confidential-balance display. Trigger: a standing weakness closes and the dashboard stops being the only place a recipient can see their balance.
 - ~~Upstream `token-wrap` supports a configurable auditor and per-caller mints. Trigger: O1 resolves without a fork.~~ Moot 2026-09-28 — O1 resolved without a fork.
+- Upstream deploys `token-wrap`. Trigger: its wrapped USDC is a different mint from ours, because the address derives from the program ID, so moving to it migrates every balance. Decide whether sharing a mint with the rest of the ecosystem is worth that.
 - The `disable_zk_elgamal_proof_program` gate activates. Both gates remain ordinary feature gates at epoch boundaries after 95% stake adoption. Trigger: fall back to transparent transfers; payments continue.
 
 ## Open items
