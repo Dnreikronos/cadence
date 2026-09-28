@@ -112,6 +112,35 @@ pub fn create_mint(addresses: &Addresses, idempotent: bool) -> Instruction {
     }
 }
 
+/// `Wrap`: moves `amount` of the unwrapped token into escrow and mints the same
+/// amount of the wrapped one.
+pub fn wrap(
+    addresses: &Addresses,
+    recipient: &Address,
+    unwrapped_token_account: &Address,
+    transfer_authority: &Address,
+    amount: u64,
+) -> Instruction {
+    let mut data = vec![1];
+    data.extend_from_slice(&amount.to_le_bytes());
+
+    Instruction {
+        program_id: addresses.program,
+        accounts: vec![
+            AccountMeta::new(*recipient, false),
+            AccountMeta::new(addresses.wrapped_mint, false),
+            AccountMeta::new_readonly(addresses.authority, false),
+            AccountMeta::new_readonly(addresses.unwrapped_token_program, false),
+            AccountMeta::new_readonly(TOKEN_2022, false),
+            AccountMeta::new(*unwrapped_token_account, false),
+            AccountMeta::new_readonly(addresses.unwrapped_mint, false),
+            AccountMeta::new(addresses.escrow, false),
+            AccountMeta::new_readonly(*transfer_authority, true),
+        ],
+        data,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
