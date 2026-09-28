@@ -114,6 +114,11 @@ async fn main() -> Result<()> {
     let (mint, funding) = match std::env::var("SPIKE_MINT") {
         Ok(mint) => {
             let mint = Address::from_str(&mint).context("SPIKE_MINT is not an address")?;
+            let (owner, data) = rpc
+                .account(&mint)
+                .await?
+                .ok_or_else(|| anyhow!("SPIKE_MINT {mint} does not exist"))?;
+            check_existing_mint(&owner, data)?;
             println!("mint             {mint} (existing)");
             let source = associated_token_address(&payer.pubkey(), &mint);
             (mint, Funding::TransferFrom(source))
