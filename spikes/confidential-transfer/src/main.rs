@@ -54,8 +54,9 @@ const TOKEN_2022: Address = spl_token_2022_interface::ID;
 const DECIMALS: u8 = 6;
 
 /// Put in the sender's account, then deposited whole into the confidential
-/// balance.
-const FUNDING_AMOUNT: u64 = 25_000_000;
+/// balance. Ten tokens, so the 20 devnet USDC Circle's faucet hands out covers
+/// it when running against wrapped USDC.
+const FUNDING_AMOUNT: u64 = 10_000_000;
 
 /// The amount that has to come back as ciphertext. 4.2 tokens.
 const TRANSFER_AMOUNT: u64 = 4_200_000;
