@@ -2392,8 +2392,46 @@ where
         auditor_elgamal_pubkey: Option<&ElGamalPubkey>,
         signing_keypairs: &S,
     ) -> TokenResult<T::Output> {
-        let signing_pubkeys = signing_keypairs.pubkeys();
-        let multisig_signers = self.get_multisig_signers(source_authority, &signing_pubkeys);
+        let instructions = self.confidential_transfer_transfer_instructions(
+            source_account,
+            destination_account,
+            source_authority,
+            equality_proof_account,
+            ciphertext_validity_proof_account_with_ciphertext,
+            range_proof_account,
+            transfer_amount,
+            account_info,
+            source_elgamal_keypair,
+            source_aes_key,
+            destination_elgamal_pubkey,
+            auditor_elgamal_pubkey,
+            &signing_keypairs.pubkeys(),
+        ).await?;
+        self.process_ixs(&instructions, signing_keypairs).await
+    }
+
+    /// Build a confidential transfer without compiling or signing a transaction.
+    ///
+    /// Cadence extension: preserves upstream proof generation and account resolution.
+    /// The caller supplies signer public keys and owns transaction version and signing.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn confidential_transfer_transfer_instructions(
+        &self,
+        source_account: &Address,
+        destination_account: &Address,
+        source_authority: &Address,
+        equality_proof_account: Option<&Address>,
+        ciphertext_validity_proof_account_with_ciphertext: Option<&ProofAccountWithCiphertext>,
+        range_proof_account: Option<&Address>,
+        transfer_amount: u64,
+        account_info: Option<TransferAccountInfo>,
+        source_elgamal_keypair: &ElGamalKeypair,
+        source_aes_key: &AeKey,
+        destination_elgamal_pubkey: &ElGamalPubkey,
+        auditor_elgamal_pubkey: Option<&ElGamalPubkey>,
+        signing_pubkeys: &[Address],
+    ) -> TokenResult<Vec<Instruction>> {
+        let multisig_signers = self.get_multisig_signers(source_authority, signing_pubkeys);
 
         let account_info = if let Some(account_info) = account_info {
             account_info
@@ -2522,7 +2560,7 @@ where
         )
         .await
         .map_err(|_| TokenError::AccountNotFound)?;
-        self.process_ixs(&instructions, signing_keypairs).await
+        Ok(instructions)
     }
 
     /// Create a record account containing zero-knowledge proof needed for a
