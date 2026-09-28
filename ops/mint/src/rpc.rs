@@ -132,6 +132,19 @@ impl JsonRpc {
         Ok(Some((owner, data)))
     }
 
+    /// Lamports held, zero if the account does not exist.
+    pub async fn lamports(&self, address: &Address) -> Result<u64> {
+        let result = self
+            .call(
+                "getBalance",
+                json!([address.to_string(), { "commitment": "confirmed" }]),
+            )
+            .await?;
+        result["value"]
+            .as_u64()
+            .ok_or_else(|| anyhow!("getBalance returned {result}"))
+    }
+
     /// Submits a base64-encoded transaction. Preflight stays on: a v1
     /// transaction rejected at simulation is exactly what this spike wants to
     /// hear about.
