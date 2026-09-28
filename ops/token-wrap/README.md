@@ -29,6 +29,10 @@ build. To check it yourself:
 solana program dump -u devnet 8vc29A8ztm3pE5qJ43paHTMGtBTnf5jXvyqcPQcTjJZc deployed.so && shasum -a 256 deployed.so
 ```
 
+The upgrade authority is a throwaway key that lives on one laptop. Fine for
+devnet. It is the first thing to replace before anything like this goes near
+mainnet.
+
 ## Building and deploying
 
 Needs the Solana 2.3.4 CLI on `PATH` and `program-keypair.json` beside this
