@@ -19,6 +19,16 @@ use {
 /// Devnet USDC's decimals, which the wrapped mint copies.
 pub const USDC_DECIMALS: u8 = 6;
 
+/// Whether the wrapped mint has actually been created at this address.
+///
+/// Anyone can send lamports to the mint's address before it exists, which
+/// leaves a system-owned account with no data there. The program is built for
+/// that, since it expects callers to pre-fund, so an account existing at the
+/// address is not the mint existing.
+pub fn is_created(owner: &Address, data: &[u8]) -> bool {
+    *owner == spl_token_2022_interface::ID && !data.is_empty()
+}
+
 pub struct WrappedMint {
     pub owner: Address,
     pub mint_authority: Option<Address>,
@@ -160,6 +170,13 @@ mod tests {
         WrappedMint::read(spl_token_2022_interface::ID, data)
             .unwrap()
             .problems(&AUTHORITY)
+    }
+
+    #[test]
+    fn a_pre_funded_address_is_not_a_created_mint() {
+        let system = Address::from_str_const("11111111111111111111111111111111");
+        assert!(!is_created(&system, &[]));
+        assert!(is_created(&spl_token_2022_interface::ID, &mint_with(|_| {})));
     }
 
     #[test]
