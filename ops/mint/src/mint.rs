@@ -66,6 +66,10 @@ impl WrappedMint {
 
     /// Everything that is not what stock token-wrap produces. Empty means the
     /// mint is fit to use.
+    ///
+    /// The two that decide ADR O1 are the auditor and the authority: both
+    /// `None` means nobody can ever read amounts on this mint, and nobody can
+    /// ever change that.
     pub fn problems(&self, expected_mint_authority: &Address) -> Vec<String> {
         let mut problems = vec![];
 
@@ -85,6 +89,26 @@ impl WrappedMint {
             ));
         }
 
+        match &self.confidential {
+            None => problems.push("no ConfidentialTransferMint extension".into()),
+            Some(config) => {
+                if let Some(authority) = config.authority {
+                    problems.push(format!(
+                        "confidential transfer authority is {authority}, so the config can change"
+                    ));
+                }
+                if let Some(auditor) = config.auditor_elgamal_pubkey {
+                    problems.push(format!("an auditor key is set: {auditor}"));
+                }
+                if !config.auto_approve_new_accounts {
+                    problems.push(
+                        "new accounts need approval, and with no authority nobody can give it"
+                            .into(),
+                    );
+                }
+            }
+        }
+
         problems
     }
 }
@@ -97,6 +121,7 @@ mod tests {
             metadata_pointer::MetadataPointer, BaseStateWithExtensionsMut,
             StateWithExtensionsMut,
         },
+        std::str::FromStr,
     };
 
     const AUTHORITY: Address = Address::from_str_const("5oAMC4VEuA1rx5KUy9w9iBJ1gQMrPtTEFnXweTNSdSGQ");
@@ -143,11 +168,42 @@ mod tests {
     }
 
     #[test]
+    fn an_auditor_is_reported() {
+        let auditor =
+            PodElGamalPubkey::from_str("yonKhqkoXNvMbN/tU6fjHFhfZuNPpvMj8L55aP2bBG4=").unwrap();
+        let found = problems(mint_with(|c| c.auditor_elgamal_pubkey = Some(auditor).try_into().unwrap()));
+        assert!(found.iter().any(|p| p.contains("auditor")), "{found:?}");
+    }
+
+    #[test]
+    fn a_config_authority_is_reported() {
+        let found = problems(mint_with(|c| c.authority = Some(AUTHORITY).try_into().unwrap()));
+        assert!(found.iter().any(|p| p.contains("can change")), "{found:?}");
+    }
+
+    #[test]
     fn a_mint_from_another_program_is_reported() {
         let other = Address::from_str_const("TwRapQCDhWkZRrDaHfZGuHxkZ91gHDRkyuzNqeU5MgR");
         let found = WrappedMint::read(spl_token_2022_interface::ID, mint_with(|_| {}))
             .unwrap()
             .problems(&other);
         assert!(found.iter().any(|p| p.contains("mint authority")), "{found:?}");
+    }
+
+    #[test]
+    fn a_mint_without_the_extension_is_reported() {
+        let space = ExtensionType::try_calculate_account_len::<Mint>(&[]).unwrap();
+        let mut data = vec![0; space];
+        let mut state = StateWithExtensionsMut::<Mint>::unpack_uninitialized(&mut data).unwrap();
+        state.base = Mint {
+            mint_authority: Some(AUTHORITY).into(),
+            decimals: USDC_DECIMALS,
+            is_initialized: true,
+            ..Mint::default()
+        };
+        state.pack_base();
+
+        let found = problems(data);
+        assert!(found.iter().any(|p| p.contains("no ConfidentialTransferMint")), "{found:?}");
     }
 }
