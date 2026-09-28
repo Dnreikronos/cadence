@@ -89,6 +89,8 @@ The costs are real and named: Cadence becomes able to decrypt every customer's a
 
 **The proof service is the highest-value target in the system.** One compromise exposes every company's payroll, where a browser compromise would have exposed one person's. B19 is the mitigation and it is not optional.
 
+**Circle can freeze wrapped USDC.** The wrapped mint inherits USDC's freeze authority, and Circle can freeze the escrow holding the USDC behind every wrapped token. That is the exposure of holding USDC at all, concentrated in one account: freezing the escrow stops every unwrap at once.
+
 **We gain a product with no licensed counterparty, no corridor and no regulated activity anywhere in it**, and a transfer path in the language the team is fastest in — which is what makes it shippable in this window.
 
 **This obligates** an honest in-product statement that this is confidentiality and not anonymity *and* that Cadence holds viewing capability; KMS-backed encryption at rest with access control and decryption audit logging (B19); monitoring of the `disable_zk_elgamal_proof_program` gate; and keeping the Brazilian analysis above current enough to act on if a fiat corridor is added.
