@@ -102,6 +102,36 @@ impl JsonRpc {
             .ok_or_else(|| anyhow!("getMinimumBalanceForRentExemption returned {result}"))
     }
 
+    /// The account's owner and raw data, or `None` if it does not exist yet.
+    pub async fn account(&self, address: &Address) -> Result<Option<(Address, Vec<u8>)>> {
+        let result = self
+            .call(
+                "getAccountInfo",
+                json!([
+                    address.to_string(),
+                    { "encoding": "base64", "commitment": "confirmed" }
+                ]),
+            )
+            .await?;
+
+        let value = &result["value"];
+        if value.is_null() {
+            return Ok(None);
+        }
+
+        let owner = value["owner"]
+            .as_str()
+            .and_then(|owner| Address::from_str(owner).ok())
+            .ok_or_else(|| anyhow!("getAccountInfo returned no owner for {address}"))?;
+        let encoded = value["data"][0]
+            .as_str()
+            .ok_or_else(|| anyhow!("getAccountInfo returned unexpected data for {address}"))?;
+        let data = BASE64
+            .decode(encoded)
+            .with_context(|| format!("account data for {address} was not base64"))?;
+        Ok(Some((owner, data)))
+    }
+
     /// Submits a base64-encoded transaction. Preflight stays on: a v1
     /// transaction rejected at simulation is exactly what this spike wants to
     /// hear about.
