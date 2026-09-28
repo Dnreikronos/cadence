@@ -14,8 +14,16 @@ UPSTREAM=https://github.com/solana-program/token-wrap.git
 COMMIT=4e4e1d0ed63e1e49d43de2db9ad533c2863b3598
 CANONICAL_ID=TwRapQCDhWkZRrDaHfZGuHxkZ91gHDRkyuzNqeU5MgR
 
+# Upstream builds this tag with 2.3.4 (workspace.metadata.cli).
+SOLANA_VERSION=2.3.4
+
 program_id="$(solana-keygen pubkey "$here/program-keypair.json")"
 src="$here/src"
+
+if ! solana --version | grep -q " $SOLANA_VERSION "; then
+    echo "expected solana $SOLANA_VERSION, got: $(solana --version)" >&2
+    exit 1
+fi
 
 if [ ! -d "$src/.git" ]; then
     git clone --quiet "$UPSTREAM" "$src"
