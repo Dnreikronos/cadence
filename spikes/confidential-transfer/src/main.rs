@@ -43,7 +43,7 @@ use {
     },
     spl_token_confidential_transfer_proof_extraction::instruction::ProofLocation,
     spl_token_confidential_transfer_proof_generation::transfer::TransferProofData,
-    std::num::NonZeroI8,
+    std::{num::NonZeroI8, str::FromStr},
 };
 
 /// Token-2022, the program carrying the confidential instructions since the
@@ -107,7 +107,18 @@ async fn main() -> Result<()> {
     ensure_funded(&rpc, &payer.pubkey()).await?;
 
     // --- step 1: a mint with the confidential extension ------------------
-    let mint = create_mint(&rpc, &payer).await?;
+    // SPIKE_MINT runs against an existing mint instead, such as the wrapped
+    // USDC from ops/mint. Nobody can mint that one but the wrap program, so
+    // the sender is funded out of the payer's own wrapped tokens.
+    let (mint, funding) = match std::env::var("SPIKE_MINT") {
+        Ok(mint) => {
+            let mint = Address::from_str(&mint).context("SPIKE_MINT is not an address")?;
+            println!("mint             {mint} (existing)");
+            let source = associated_token_address(&payer.pubkey(), &mint);
+            (mint, Funding::TransferFrom(source))
+        }
+        Err(_) => (create_mint(&rpc, &payer).await?, Funding::MintTo),
+    };
 
     // --- step 2: two token accounts configured for confidential transfers -
     let recipient_owner = Keypair::new();
@@ -115,7 +126,7 @@ async fn main() -> Result<()> {
     let recipient = configure_account(&rpc, &payer, &mint, &recipient_owner, "recipient").await?;
 
     // --- step 3: deposit, then apply --------------------------------------
-    fund_confidential_balance(&rpc, &payer, &mint, &sender, &Funding::MintTo).await?;
+    fund_confidential_balance(&rpc, &payer, &mint, &sender, &funding).await?;
 
     // --- step 4: one confidential transfer, one v1 transaction ------------
     let signature = send_confidential_transfer(&rpc, &payer, &mint, &sender, &recipient).await?;
@@ -265,6 +276,21 @@ async fn configure_account(
 enum Funding {
     /// The spike's own mint, where the payer is the mint authority.
     MintTo,
+    /// A mint the payer cannot mint, like wrapped USDC. The tokens come out of
+    /// this account, which the payer owns.
+    TransferFrom(Address),
+}
+
+/// The payer's associated Token-2022 account for `mint`, which is where
+/// ops/mint puts wrapped tokens.
+fn associated_token_address(owner: &Address, mint: &Address) -> Address {
+    const ASSOCIATED_TOKEN: Address =
+        Address::from_str_const("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+    Address::find_program_address(
+        &[owner.as_ref(), TOKEN_2022.as_ref(), mint.as_ref()],
+        &ASSOCIATED_TOKEN,
+    )
+    .0
 }
 
 /// Funds the sender, deposits into the confidential balance, then applies it.
@@ -284,6 +310,16 @@ async fn fund_confidential_balance(
     let fund = match funding {
         Funding::MintTo => token_instruction::mint_to_checked(
             &TOKEN_2022,
+            mint,
+            &sender.account,
+            &payer.pubkey(),
+            &[],
+            FUNDING_AMOUNT,
+            DECIMALS,
+        )?,
+        Funding::TransferFrom(source) => token_instruction::transfer_checked(
+            &TOKEN_2022,
+            source,
             mint,
             &sender.account,
             &payer.pubkey(),
