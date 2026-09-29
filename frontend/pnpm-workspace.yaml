@@ -1,0 +1,3 @@
+allowBuilds:
+  # Ships prebuilt binaries; its postinstall is not needed.
+  unrs-resolver: false
