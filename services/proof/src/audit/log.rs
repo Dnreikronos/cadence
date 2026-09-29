@@ -58,3 +58,19 @@ pub async fn append(client: &Client, entry: &AuditEntry<'_>) -> Result<(), Audit
         .map_err(|_| AuditError::Unavailable)?;
     Ok(())
 }
+
+/// Persist attribution and a single-use Vault read permit in one autocommit call.
+/// The private SQL reader rejects permits from uncommitted transactions.
+pub(crate) async fn key_read_permit(
+    client: &Client,
+    entry: &AuditEntry<'_>,
+) -> Result<String, AuditError> {
+    client
+        .query_one(
+            "SELECT cadence_private.audit_key_read($1, $2, $3)",
+            &[&entry.actor, &entry.reason, &entry.target_account],
+        )
+        .await
+        .map(|row| row.get(0))
+        .map_err(|_| AuditError::Unavailable)
+}

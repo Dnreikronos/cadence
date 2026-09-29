@@ -2,7 +2,7 @@ use solana_address::Address;
 use solana_signature::Signature;
 use solana_zk_sdk::encryption::{
     derivation::{confidential_derivation_message, derive_confidential_keys_from_signature},
-    elgamal::{ElGamalKeypair, ElGamalPubkey},
+    elgamal::{ElGamalKeypair, ElGamalPubkey, ElGamalSecretKey},
 };
 use zeroize::Zeroizing;
 
@@ -36,6 +36,15 @@ impl ViewingKey {
 
     pub fn public_key(&self) -> ElGamalPubkey {
         self.0.pubkey_owned()
+    }
+
+    pub(super) fn secret_bytes(&self) -> &[u8; 32] {
+        self.0.secret().as_bytes()
+    }
+
+    pub(super) fn from_secret_bytes(bytes: &[u8]) -> Result<Self, DerivationError> {
+        let secret = ElGamalSecretKey::try_from(bytes).map_err(|_| DerivationError)?;
+        Ok(Self(Zeroizing::new(ElGamalKeypair::new(secret))))
     }
 
     /// Trusted proof code must not copy, log, or serialize the borrowed SDK keypair.
