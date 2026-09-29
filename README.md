@@ -50,7 +50,9 @@ off-chain, and viewing keys are encrypted at rest with every decryption logged.
 
 ## Status
 
-Pre-implementation. No application code yet. The wrapped USDC mint is live on
+The [Rust proof service scaffold](services/proof/README.md) provides RPC health
+checks and an unsigned v1 adapter for `spl-token-client`. Payment endpoints and
+key storage are still to come. The wrapped USDC mint is live on
 devnet with no auditor key, and auditors get access through app-level grants
 (ADR O1, see [ops/mint](ops/mint/README.md)). Open items are tracked in the ADR —
 O3 (whether a Squads multisig can originate a confidential transfer) gates a
