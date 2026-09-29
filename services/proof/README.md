@@ -102,3 +102,36 @@ at slot 505330225, and the recipient decrypted 4,200,000 units:
 [devnet transaction](https://explorer.solana.com/tx/2fMrc3gvo5wAjW8wcXHj68Tw51ERPyh1jRQXdVZH5vQQmYmUBmDTciGtoCw5Pt6VDZPJpZjeJ9KDAesXYZtArNC2?cluster=devnet).
 This used a disposable Token-2022 mint; it did not move wrapped USDC or test a
 browser wallet integration.
+
+## Decryption audit log
+
+Apply `supabase/migrations/20260928000000_decryption_audit_log.sql` as the
+Supabase migration administrator. The runtime must use `service_role`, which
+has INSERT permission only on actor, reason and target account. PostgreSQL
+assigns the ID and timestamp. Anonymous and authenticated clients have no table
+access; RLS is enabled with no client policies. Administrators remain trusted
+and can change records or schema. No amount column or metadata payload exists.
+
+`audit::log::AuditEntry::new(actor, reason, target_account)` requires a nonblank
+actor/reason and a valid Solana public key. Derive the actor from authenticated
+context; do not trust a caller-supplied actor field. Reasons describe operations
+and must never include amounts or secrets. Await `audit::log::append` on an
+autocommit `tokio_postgres::Client` before releasing a key, and abort key access
+on any error. Never put the insert in a transaction that may later roll back.
+The future key-storage integration owns connection setup, TLS, timeouts and
+access authorization; no decryption endpoint is added here.
+
+Run the database test against an **empty disposable PostgreSQL database** as
+an administrator. It creates the Supabase roles and applies the migration;
+never point it at an existing development or production database. TLS is
+disabled only in this local test connection.
+
+```bash
+cargo test --locked --test audit
+AUDIT_TEST_DATABASE_URL=postgres://postgres:password@localhost:5432/audit_test \
+  cargo test --locked --test audit -- --ignored
+```
+
+CI provisions PostgreSQL 17 and explicitly runs the database test, including
+INSERT success, mutation/read denial for the BYPASSRLS service role, denied
+client access, attribution constraints, and propagation of failed inserts.
