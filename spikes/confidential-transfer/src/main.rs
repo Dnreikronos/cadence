@@ -154,7 +154,9 @@ async fn main() -> Result<()> {
     }
 
     // --- step 4: one confidential transfer, one v1 transaction ------------
-    let signature = send_confidential_transfer(&rpc, &payer, &mint, &sender, &recipient).await?;
+    let signature =
+        send_confidential_transfer(&rpc, &payer, &mint, &sender, &recipient, provider.as_ref())
+            .await?;
 
     // --- step 5: read it back from somewhere else -------------------------
     verify_through_third_party(&verify_rpc, &signature).await?;
@@ -428,6 +430,7 @@ async fn send_confidential_transfer(
     mint: &Address,
     sender: &ConfidentialAccount,
     recipient: &ConfidentialAccount,
+    provider: Option<&provider::Provider>,
 ) -> Result<String> {
     let balances = read_balances(rpc, &sender.account).await?;
 
@@ -474,7 +477,7 @@ async fn send_confidential_transfer(
     println!("amount           {TRANSFER_AMOUNT} units");
     println!("instructions     {} in one transaction", instructions.len());
 
-    let sent = if let Some(provider) = provider::Provider::from_env()? {
+    let sent = if let Some(provider) = provider {
         provider.send(rpc, &instructions, payer, BUDGET).await?
     } else {
         send(rpc, &instructions, payer, &[], "confidential transfer").await?
