@@ -20,7 +20,11 @@ pub struct Provider {
 
 pub async fn require_devnet(rpc: &JsonRpc) -> Result<()> {
     let genesis = rpc.call("getGenesisHash", serde_json::json!([])).await?;
-    if genesis != "EtWTRABZaYq6iMfeYKouRu166VU2xqa1" {
+    validate_devnet_genesis(&genesis)
+}
+
+fn validate_devnet_genesis(genesis: &serde_json::Value) -> Result<()> {
+    if genesis != "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" {
         bail!("wallet provider experiment requires Solana devnet");
     }
     Ok(())
@@ -152,6 +156,23 @@ fn validate_signed(unsigned: &VersionedTransaction, wire: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
     use solana_keypair::Keypair;
+
+    #[test]
+    fn devnet_guard_requires_the_complete_genesis_hash() {
+        assert!(validate_devnet_genesis(&serde_json::json!(
+            "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"
+        ))
+        .is_ok());
+        for hash in [
+            "EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+            "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+            "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY",
+            "",
+        ] {
+            assert!(validate_devnet_genesis(&serde_json::json!(hash)).is_err());
+        }
+        assert!(validate_devnet_genesis(&serde_json::Value::Null).is_err());
+    }
 
     #[test]
     fn provider_output_must_preserve_message_and_authorize_every_signer() {

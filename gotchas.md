@@ -18,3 +18,7 @@
   A durable audit gate must exclude its own top-level transaction explicitly;
   test with a concurrent transaction advancing the global ID counter. Do not
   use tuple xmin for this check because PL/pgSQL exception blocks use subtransactions.
+
+- Cluster guards must compare the complete genesis hash, not an abbreviated
+  identifier. Verify it against independent RPCs and test rejection of truncated
+  values before live provider experiments.
