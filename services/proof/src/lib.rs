@@ -1,3 +1,6 @@
+pub mod audit {
+    pub mod log;
+}
 pub mod config;
 pub mod error;
 pub mod routes {
