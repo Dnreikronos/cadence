@@ -197,7 +197,8 @@ WALLET_SPIKE_FIXTURE=../wallet-providers/fixture.json rtk cargo test --locked on
 Fixture generation uses random proof inputs and rewrites the fixture; its address
 and bytes will change. It never reads a funded wallet or contacts an RPC.
 Locally executed: compiler/type checks, Rust formatting and Clippy, Biome,
-four Node tests, and the two targeted Rust tests above all passed. The full
+eight Node tests (provider adapters and Phantom), and the two targeted Rust
+tests above all passed. `npm test` runs both Node test files. The full
 repository suite and remote CI were not run.
 
 ## Reproduce the live experiment
