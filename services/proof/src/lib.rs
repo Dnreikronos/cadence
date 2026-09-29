@@ -3,6 +3,9 @@ pub mod audit {
 }
 pub mod config;
 pub mod error;
+pub mod keys {
+    pub mod elgamal;
+}
 pub mod routes {
     pub mod health;
 }
