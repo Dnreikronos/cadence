@@ -1,5 +1,11 @@
 # Gotchas
 
+- For #51, Turnkey is selected after a confirmed confidential v1 transfer on
+  devnet. This supersedes the earlier Phantom-only preference. Keep production
+  embedded onboarding and custody review open; the root-key spike does not
+  establish user-controlled signing. Update earlier guidance when a decision
+  changes so future work does not follow a superseded scope.
+
 - For #50, the user does not want to provision AWS, Azure, or a similar cloud
   account for key management. Establish the operational constraint before
   offering provider choices. Prefer existing infrastructure where appropriate,
@@ -14,3 +20,10 @@
   A durable audit gate must exclude its own top-level transaction explicitly;
   test with a concurrent transaction advancing the global ID counter. Do not
   use tuple xmin for this check because PL/pgSQL exception blocks use subtransactions.
+
+- Cluster guards must compare the complete genesis hash, not an abbreviated
+  identifier. Verify it against independent RPCs and test rejection of truncated
+  values before live provider experiments.
+
+- For Turnkey dashboard guidance, inspect the current UI first. API Keys lives
+  on My Profile and the action is labelled New API Key.

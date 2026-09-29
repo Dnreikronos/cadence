@@ -14,6 +14,8 @@
 //! enable the ZK ElGamal Proof program and every proof instruction will fail.
 
 mod balances;
+#[path = "../../wallet-providers/provider.rs"]
+mod provider;
 mod rpc;
 mod v1;
 
@@ -99,6 +101,10 @@ async fn main() -> Result<()> {
 
     let rpc = JsonRpc::new(rpc_url);
     let verify_rpc = JsonRpc::new(verify_rpc_url);
+    let provider = provider::Provider::from_env()?;
+    if provider.is_some() {
+        provider::require_devnet(&rpc).await?;
+    }
 
     let payer = load_payer()?;
     println!("payer            {}", payer.pubkey());
@@ -128,14 +134,29 @@ async fn main() -> Result<()> {
 
     // --- step 2: two token accounts configured for confidential transfers -
     let recipient_owner = Keypair::new();
-    let sender = configure_account(&rpc, &payer, &mint, &payer, "sender").await?;
+    let mut sender = configure_account(&rpc, &payer, &mint, &payer, "sender").await?;
     let recipient = configure_account(&rpc, &payer, &mint, &recipient_owner, "recipient").await?;
 
     // --- step 3: deposit, then apply --------------------------------------
     fund_confidential_balance(&rpc, &payer, &mint, &sender, &funding).await?;
 
+    if let Some(provider) = &provider {
+        let change_owner = token_instruction::set_authority(
+            &TOKEN_2022,
+            &sender.account,
+            Some(&provider.address),
+            token_instruction::AuthorityType::AccountOwner,
+            &payer.pubkey(),
+            &[],
+        )?;
+        send(&rpc, &[change_owner], &payer, &[], "assign provider owner").await?;
+        sender.owner = provider.address;
+    }
+
     // --- step 4: one confidential transfer, one v1 transaction ------------
-    let signature = send_confidential_transfer(&rpc, &payer, &mint, &sender, &recipient).await?;
+    let signature =
+        send_confidential_transfer(&rpc, &payer, &mint, &sender, &recipient, provider.as_ref())
+            .await?;
 
     // --- step 5: read it back from somewhere else -------------------------
     verify_through_third_party(&verify_rpc, &signature).await?;
@@ -409,6 +430,7 @@ async fn send_confidential_transfer(
     mint: &Address,
     sender: &ConfidentialAccount,
     recipient: &ConfidentialAccount,
+    provider: Option<&provider::Provider>,
 ) -> Result<String> {
     let balances = read_balances(rpc, &sender.account).await?;
 
@@ -455,7 +477,11 @@ async fn send_confidential_transfer(
     println!("amount           {TRANSFER_AMOUNT} units");
     println!("instructions     {} in one transaction", instructions.len());
 
-    let sent = send(rpc, &instructions, payer, &[], "confidential transfer").await?;
+    let sent = if let Some(provider) = provider {
+        provider.send(rpc, &instructions, payer, BUDGET).await?
+    } else {
+        send(rpc, &instructions, payer, &[], "confidential transfer").await?
+    };
     println!(
         "size             {} bytes of {MAX_TRANSACTION_SIZE}",
         sent.size
@@ -1003,6 +1029,24 @@ mod tests {
         )
         .expect("v1 compilation");
         let size = v1::serialize(&transaction).expect("serialization").len();
+
+        if let Ok(path) = std::env::var("WALLET_SPIKE_FIXTURE") {
+            use base64::{engine::general_purpose::STANDARD, Engine};
+            let mut unsigned = transaction.clone();
+            unsigned
+                .signatures
+                .fill(solana_signature::Signature::default());
+            std::fs::write(
+                path,
+                serde_json::to_vec_pretty(&json!({
+                    "kind": "synthetic-confidential-transfer-not-submittable",
+                    "address": payer.pubkey().to_string(),
+                    "transaction": STANDARD.encode(v1::serialize(&unsigned).unwrap()),
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        }
 
         println!("one confidential transfer is {size} bytes of {MAX_TRANSACTION_SIZE}");
         assert!(
