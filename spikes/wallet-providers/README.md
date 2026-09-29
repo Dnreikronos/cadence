@@ -2,7 +2,49 @@
 
 Issue [#51](https://github.com/Dnreikronos/cadence/issues/51).
 
-## Revised scope — 2026-09-29
+## Provider decision — 2026-09-29
+
+Select **Turnkey's transaction API** for confidential v1 signing. After the
+Phantom capability check below failed, the user provisioned Turnkey credentials
+and authorized a disposable devnet experiment. This supersedes the temporary
+Phantom-only scope. Use `@turnkey/sdk-server` directly; the Solana SDK's local
+v1 serialization failure remains reproducible.
+
+The technical “done when” criterion is met: a selected provider authorized a
+confirmed confidential transfer. The original checklist is not fully exercised:
+Privy's remote signing remains untested without credentials. Production browser
+onboarding (#77) and the O2 custody/recovery review remain separate open work.
+
+### Live evidence
+
+- Provider: `turnkey-api`, `@turnkey/sdk-server` 8.6.0.
+- Wallet: `4egAZELoLKWqJwHwAwaZwS2su9rewh7is3ukCagHnSQ5`, newly created for
+  this experiment; authenticated with the developer's root-user API key.
+- [Confirmed devnet transfer](https://explorer.solana.com/tx/4AGRXsecEoxPdzvZoPn1rGSdKXMXTVTBofjSUXzTHG8wWdxdNPth2pRCiZ3QQGEqg2VQdstweLEKcvDLs1FRuHQn?cluster=devnet),
+  slot **505677040**, version **1**, **2,491 bytes**, four instructions (transfer
+  plus three proofs). Turnkey signed as the token-account owner; a separate
+  disposable local key paid fees.
+- The Rust bridge verified every signature, unchanged message bytes and the
+  preserved fee-payer signature before broadcasting through
+  `https://api.devnet.solana.com`.
+- Independent retrieval through `https://solana-devnet.api.onfinality.io/public`
+  returned the v1 confidential instruction and ciphertext. The sender retained
+  5,800,000 units; the recipient decrypted 4,200,000 pending units.
+- No remote instruction-parsing or signing rejection occurred for this root-key
+  request. This does **not** establish non-root policy support, plaintext amount
+  restrictions, end-user ownership, or production recovery controls.
+- The first attempt stopped before setup because the devnet guard contained a
+  truncated genesis hash. Both RPCs returned
+  `EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG`; the guard now compares the full
+  value. Its regression test accepts that hash and rejects truncated, other and
+  missing values. Never bypass the cluster check to work around a mismatch.
+
+Validation after the fix: two targeted Rust provider tests, Rust formatting and
+Clippy across all targets, JavaScript type checking, Biome and four provider
+adapter tests passed. The live experiment exited successfully. Credentials are
+stored outside the repository and are not part of this evidence.
+
+## Earlier Phantom scope — superseded
 
 The user selected Phantom to avoid provisioning embedded-wallet services.
 The initial flow requires an existing Phantom wallet; automatic creation for
@@ -48,7 +90,7 @@ update that adds v1 support, or choose a different signing path. Splitting the
 proofs into separate transactions would change the atomic-transfer requirement;
 it is not an interchangeable wallet fix.
 
-## Original embedded-provider experiment contract (deferred)
+## Embedded-provider experiment contract
 
 Reuse the real proof generation and devnet setup from `../confidential-transfer`.
 After funding its disposable sender, change that token account's owner to the
@@ -69,22 +111,22 @@ transaction above 4,096 bytes. Require successful devnet confirmation and the
 existing independent-RPC ciphertext check. Document an authenticated rejection
 as a failure, missing credentials as untested, and local mocks as local only.
 
-The provider decision remains provisional until a real provider-owned wallet
-authorizes a confirmed transfer. B6 and O2 must distinguish technical compatibility
-from the production user-control/recovery configuration and legal assessment.
+The live Turnkey run now satisfies the provider-signing gate. B6 and O2
+distinguish technical compatibility from the production user-control/recovery
+configuration and legal assessment.
 
 ## Findings — 2026-09-28
 
-**Issue #51 is not complete.** No provider credentials are available. No remote
+At the time of these initial findings, no provider credentials were available. No remote
 signing request was made, no provider policy was evaluated, and no provider-signed
-devnet transfer is claimed. Browser extension wallets do not supply these API
+devnet transfer had been confirmed. Browser extension wallets do not supply these API
 credentials. At that point, Turnkey was the first candidate to validate because its transaction
-API explicitly documents v1. The Phantom scope change above supersedes that priority.
+API explicitly documents v1. The live Turnkey result above supersedes these initial findings.
 
 | Path | Locally observed result | What remains untested |
 |---|---|---|
 | `@turnkey/solana` 1.1.43 with `@solana/web3.js` 1.99.0 | Real `TurnkeySigner.signTransaction` fails before its API call: `Serialization of version 1 transaction messages is not supported` | Nothing in this failure establishes a provider-side rejection |
-| `@turnkey/sdk-server` 8.6.0 `signTransaction` | Adapter passes exact Rust wire bytes as hex, without web3 reserialization; mocked response only | Authenticated signing, instruction parsing, policy evaluation and devnet confirmation |
+| `@turnkey/sdk-server` 8.6.0 `signTransaction` | Exact Rust wire bytes passed as hex; live root-key signing and devnet confirmation succeeded (evidence above) | Non-root policy evaluation and production user-control setup |
 | `@privy-io/node` 0.35.0 `wallets().solana().signTransaction` | Real SDK passes the exact bytes as base64 to a mocked HTTP transport | Server acceptance of v1, confidential instructions, policy evaluation and devnet confirmation |
 
 The SDK failure is reproducible using `fixture.json`: the original spike builds
@@ -105,9 +147,10 @@ with raw-payload signing. This keeps the transaction-policy path under test.
 The [Privy signing guide](https://docs.privy.io/wallets/using-wallets/solana/sign-a-transaction)
 accepts encoded transaction bytes but does not establish confidential-v1 support.
 
-No instruction-parsing or policy-engine failure has been observed remotely.
-The issue comment's claim that Turnkey signs confidential instructions as bytes
-remains a hypothesis here. An encrypted amount cannot be checked by an ordinary
+No instruction-parsing or policy-engine failure has been observed remotely, including the successful root-key experiment.
+The live result establishes that the transaction API can sign this confidential
+instruction shape. It does not establish how the policy engine parses it.
+An encrypted amount cannot be checked by an ordinary
 plaintext amount policy; whether instruction/account restrictions accept these
 instructions must be tested with the intended **non-root** user policy. A root
 test cannot demonstrate that policy. The bridge reports stage/error type without
@@ -129,7 +172,7 @@ Both products support configurations with materially different control rights.
 Provider branding does not settle Cadence's custody posture. B9 requires user
 signing without Cadence unilateral spending authority; no backend signing or
 recovery credential should make that claim false. These are technical control
-requirements, not a legal conclusion. O2 remains open pending the actual setup
+requirements, not a legal conclusion. O2 remains open pending the production setup
 and its regulatory assessment. The CLI's dev-only authorization credentials do
 not demonstrate the browser's production custody model or Supabase login flow.
 
@@ -157,7 +200,7 @@ Locally executed: compiler/type checks, Rust formatting and Clippy, Biome,
 four Node tests, and the two targeted Rust tests above all passed. The full
 repository suite and remote CI were not run.
 
-## Run the live experiment when accounts are available
+## Reproduce the live experiment
 
 Create a disposable Solana wallet separately in each provider and authorize
 signing for it. Do not import the Phantom/MetaMask wallet or its seed phrase.
@@ -194,5 +237,5 @@ Run separately for each provider. The bridge never automatically retries with a
 different signing mechanism. Record package versions, provider mode, wallet
 address, non-root policy configuration, sanitized failure stage/details, and—on
 success—transaction signature, confirmed slot, size and independent-RPC result
-here. Only then choose the provider and resolve B6's technical gate; O2 also
+here. The Turnkey result above resolves B6's technical gate; O2 also
 requires the user-control and recovery review above.
