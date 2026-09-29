@@ -22,3 +22,7 @@
 - Cluster guards must compare the complete genesis hash, not an abbreviated
   identifier. Verify it against independent RPCs and test rejection of truncated
   values before live provider experiments.
+
+- For Turnkey dashboard guidance, inspect the current UI first. API Keys lives
+  on My Profile and the action is labelled New API Key. The user has now
+  provisioned Turnkey, superseding the earlier Phantom-only preference.
