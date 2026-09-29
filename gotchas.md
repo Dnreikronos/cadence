@@ -1,5 +1,9 @@
 # Gotchas
 
+- For #51, the user chose an existing Phantom wallet over creating Turnkey/Privy
+  accounts. Treat embedded onboarding as deferred and verify installed-wallet
+  v1 transaction support before promising that this alternative works.
+
 - For #50, the user does not want to provision AWS, Azure, or a similar cloud
   account for key management. Establish the operational constraint before
   offering provider choices. Prefer existing infrastructure where appropriate,
