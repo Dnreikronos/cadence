@@ -128,7 +128,7 @@ The fee is for software. It is never a spread on the amount transferred and Cade
 | R8 | No plaintext amount is stored off-chain | A dump of every database table contains no readable payment amount |
 | R9 | Payments survive the feature being switched off | With the proof program simulated unavailable, a run completes as ordinary transfers |
 | R10 | No tenant can read another tenant's data | A session attempting to read another company's roster or another person's payments fails; covered by tests that run on every migration |
-| R11 | Cadence cannot move customer funds, and every decryption it performs is accountable | No signing key reaches our infrastructure, demonstrable from network traffic. ElGamal secrets are encrypted at rest under a KMS key, decryption is access-controlled, and an audit log records actor and reason for every one |
+| R11 | Cadence cannot move customer funds, and every decryption it performs is accountable | No signing key reaches our infrastructure, demonstrable from network traffic. ElGamal secrets are encrypted at rest using Supabase Vault (ADR B19), decryption is access-controlled, and an audit log records actor and reason for every one |
 | R12 | Real companies are using it | At least 2 real companies have made a real payment through Cadence before submission |
 
 ## Constraints
@@ -161,7 +161,7 @@ TODO(João): the deposit figure cited for Umbra and Circle Arc's launch status b
 
 | Risk | Likelihood | What we do |
 |---|---|---|
-| Our proof service is breached, exposing every customer's amounts | Low, severe | R11 — KMS-backed encryption at rest, access control, decryption audit log. The concentration is inherent to server-side proof generation and is the accepted cost of that decision |
+| Our proof service is breached, exposing every customer's amounts | Low, severe | R11 — Supabase Vault encryption at rest, access control, decryption audit log. The concentration is inherent to server-side proof generation and is the accepted cost of that decision |
 | A customer or judge expects "you cannot see it" and we say "we can" | High | Say it first, in the product and the pitch, rather than being caught by the question |
 | Companies find it interesting but won't pay | Medium | Validate with pilots before building more — see below |
 | Wallets take years to show hidden balances | High | Our dashboard covers it; approach Phantom early |

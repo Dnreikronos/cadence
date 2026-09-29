@@ -51,7 +51,7 @@ Meanwhile the technical window is narrow and recent. The ZK ElGamal Proof progra
 | ~~B16~~ | ~~Proof generation runs in the browser~~ | Superseded by B17 |
 | B17 | **Proof generation runs server-side in a Rust service, which therefore holds customers' ElGamal secrets** | Browser crypto is re-delivered on every page load, so a compromised CDN, an XSS or one malicious transitive dependency can exfiltrate the secret. A server is one audited runtime with memory-safe handling and secrets that can be zeroed. Accepted cost: Cadence can decrypt customer amounts, and the product claim changes from "we cannot see" to "we do not expose" — see Consequences |
 | B18 | Use `spl-token-client` (Rust) for the confidential helpers, with a pinned local patch exposing unsigned transfer instructions and making its legacy RPC client optional. The service assembles transaction v1; the browser signs it. Do not hand-assemble proofs | Confirmed with João 2026-09-28 for #48. The stock 0.19.1 client cannot package our transfer or coexist with the required v1 dependency graph unchanged. The [proof service](../../services/proof/README.md) preserves its proof and balance helpers and documents the patch maintenance cost. A 2,395-byte transfer through the patched helper confirmed on devnet |
-| B19 | ElGamal secrets are encrypted at rest under a KMS key, decryption is access-controlled, and every decryption is logged with actor and reason | B17 makes this service the highest-value target in the system. If it is going to hold every customer's viewing capability, that has to be operationally real rather than a promise |
+| B19 | ElGamal secrets are encrypted at rest with Supabase Vault, decryption is access-controlled, and every service read is logged with actor and reason | Amended for #50 on 2026-09-28: use the existing Supabase stack instead of provisioning a separate cloud KMS. A dedicated database role can only use audited key accessors; Supabase administrators and the broad service_role remain trusted. See the [storage contract](../plans/2026-09-28-050-encrypted-viewing-keys.md) |
 
 ## Alternatives considered
 
@@ -93,7 +93,7 @@ The costs are real and named: Cadence becomes able to decrypt every customer's a
 
 **We gain a product with no licensed counterparty, no corridor and no regulated activity anywhere in it**, and a transfer path in the language the team is fastest in — which is what makes it shippable in this window.
 
-**This obligates** an honest in-product statement that this is confidentiality and not anonymity *and* that Cadence holds viewing capability; KMS-backed encryption at rest with access control and decryption audit logging (B19); monitoring of the `disable_zk_elgamal_proof_program` gate; and keeping the Brazilian analysis above current enough to act on if a fiat corridor is added.
+**This obligates** an honest in-product statement that this is confidentiality and not anonymity *and* that Cadence holds viewing capability; Supabase Vault encryption at rest with access control and decryption audit logging (B19); monitoring of the `disable_zk_elgamal_proof_program` gate; and keeping the Brazilian analysis above current enough to act on if a fiat corridor is added.
 
 ## Revisit when
 
