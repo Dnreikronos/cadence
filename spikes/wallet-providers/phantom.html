@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Cadence · Phantom compatibility</title>
+  <style>
+    body { font: 17px/1.6 system-ui, sans-serif; color: #eee; background: #151820; max-width: 760px; margin: 64px auto; padding: 0 24px; }
+    h1 { line-height: 1.2; } p { color: #bbc4d4; }
+    #status { color: #fff; padding: 24px; background: #272b38; border-radius: 12px; }
+    button { background: #b7a8ff; color: #171323; border: 0; border-radius: 8px; padding: 12px 22px; font: inherit; cursor: pointer; }
+    pre { padding: 20px; background: #20242e; border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <p>CADENCE / WALLET COMPATIBILITY</p>
+  <h1>Can your Phantom sign a confidential payment?</h1>
+  <p>Cadence needs Solana transaction version 1. This page reads the capabilities advertised by your installed wallet.</p>
+  <p>No wallet connection, signature, account address, or funds are requested.</p>
+  <p id="status" role="status">Checking installed wallets…</p>
+  <button id="check" type="button">Check again</button>
+  <h2>Compatibility evidence</h2>
+  <pre id="evidence">Waiting for Wallet Standard registration.</pre>
+  <script type="module" src="/phantom-capabilities.mjs"></script>
+</body>
+</html>

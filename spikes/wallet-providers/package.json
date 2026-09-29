@@ -1,0 +1,28 @@
+{
+  "name": "cadence-wallet-provider-spike",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "tsc --allowJs --checkJs --noEmit --skipLibCheck --module nodenext --target es2023 sign.mjs phantom-capabilities.mjs phantom-server.mjs",
+    "lint": "biome check sign.mjs sign.test.mjs phantom-capabilities.mjs phantom-server.mjs phantom.test.mjs",
+    "test": "node --test sign.test.mjs",
+    "phantom": "node phantom-server.mjs",
+    "test:phantom": "node --test phantom.test.mjs"
+  },
+  "dependencies": {
+    "@privy-io/node": "0.35.0",
+    "@solana/web3.js": "1.99.0",
+    "@turnkey/sdk-server": "8.6.0",
+    "@turnkey/solana": "1.1.43",
+    "@wallet-standard/app": "1.1.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@types/node": "26.6.3",
+    "typescript": "5.9.3"
+  }
+}
