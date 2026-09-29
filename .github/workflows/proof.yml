@@ -2,10 +2,10 @@ name: Proof service
 
 on:
   pull_request:
-    paths: ['services/proof/**', '.github/workflows/proof.yml']
+    paths: ['services/proof/**', 'supabase/migrations/**', '.github/workflows/proof.yml']
   push:
     branches: [main]
-    paths: ['services/proof/**', '.github/workflows/proof.yml']
+    paths: ['services/proof/**', 'supabase/migrations/**', '.github/workflows/proof.yml']
   workflow_dispatch:
 
 permissions:
@@ -15,6 +15,16 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: audit-test-only
+          POSTGRES_DB: audit_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     defaults:
       run:
         working-directory: services/proof
@@ -29,6 +39,10 @@ jobs:
       - run: cargo check --locked --all-targets
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
+      - name: Verify audit database permissions
+        env:
+          AUDIT_TEST_DATABASE_URL: postgres://postgres:audit-test-only@localhost:5432/audit_test
+        run: cargo test --locked --test audit -- --ignored
       - name: Build runtime image
         run: docker build --build-arg BUILD_SHA="$GITHUB_SHA" -t cadence-proof:ci .
       - name: Check health against devnet and stop gracefully
