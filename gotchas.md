@@ -1,8 +1,10 @@
 # Gotchas
 
-- For #51, the user chose an existing Phantom wallet over creating Turnkey/Privy
-  accounts. Treat embedded onboarding as deferred and verify installed-wallet
-  v1 transaction support before promising that this alternative works.
+- For #51, Turnkey is selected after a confirmed confidential v1 transfer on
+  devnet. This supersedes the earlier Phantom-only preference. Keep production
+  embedded onboarding and custody review open; the root-key spike does not
+  establish user-controlled signing. Update earlier guidance when a decision
+  changes so future work does not follow a superseded scope.
 
 - For #50, the user does not want to provision AWS, Azure, or a similar cloud
   account for key management. Establish the operational constraint before
@@ -24,5 +26,4 @@
   values before live provider experiments.
 
 - For Turnkey dashboard guidance, inspect the current UI first. API Keys lives
-  on My Profile and the action is labelled New API Key. The user has now
-  provisioned Turnkey, superseding the earlier Phantom-only preference.
+  on My Profile and the action is labelled New API Key.
