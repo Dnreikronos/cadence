@@ -5,10 +5,16 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-canvas: var(--canvas);
+  --color-line: var(--line);
+  --color-glow: var(--glow);
+  --color-uv: var(--uv);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-code);
   --font-heading: var(--font-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -127,4 +133,191 @@
   html {
     @apply font-sans;
   }
+}
+
+:root {
+  --ink: #0e0f0c;
+  --ink-muted: #6a6b63;
+  --canvas: #f2f2ef;
+  --line: #e2e2dc;
+  --glow: #d6f53d;
+  --uv: #a393ff;
+  --font-ui: var(--font-instrument);
+  --font-code: var(--font-jetbrains);
+}
+
+.font-display {
+  font-stretch: 92%;
+}
+
+em,
+i {
+  font-style: normal;
+}
+
+.motion-ready [data-reveal] {
+  visibility: hidden;
+}
+
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  interpolate-size: allow-keywords;
+}
+
+@keyframes pulse-ring {
+  from {
+    opacity: 0.8;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 0;
+    transform: scale(2.2);
+  }
+}
+
+@keyframes cell {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes scan-down {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(var(--scan-distance, 400px));
+  }
+}
+
+@keyframes grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes type {
+  from {
+    width: 0;
+  }
+  to {
+    width: 8ch;
+  }
+}
+
+/* Pay demo packets: x runs linear while y eases, which traces the S-curve drawn under them. */
+@keyframes packet-x {
+  0% {
+    opacity: 0;
+    transform: translateX(0);
+  }
+  12%,
+  88% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+
+@keyframes packet-y-0 {
+  to {
+    transform: translateY(-126px);
+  }
+}
+@keyframes packet-y-1 {
+  to {
+    transform: translateY(-63px);
+  }
+}
+@keyframes packet-y-2 {
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes packet-y-3 {
+  to {
+    transform: translateY(63px);
+  }
+}
+@keyframes packet-y-4 {
+  to {
+    transform: translateY(126px);
+  }
+}
+
+@keyframes dash-flow {
+  to {
+    stroke-dashoffset: -40;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    filter: blur(2px);
+    transform: translateY(2px);
+  }
+}
+
+.link-underline {
+  background: linear-gradient(currentColor, currentColor) 0 100% / 0 1px no-repeat;
+  transition: background-size 250ms var(--ease-out), color 150ms ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .link-underline:hover {
+    background-size: 100% 1px;
+  }
+}
+
+details.faq::details-content {
+  block-size: 0;
+  overflow: hidden;
+  transition:
+    block-size 280ms var(--ease-out),
+    content-visibility 280ms allow-discrete;
+}
+
+details.faq[open]::details-content {
+  block-size: auto;
+}
+
+details.faq .faq-answer {
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity 220ms ease,
+    transform 280ms var(--ease-out);
+}
+
+details.faq[open] .faq-answer {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  details.faq::details-content,
+  details.faq .faq-answer {
+    transition: none;
+  }
+}
+
+.perforated {
+  --hole: 6px;
+  --pitch: 18px;
+  mask:
+    radial-gradient(circle var(--hole) at 50% 0, #0000 98%, #000) top / var(--pitch) 51% repeat-x,
+    radial-gradient(circle var(--hole) at 50% 100%, #0000 98%, #000) bottom / var(--pitch) 51% repeat-x;
 }
