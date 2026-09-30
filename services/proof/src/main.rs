@@ -9,6 +9,7 @@ async fn main() -> Result<(), AppError> {
     let config = Config::from_env()?;
     let rpc = Arc::new(RpcClient::new(config.rpc_url, config.rpc_timeout)?);
     let wrap_store = WrapStore::from_env()?.map(Arc::new);
+    let cors = cadence_proof::cors::from_env()?;
 
     #[cfg(unix)]
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -42,7 +43,8 @@ async fn main() -> Result<(), AppError> {
                 build_sha: config.build_sha,
             },
             wrap_store,
-        ),
+        )
+        .layer(cors),
     )
     .with_graceful_shutdown(shutdown)
     .await?;

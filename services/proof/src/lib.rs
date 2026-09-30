@@ -2,6 +2,7 @@ pub mod audit {
     pub mod log;
 }
 pub mod config;
+pub mod cors;
 pub mod error;
 pub mod wrap_store;
 pub mod keys {
