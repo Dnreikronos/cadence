@@ -123,7 +123,7 @@ const cases: {
   },
   {
     title: "Treasury balance",
-    body: "What you hold stays yours to know. Only deposits and withdrawals are public.",
+    body: "Nobody watching the chain learns what you hold. Only deposits and withdrawals are public.",
     line: "Solaris · balance",
     amount: 84000,
     icon: Landmark,

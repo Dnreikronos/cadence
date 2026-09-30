@@ -30,7 +30,7 @@ export function CompareChain() {
               value={cipherText}
               label="Copy ciphertext"
               toastTitle="Ciphertext copied"
-              toastDescription="That's all anyone can read from this payment."
+              toastDescription="That's all the chain shows about this payment."
             />
           </span>
         </div>
@@ -49,7 +49,7 @@ export function CompareChain() {
           </p>
           <p className="mt-3 flex items-center gap-2 text-ui text-ink-muted">
             <span className="size-1.5 rounded-full bg-success-dot" /> Readable
-            by Bruno, Solaris and their auditor
+            by Bruno, Solaris, their auditor and Cadence
           </p>
         </div>
       </PanelView>

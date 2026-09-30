@@ -23,6 +23,13 @@ describe("canSee", () => {
       "diego",
       "northwind",
     ])
+    expect(visibleIds("cadence")).toEqual([
+      "bruno",
+      "ana",
+      "mariana",
+      "diego",
+      "northwind",
+    ])
     expect(visibleIds("recipient")).toEqual(["bruno"])
     expect(visibleIds("public")).toEqual([])
   })
