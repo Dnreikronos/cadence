@@ -3,13 +3,30 @@
 import { Eye } from "lucide-react"
 import type { Role } from "@/lib/auth/guard"
 import { cn } from "@/lib/utils"
-import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "./popover"
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "./popover"
 
 // Cadence runs the proof service and holds viewing keys (ADR B17), so it is always named.
 export function whoCanSee(viewerRole: Role, hasAuditor: boolean) {
   const readers = {
-    admin: ["Your company", "the recipient", ...(hasAuditor ? ["your auditor"] : []), "Cadence"],
-    recipient: ["You", "the company that paid you", ...(hasAuditor ? ["its auditor"] : []), "Cadence"],
+    admin: [
+      "Your company",
+      "the recipient",
+      ...(hasAuditor ? ["your auditor"] : []),
+      "Cadence",
+    ],
+    recipient: [
+      "You",
+      "the company that paid you",
+      ...(hasAuditor ? ["its auditor"] : []),
+      "Cadence",
+    ],
     auditor: ["You", "the company", "the recipient", "Cadence"],
   }[viewerRole]
   return `${list(readers)} can read this amount. The public cannot: on-chain it is ciphertext.`
@@ -42,9 +59,14 @@ export function WhoCanSee({
       <PopoverContent align="start">
         <PopoverHeader>
           <PopoverTitle>Who can see this</PopoverTitle>
-          <PopoverDescription>{whoCanSee(viewerRole, hasAuditor)}</PopoverDescription>
+          <PopoverDescription>
+            {whoCanSee(viewerRole, hasAuditor)}
+          </PopoverDescription>
         </PopoverHeader>
-        <p className="text-caption leading-[1.5] text-ink-muted">Cadence reads amounts only to prove transfers, and every read is logged.</p>
+        <p className="text-caption/normal text-ink-muted">
+          Cadence reads amounts only to prove transfers, and every read is
+          logged.
+        </p>
       </PopoverContent>
     </Popover>
   )

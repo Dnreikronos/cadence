@@ -9,16 +9,27 @@ export function AvatarPerson({
   size?: number
   className?: string
 }) {
-  const tone = tones[(initials.charCodeAt(0) + (initials.charCodeAt(1) || 0)) % tones.length]
+  const tone =
+    tones[
+      (initials.charCodeAt(0) + (initials.charCodeAt(1) || 0)) % tones.length
+    ]
   return (
     <span
       className={cn(
         "relative grid shrink-0 place-items-center overflow-hidden rounded-full font-medium text-ink ring-1 ring-black/5",
         className,
       )}
-      style={{ width: size, height: size, fontSize: Math.max(9, size * 0.34), background: tone }}
+      style={{
+        width: size,
+        height: size,
+        fontSize: Math.max(9, size * 0.34),
+        background: tone,
+      }}
     >
-      <span aria-hidden className="absolute -right-1/4 -bottom-1/4 size-3/4 rounded-full bg-white/35" />
+      <span
+        aria-hidden
+        className="absolute -right-1/4 -bottom-1/4 size-3/4 rounded-full bg-white/35"
+      />
       <span className="relative">{initials}</span>
     </span>
   )

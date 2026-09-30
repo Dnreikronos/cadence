@@ -47,11 +47,11 @@ src/middleware.ts   role-based route guard
 `src/middleware.ts` refreshes the Supabase session on every request and guards
 three areas by the role in the viewer's `memberships` rows:
 
-| Path | Role |
-|---|---|
-| `/company/*` | `admin` |
-| `/me/*` | `recipient` |
-| `/audit/*` | `auditor` |
+| Path         | Role        |
+| ------------ | ----------- |
+| `/company/*` | `admin`     |
+| `/me/*`      | `recipient` |
+| `/audit/*`   | `auditor`   |
 
 A signed-out visit goes to `/sign-in?next=<path>`. A signed-in user without the
 role goes to `/`. If Supabase is unreachable or unconfigured, guarded areas are

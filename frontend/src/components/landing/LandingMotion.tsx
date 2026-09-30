@@ -22,7 +22,12 @@ export function LandingMotion() {
       gsap.to("[data-progress]", {
         scaleX: 1,
         ease: "none",
-        scrollTrigger: { trigger: document.body, start: "top top", end: "bottom bottom", scrub: 0.3 },
+        scrollTrigger: {
+          trigger: document.body,
+          start: "top top",
+          end: "bottom bottom",
+          scrub: 0.3,
+        },
       })
 
       gsap.utils.toArray<HTMLElement>("[data-split]").forEach((heading) => {
@@ -42,7 +47,14 @@ export function LandingMotion() {
           gsap.fromTo(
             elements,
             { autoAlpha: 0, y: 40, filter: "blur(8px)" },
-            { autoAlpha: 1, y: 0, filter: "blur(0px)", duration: 1, ease: "expo.out", stagger: 0.09 },
+            {
+              autoAlpha: 1,
+              y: 0,
+              filter: "blur(0px)",
+              duration: 1,
+              ease: "expo.out",
+              stagger: 0.09,
+            },
           ),
       })
 
@@ -50,7 +62,12 @@ export function LandingMotion() {
         gsap.to(element, {
           yPercent: Number(element.dataset.parallax) * -100,
           ease: "none",
-          scrollTrigger: { trigger: element, start: "top bottom", end: "bottom top", scrub: true },
+          scrollTrigger: {
+            trigger: element,
+            start: "top bottom",
+            end: "bottom top",
+            scrub: true,
+          },
         })
       })
 
@@ -61,7 +78,10 @@ export function LandingMotion() {
           duration: 1.6,
           ease: "expo.out",
           scrollTrigger: { trigger: element, start: "top 92%" },
-          onUpdate: () => (element.textContent = Math.round(counter.value).toLocaleString("en-US")),
+          onUpdate: () =>
+            (element.textContent = Math.round(counter.value).toLocaleString(
+              "en-US",
+            )),
         })
       })
 
@@ -77,11 +97,20 @@ export function LandingMotion() {
   return null
 }
 
-export function SplitWords({ children, className }: { children: string; className?: string }) {
+export function SplitWords({
+  children,
+  className,
+}: {
+  children: string
+  className?: string
+}) {
   return (
     <span data-split className={className}>
       {children.split(" ").map((word, index) => (
-        <span key={index} className="inline-block overflow-hidden pb-[0.08em] align-bottom">
+        <span
+          key={index}
+          className="inline-block overflow-hidden pb-[0.08em] align-bottom"
+        >
           <span data-word className="inline-block">
             {word}
             {"\u00a0"}

@@ -13,7 +13,12 @@ import {
 import type { Role } from "@/lib/auth/guard"
 
 // `exact` marks an area root, which must not light up on its subpages.
-export type NavItem = { label: string; href: string; icon: LucideIcon; exact?: boolean }
+export type NavItem = {
+  label: string
+  href: string
+  icon: LucideIcon
+  exact?: boolean
+}
 
 export const navByRole: Record<Role, { items: NavItem[]; action?: NavItem }> = {
   admin: {
@@ -23,7 +28,11 @@ export const navByRole: Record<Role, { items: NavItem[]; action?: NavItem }> = {
       { label: "Auditors", href: "/company/auditors", icon: ShieldCheck },
       { label: "Receipts", href: "/company/receipts", icon: ReceiptText },
     ],
-    action: { label: "Deposit", href: "/company/deposit", icon: ArrowDownToLine },
+    action: {
+      label: "Deposit",
+      href: "/company/deposit",
+      icon: ArrowDownToLine,
+    },
   },
   recipient: {
     items: [
@@ -40,7 +49,11 @@ export const navByRole: Record<Role, { items: NavItem[]; action?: NavItem }> = {
   },
 }
 
-export const roleLabels: Record<Role, string> = { admin: "Admin", recipient: "Recipient", auditor: "Auditor" }
+export const roleLabels: Record<Role, string> = {
+  admin: "Admin",
+  recipient: "Recipient",
+  auditor: "Auditor",
+}
 
 export function isActive(item: NavItem, pathname: string) {
   if (item.exact) return pathname === item.href

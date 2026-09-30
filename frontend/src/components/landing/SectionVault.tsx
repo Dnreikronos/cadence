@@ -4,13 +4,19 @@ import { VaultKeys } from "./VaultKeys"
 
 export function SectionVault() {
   return (
-    <section id="vault" className="perforated relative overflow-hidden bg-night pb-24 text-white sm:pb-32">
-      <NoiseTexture className="opacity-[0.22] mix-blend-soft-light" frequency={0.85} />
+    <section
+      id="vault"
+      className="perforated relative overflow-hidden bg-night pb-24 text-white sm:pb-32"
+    >
+      <NoiseTexture
+        className="opacity-[0.22] mix-blend-soft-light"
+        frequency={0.85}
+      />
       <div
         aria-hidden
-        className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.07)_1px,transparent_1px)] [background-size:22px_22px] [mask-image:radial-gradient(ellipse_at_50%_70%,#000,transparent_70%)]"
+        className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.07)_1px,transparent_1px)] mask-[radial-gradient(ellipse_at_50%_70%,#000,transparent_70%)] bg-size-[22px_22px]"
       />
-      <div className="relative mx-auto max-w-[1248px] border-x border-white/[0.07]">
+      <div className="relative mx-auto max-w-312 border-x border-white/[0.07]">
         <SectionHeading
           index="02"
           eyebrow="Who sees what"
