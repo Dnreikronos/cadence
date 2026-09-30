@@ -22,6 +22,10 @@ repo's paths instead of these.
 
 - [Cadence pays people who already hold dollars, so no part of the product is a regulated activity](decisions/2026-09-27-confidential-payroll-rail-architecture.md) — 2026-09-27, decision log. Why the Brazil corridor was abandoned, why proof generation moved to the browser, and what is still open on the wrapped mint. Status: accepted.
 
+## Implementation plans
+
+- [Company wallets sign the USDC wrap transaction](plans/2026-09-29-052-plan-wrap.md) — 2026-09-29, #52. Implemented and tested locally; browser-wallet devnet acceptance remains unverified. [API contract](dev/WRAP_API.md).
+
 ## Spikes
 
 - [One confidential transfer is 2,395 bytes on devnet, and `spl-token-client` cannot send it](dev/spikes/2026-09-27-confidential-transfer.md) — 2026-09-27. Verdict: go, conditional on superseding B18. R2 and R3 confirmed on chain; the client the ADR picks cannot build a v1 transaction.
