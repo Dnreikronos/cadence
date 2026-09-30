@@ -11,7 +11,7 @@ import { SectionVault } from "@/components/landing/SectionVault"
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-canvas bg-[radial-gradient(circle_at_center,color-mix(in_oklab,var(--ink)_9%,transparent)_1px,transparent_1px)] [background-size:12px_12px]">
+    <div className="min-h-screen bg-canvas">
       <LandingMotion />
       <NavLanding />
       <main>

@@ -2,6 +2,7 @@ import Link from "next/link"
 import { ArrowLeftRight, ArrowRight, Binary, Eye, KeyRound, Scale, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { buttonPrimary, buttonSecondary, iconNudge } from "./button-styles"
+import { HeroGlass } from "./HeroGlass"
 import { HeroProduct } from "./HeroProduct"
 import { SplitWords } from "./LandingMotion"
 
@@ -30,13 +31,10 @@ export function SectionHero() {
             </a>
           </div>
         </div>
-        <div className="relative px-3 pt-14 pb-12 sm:px-10 sm:pt-16 sm:pb-16" data-reveal>
-          <HeroProduct />
+        <div className="relative mt-6 sm:mt-2" data-reveal>
+          <HeroGlass />
         </div>
-      </div>
-
-      <div className="border-t border-line">
-        <dl className="mx-auto grid max-w-[1248px] grid-cols-2 border-x border-line bg-white lg:grid-cols-4">
+        <dl className="relative grid grid-cols-2 border-t border-line lg:grid-cols-4">
           {facts.map((fact) => (
             <div
               key={fact.label}
@@ -52,6 +50,9 @@ export function SectionHero() {
             </div>
           ))}
         </dl>
+        <div className="relative border-t border-line px-3 pt-12 pb-12 sm:px-10 sm:pt-16 sm:pb-16" data-reveal>
+          <HeroProduct />
+        </div>
       </div>
     </section>
   )
