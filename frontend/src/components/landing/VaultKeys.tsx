@@ -34,10 +34,10 @@ export function VaultKeys() {
       </div>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-12">
-        <div role="tabpanel" aria-label={`${active.label} key`} className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#121310] lg:col-span-8">
+        <div role="tabpanel" aria-label={`${active.label} key`} className="relative overflow-hidden rounded-2xl border border-white/10 bg-night-raised lg:col-span-8">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
-            <p className="font-mono text-[11px] tracking-[0.1em] text-white/45 uppercase">Solaris · payments · March 2026</p>
-            <p key={perspective} className="flex animate-[fade-in_300ms_var(--ease-out)] items-center gap-2 text-[13px] text-white/70">
+            <p className="text-eyebrow tracking-[0.1em] text-white/45">Solaris · payments · March 2026</p>
+            <p key={perspective} className="flex animate-[fade-in_300ms_var(--ease-out)] items-center gap-2 text-ui text-white/70">
               <span className={cn("size-1.5 rounded-full", readable ? "bg-glow shadow-[0_0_8px_var(--glow)]" : "bg-white/25")} />
               {readable} of {payments.length} amounts readable
             </p>
@@ -60,7 +60,7 @@ export function VaultKeys() {
                       <AvatarPerson initials={payment.initials} size={28} className="ring-white/10" />
                       <span className="truncate text-[14px] text-white/85">{payment.name}</span>
                     </span>
-                    <span className="hidden text-[13px] text-white/40 sm:block">{payment.kind}</span>
+                    <span className="hidden text-ui text-white/40 sm:block">{payment.kind}</span>
                     <span className="flex items-center justify-end gap-2 font-mono text-[14px] text-white tabular-nums">
                       <Lock
                         className={cn("size-3 text-white/35 transition-opacity duration-300", isReadable ? "opacity-0" : "opacity-100")}
@@ -78,7 +78,7 @@ export function VaultKeys() {
         </div>
 
         <dl key={perspective} className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 lg:col-span-4">
-          <p className="font-mono text-[11px] tracking-[0.1em] text-white/45 uppercase">{active.label} key can</p>
+          <p className="text-eyebrow tracking-[0.1em] text-white/45">{active.label} key can</p>
           {abilities[perspective].map((ability, index) => (
             <div
               key={ability.label}
@@ -95,7 +95,7 @@ export function VaultKeys() {
               </span>
               <div>
                 <dt className="text-[14px] text-white">{ability.label}</dt>
-                <dd className="mt-0.5 text-[13px] leading-[1.5] text-white/45">{ability.note}</dd>
+                <dd className="mt-0.5 text-ui leading-[1.5] text-white/45">{ability.note}</dd>
               </div>
             </div>
           ))}
@@ -146,11 +146,11 @@ function CardKey({
             <Globe className="size-3.5" strokeWidth={1.75} />
           </span>
         )}
-        <span className={cn("text-[15px] font-medium transition-colors", isActive ? "text-white" : "text-white/70")}>{item.label}</span>
+        <span className={cn("text-button transition-colors", isActive ? "text-white" : "text-white/70")}>{item.label}</span>
       </span>
       <span className="relative">
-        <span className={cn("block text-[13px] transition-colors", isActive ? "text-white/75" : "text-white/45")}>{item.holder}</span>
-        <span className="mt-0.5 block font-mono text-[10.5px] text-white/30">{item.initials ? keyIds[item.id] : "no key"}</span>
+        <span className={cn("block text-ui transition-colors", isActive ? "text-white/75" : "text-white/45")}>{item.holder}</span>
+        <span className="mt-0.5 block text-label text-white/30">{item.initials ? keyIds[item.id] : "no key"}</span>
       </span>
     </button>
   )

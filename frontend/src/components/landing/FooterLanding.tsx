@@ -8,8 +8,8 @@ import { SealGuilloche } from "./SealGuilloche";
 export function FooterLanding() {
   return (
     <footer>
-      <div className="mx-auto max-w-[1248px] overflow-hidden border-x border-line bg-white px-3 pt-3 sm:px-6 sm:pt-6">
-        <div className="relative overflow-hidden rounded-[24px] bg-[#0b0c09] px-6 py-20 text-white sm:px-14 sm:py-28">
+      <div className="mx-auto max-w-[1248px] overflow-hidden border-x border-line bg-surface px-3 pt-3 sm:px-6 sm:pt-6">
+        <div className="relative overflow-hidden rounded-[24px] bg-night px-6 py-20 text-white sm:px-14 sm:py-28">
           <FlowLines />
           <div
             aria-hidden
@@ -21,16 +21,16 @@ export function FooterLanding() {
               rings={10}
             />
           </div>
-          <div className="absolute inset-0 bg-gradient-to-r from-[#0b0c09] via-[#0b0c09]/80 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-night via-night/80 to-transparent" />
           <div className="relative max-w-[560px]">
-            <p className="font-mono text-[11px] tracking-[0.14em] text-white/50 uppercase">
+            <p className="text-eyebrow tracking-[0.14em] text-white/50">
               Pilot program
             </p>
             <h2 className="font-display mt-5 text-[40px] leading-[0.98] font-semibold tracking-[-0.04em] sm:text-[64px]">
               <SplitWords>Make your next payment private.</SplitWords>
             </h2>
             <p
-              className="mt-6 max-w-[440px] text-[17px] leading-[1.6] text-white/60"
+              className="mt-6 max-w-[440px] text-lead leading-[1.6] text-white/60"
               data-reveal
             >
               Free for pilot companies while we onboard the first teams. Your
@@ -72,7 +72,7 @@ export function FooterLanding() {
           </div>
           {columns.map((column) => (
             <div key={column.title}>
-              <p className="font-mono text-[11px] tracking-[0.1em] text-ink-muted uppercase">
+              <p className="text-eyebrow tracking-[0.1em] text-ink-muted">
                 {column.title}
               </p>
               <ul className="mt-4 space-y-2.5">

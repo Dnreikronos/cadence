@@ -14,7 +14,7 @@ export function SectionFrame({
 }) {
   return (
     <section id={id} className={cn("border-b border-line", className)}>
-      <div className={cn("mx-auto max-w-[1248px] border-x border-line bg-white", innerClassName)}>{children}</div>
+      <div className={cn("mx-auto max-w-[1248px] border-x border-line bg-surface", innerClassName)}>{children}</div>
     </section>
   )
 }
@@ -37,8 +37,8 @@ export function SectionHeading({
   return (
     <div className="grid gap-8 px-6 pt-20 pb-12 sm:px-12 sm:pt-28 sm:pb-16 lg:grid-cols-12">
       <div className="lg:col-span-9">
-        <p className={cn("flex items-center gap-3 font-mono text-[11px] tracking-[0.14em] uppercase", isDark ? "text-white/45" : "text-ink-muted")}>
-          <span className={cn("rounded-[4px] border px-1.5 py-0.5", isDark ? "border-white/15" : "border-line bg-white")}>{index}</span>
+        <p className={cn("flex items-center gap-3 text-eyebrow tracking-[0.14em]", isDark ? "text-white/45" : "text-ink-muted")}>
+          <span className={cn("rounded-[4px] border px-1.5 py-0.5", isDark ? "border-white/15" : "border-line bg-surface")}>{index}</span>
           {eyebrow}
         </p>
         <h2 className="mt-6 max-w-[900px] text-[30px] leading-[1.1] font-medium tracking-[-0.03em] sm:text-[40px]">

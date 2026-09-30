@@ -18,7 +18,7 @@ export function CompareChain() {
             <Redacted isRevealed={false}>{formatUsd(bruno.amount)}</Redacted>
           </p>
           <span className="mt-3 flex items-center gap-3">
-            <span className="min-w-0 truncate font-mono text-[12px] text-ink-muted">{cipherText}</span>
+            <span className="min-w-0 truncate font-mono text-caption text-ink-muted">{cipherText}</span>
             <ButtonCopy value={cipherText} />
           </span>
         </div>
@@ -29,8 +29,8 @@ export function CompareChain() {
           <p className="font-display text-[52px] leading-none font-semibold tracking-[-0.05em] text-ink tabular-nums sm:text-[64px]">
             {formatUsd(bruno.amount)}
           </p>
-          <p className="mt-3 flex items-center gap-2 text-[13px] text-ink-muted">
-            <span className="size-1.5 rounded-full bg-emerald-500" /> Readable by Bruno, Solaris and their auditor
+          <p className="mt-3 flex items-center gap-2 text-ui text-ink-muted">
+            <span className="size-1.5 rounded-full bg-success-dot" /> Readable by Bruno, Solaris and their auditor
           </p>
         </div>
       </PanelView>
@@ -58,7 +58,7 @@ function PanelView({
       data-reveal
       className={cn(
         "relative flex flex-col overflow-hidden rounded-[24px] border border-line p-6 sm:p-8",
-        hasTexture ? "bg-white" : "bg-canvas",
+        hasTexture ? "bg-surface" : "bg-canvas",
       )}
     >
       {hasTexture && (
@@ -66,14 +66,14 @@ function PanelView({
       )}
       <div className="relative flex items-center justify-between gap-3">
         <span className="flex shrink-0 items-center gap-2 text-[14px] font-medium text-ink">
-          <span className="grid size-7 place-items-center rounded-lg border border-line bg-white text-ink">
+          <span className="grid size-7 place-items-center rounded-lg border border-line bg-surface text-ink">
             <Icon className="size-3.5" strokeWidth={1.75} />
           </span>
           {label}
         </span>
         <span className="truncate font-mono text-[11px] text-ink-muted">{note}</span>
       </div>
-      <p className="relative mt-8 flex items-center gap-1.5 font-mono text-[11px] tracking-[0.08em] text-ink-muted uppercase">
+      <p className="relative mt-8 flex items-center gap-1.5 text-eyebrow tracking-[0.08em] text-ink-muted">
         <Lock className="size-3" /> Amount
       </p>
       <div className="relative mt-3 flex min-h-[112px] flex-1 flex-col justify-center">{children}</div>
@@ -93,7 +93,7 @@ function DetailRows({ to, avatar = false }: { to: string; avatar?: boolean }) {
     <dl className="relative mt-8 divide-y divide-dashed divide-line border-t border-line">
       {rows.map((row) => (
         <div key={row.label} className="flex items-center justify-between gap-4 py-3">
-          <dt className="font-mono text-[11px] tracking-[0.08em] text-ink-muted uppercase">{row.label}</dt>
+          <dt className="text-eyebrow tracking-[0.08em] text-ink-muted">{row.label}</dt>
           <dd className="flex items-center gap-2 font-mono text-[12.5px] text-ink">
             {avatar && row.label === "To" && <AvatarPerson initials={bruno.initials} size={20} />}
             {row.value}

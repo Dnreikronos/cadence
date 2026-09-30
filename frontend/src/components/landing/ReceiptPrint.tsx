@@ -35,7 +35,7 @@ export function ReceiptPrint() {
         <span className="absolute inset-x-6 top-1/2 h-[3px] -translate-y-1/2 rounded-full bg-black/60" />
       </div>
       <div className="-mt-2.5 overflow-hidden px-4 pb-10">
-        <div ref={paperRef} className="perforated bg-white px-6 pt-8 pb-10 font-mono text-[12px] text-ink shadow-[0_30px_50px_-30px_rgba(0,0,0,0.35)] [--hole:4px] [--pitch:12px]">
+        <div ref={paperRef} className="perforated bg-surface px-6 pt-8 pb-10 font-mono text-caption text-ink shadow-[0_30px_50px_-30px_rgba(0,0,0,0.35)] [--hole:4px] [--pitch:12px]">
           <p className="text-center text-[11px] tracking-[0.16em] uppercase">Cadence · Decryption log</p>
           <p className="mt-1 text-center text-[11px] text-ink-muted">Solaris · March 2026</p>
           <Rule />
@@ -95,7 +95,7 @@ function ButtonExport() {
     <button
       type="button"
       onClick={exportSample}
-      className="group/btn inline-flex h-10 items-center gap-2.5 rounded-full border border-line bg-white pr-4 pl-3 text-sm font-medium text-ink transition-[transform,border-color] duration-150 ease-[var(--ease-out)] hover:border-ink/25 active:scale-[0.97]"
+      className="group/btn inline-flex h-10 items-center gap-2.5 rounded-full border border-line bg-surface pr-4 pl-3 text-sm font-medium text-ink transition-[transform,border-color] duration-150 ease-[var(--ease-out)] hover:border-ink/25 active:scale-[0.97]"
     >
       <span className="relative grid size-5 place-items-center overflow-hidden">
         <ArrowDown
