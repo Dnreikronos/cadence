@@ -44,7 +44,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: public.ecr.aws/supabase/postgres:17.6.1.143
+        image: supabase/postgres:17.6.1.143
         env:
           POSTGRES_PASSWORD: keys-test-only
           POSTGRES_DB: keys_test
