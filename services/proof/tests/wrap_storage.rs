@@ -42,6 +42,11 @@ async fn wrap_records_are_private_and_confirmations_are_immutable() {
     ))
     .await
     .unwrap();
+    db.batch_execute(include_str!(
+        "../../../supabase/migrations/20260930000001_wrap_cleanup.sql"
+    ))
+    .await
+    .unwrap();
     db.batch_execute("SET ROLE cadence_wrap_service")
         .await
         .unwrap();
@@ -75,6 +80,7 @@ async fn wrap_records_are_private_and_confirmations_are_immutable() {
             .await
             .unwrap();
         for sql in [
+            "SELECT public.cleanup_wrap_requests(1000)",
             "SELECT * FROM public.wrap_requests",
             "UPDATE public.wrap_requests SET slot = 9",
             "DELETE FROM public.wrap_requests",
@@ -88,6 +94,29 @@ async fn wrap_records_are_private_and_confirmations_are_immutable() {
     assert_eq!(row.get::<_, String>(0), "2".repeat(88));
     assert_eq!(row.get::<_, i64>(1), 7);
     assert!(row.get::<_, bool>(2));
+    db.batch_execute("UPDATE public.wrap_requests SET created_at = clock_timestamp() - interval '2 days';
+        INSERT INTO public.wrap_requests (id, company_wallet, destination, transaction, last_valid_block_height, created_at)
+        SELECT repeat(md5(n::text),2), repeat('1',32), repeat('1',32), 'AA==', 100, clock_timestamp() - interval '2 days' FROM generate_series(1,1002) n;
+        INSERT INTO public.wrap_requests (id, company_wallet, destination, transaction, last_valid_block_height, created_at)
+        VALUES (repeat('c',64),repeat('1',32),repeat('1',32),'AA==',1000,clock_timestamp() - interval '2 days'),
+               (repeat('d',64),repeat('1',32),repeat('1',32),'AA==',100,clock_timestamp());
+        SET ROLE cadence_wrap_service;").await.unwrap();
+    for expected in [1000i64, 2, 0] {
+        let row = db
+            .query_one("SELECT public.cleanup_wrap_requests(1000)", &[])
+            .await
+            .unwrap();
+        assert_eq!(row.get::<_, i64>(0), expected);
+    }
+    let row = db
+        .query_one("SELECT count(*) FROM public.wrap_requests", &[])
+        .await
+        .unwrap();
+    assert_eq!(row.get::<_, i64>(0), 3); // confirmed, unexpired, and within grace period
+    assert!(db
+        .batch_execute("DELETE FROM public.wrap_requests")
+        .await
+        .is_err());
     drop(db);
     task.await.unwrap();
 }

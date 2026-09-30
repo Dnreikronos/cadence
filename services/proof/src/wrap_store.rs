@@ -7,7 +7,7 @@ use reqwest::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PreparedWrap {
@@ -86,6 +86,43 @@ impl WrapStore {
             .map_err(|_| AppError::StorageUnavailable)?;
         url.set_path("/rest/v1/wrap_requests");
         Ok(Self { http, table: url })
+    }
+
+    pub fn spawn_cleanup(
+        self: Arc<Self>,
+        rpc: Arc<crate::solana::client::RpcClient>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                if self.cleanup_expired(&rpc).await.is_err() {
+                    eprintln!("wrap cleanup failed; retrying on the next interval");
+                }
+            }
+        })
+    }
+
+    pub async fn cleanup_expired(
+        &self,
+        rpc: &crate::solana::client::RpcClient,
+    ) -> Result<u64, AppError> {
+        rpc.require_devnet().await?;
+        let height = rpc.finalized_block_height().await?;
+        let mut url = self.table.clone();
+        url.set_path("/rest/v1/rpc/cleanup_wrap_requests");
+        self.http
+            .post(url)
+            .json(&json!({"finalized_height": height}))
+            .send()
+            .await
+            .map_err(|_| AppError::StorageUnavailable)?
+            .error_for_status()
+            .map_err(|_| AppError::StorageUnavailable)?
+            .json()
+            .await
+            .map_err(|_| AppError::StorageUnavailable)
     }
 
     pub async fn prepare(&self, record: &PreparedWrap) -> Result<(), AppError> {

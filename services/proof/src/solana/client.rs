@@ -70,6 +70,13 @@ impl RpcClient {
         Ok(())
     }
 
+    pub async fn finalized_block_height(&self) -> Result<u64, AppError> {
+        self.call("getBlockHeight", json!([{"commitment": "finalized"}]))
+            .await?
+            .as_u64()
+            .ok_or(AppError::RpcUnavailable)
+    }
+
     pub async fn finalized_transaction(&self, signature: &str) -> Result<Value, AppError> {
         self.call(
             "getTransaction",

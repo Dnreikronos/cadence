@@ -35,7 +35,10 @@ async fn main() -> Result<(), AppError> {
         config.build_sha,
         listener.local_addr()?
     );
-    axum::serve(
+    let cleanup = wrap_store
+        .as_ref()
+        .map(|store| store.clone().spawn_cleanup(rpc.clone()));
+    let result = axum::serve(
         listener,
         router_with_wrap(
             AppState {
@@ -48,6 +51,10 @@ async fn main() -> Result<(), AppError> {
         .into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown)
-    .await?;
+    .await;
+    if let Some(cleanup) = cleanup {
+        cleanup.abort();
+    }
+    result?;
     Ok(())
 }
