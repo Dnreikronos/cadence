@@ -61,6 +61,46 @@ impl RpcClient {
             .await
     }
 
+    pub async fn require_devnet(&self) -> Result<(), AppError> {
+        if self.call("getGenesisHash", json!([])).await?
+            != "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"
+        {
+            return Err(AppError::Conflict("wrap_requires_devnet"));
+        }
+        Ok(())
+    }
+
+    pub async fn finalized_block_height(&self) -> Result<u64, AppError> {
+        self.call("getBlockHeight", json!([{"commitment": "finalized"}]))
+            .await?
+            .as_u64()
+            .ok_or(AppError::RpcUnavailable)
+    }
+
+    pub async fn finalized_transaction(&self, signature: &str) -> Result<Value, AppError> {
+        self.call(
+            "getTransaction",
+            json!([signature, {
+                "encoding": "base64", "commitment": "finalized", "maxSupportedTransactionVersion": 1
+            }]),
+        )
+        .await
+    }
+
+    pub async fn blockhash_with_expiry(&self) -> Result<(Hash, u64), AppError> {
+        let result = self
+            .call("getLatestBlockhash", json!([{ "commitment": "confirmed" }]))
+            .await?;
+        let hash = result["value"]["blockhash"]
+            .as_str()
+            .and_then(|hash| Hash::from_str(hash).ok())
+            .ok_or(AppError::RpcUnavailable)?;
+        let height = result["value"]["lastValidBlockHeight"]
+            .as_u64()
+            .ok_or(AppError::RpcUnavailable)?;
+        Ok((hash, height))
+    }
+
     pub async fn block(&self, slot: u64) -> Result<Value, AppError> {
         self.call("getBlock", json!([slot, Self::read_config()]))
             .await

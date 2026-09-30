@@ -12,12 +12,39 @@ permissions:
   contents: read
 
 jobs:
+  wrap-storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: wrap-test-only
+          POSTGRES_DB: wrap_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d wrap_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: services/proof
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup toolchain install 1.98.1 --profile minimal && rustup default 1.98.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: services/proof
+      - name: Verify wrap storage permissions and immutable confirmations
+        env:
+          WRAP_TEST_DATABASE_URL: postgres://postgres:wrap-test-only@localhost:5432/wrap_test
+        run: cargo test --locked --test wrap_storage wrap_records -- --ignored
   vault:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
       postgres:
-        image: public.ecr.aws/supabase/postgres:17.6.1.143
+        image: supabase/postgres:17.6.1.143
         env:
           POSTGRES_PASSWORD: keys-test-only
           POSTGRES_DB: keys_test
@@ -68,6 +95,8 @@ jobs:
       - run: cargo check --locked --all-targets
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
+      - name: Verify the mint tool still uses the shared wrap instructions
+        run: cargo test --locked --manifest-path ../../ops/mint/Cargo.toml token_wrap
       - name: Verify audit database permissions
         env:
           AUDIT_TEST_DATABASE_URL: postgres://postgres:audit-test-only@localhost:5432/audit_test

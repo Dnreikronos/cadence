@@ -27,3 +27,15 @@
 
 - For Turnkey dashboard guidance, inspect the current UI first. API Keys lives
   on My Profile and the action is labelled New API Key.
+
+- For #52's current local/frontend integration phase, the user explicitly chose
+  wildcard CORS (`*`) and Brave with Phantom for browser checks. Keep cookies
+  disabled and the configurable origin allowlist available; do not silently
+  substitute a stricter default or another wallet.
+
+- For #52, distinguish wrap from larger confidential transfers: fresh wrap fits
+  v0 (812 bytes), even though confidential transfer needs v1. Test each flow.
+  Phantom must use Testnet Mode / Solana Devnet for devnet previews. Successful
+  transaction signing does not prove confidential-key enrollment: the SDK's
+  canonical derivation message was rejected separately. Never substitute a new
+  message or submit setup with discarded temporary keys just to pass an E2E test.

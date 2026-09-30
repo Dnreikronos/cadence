@@ -1,10 +1,15 @@
-use cadence_proof::{config::Config, error::AppError, router, solana::client::RpcClient, AppState};
+use cadence_proof::{
+    config::Config, error::AppError, router_with_wrap, solana::client::RpcClient,
+    wrap_store::WrapStore, AppState,
+};
 use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     let config = Config::from_env()?;
     let rpc = Arc::new(RpcClient::new(config.rpc_url, config.rpc_timeout)?);
+    let wrap_store = WrapStore::from_env()?.map(Arc::new);
+    let cors = cadence_proof::cors::from_env()?;
 
     #[cfg(unix)]
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -30,14 +35,26 @@ async fn main() -> Result<(), AppError> {
         config.build_sha,
         listener.local_addr()?
     );
-    axum::serve(
+    let cleanup = wrap_store
+        .as_ref()
+        .map(|store| store.clone().spawn_cleanup(rpc.clone()));
+    let result = axum::serve(
         listener,
-        router(AppState {
-            rpc,
-            build_sha: config.build_sha,
-        }),
+        router_with_wrap(
+            AppState {
+                rpc,
+                build_sha: config.build_sha,
+            },
+            wrap_store,
+        )
+        .layer(cors)
+        .into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown)
-    .await?;
+    .await;
+    if let Some(cleanup) = cleanup {
+        cleanup.abort();
+    }
+    result?;
     Ok(())
 }

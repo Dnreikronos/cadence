@@ -23,6 +23,7 @@ curl --fail http://localhost:3000/health
 | `BUILD_SHA` | Required full, 40-character Git revision identifying the build |
 | `PROOF_BIND_ADDR` | `0.0.0.0:3000` |
 | `PROOF_RPC_TIMEOUT_MS` | `5000`, accepted range 1–60000 |
+| `PROOF_CORS_ORIGINS` | `*`; alternatively comma-separated exact origins or empty to disable |
 
 Configuration is checked before listening. Provider URLs and response bodies
 are never included in errors because they may contain credentials. No wallet
@@ -89,8 +90,9 @@ RPC transaction and block reads centrally declare
 This patch currently exposes the no-transfer-fee confidential transfer builder
 needed by our wrapped USDC mint. Other upstream methods still build legacy
 transactions; they are not ready for service use. Later endpoints must expose
-and test their own unsigned instruction path. No proof HTTP endpoint or balance
-resynchronization flow is added by this scaffold. Key storage is described below.
+and test their own unsigned instruction path. Key storage is described below;
+the wrap endpoint is documented at the end of this file. Balance resynchronization
+remains separate work.
 
 The local compatibility test invokes the patched helper with real proofs and
 checks the unsigned v1 output, proof offsets, mint lookup, and wire limit.
@@ -217,3 +219,27 @@ uses the dedicated runtime role for enrollment and reads. It covers recovery,
 duplicate registration, logging settings, direct-access denial, audit failure,
 concurrent transaction visibility, permit reuse, and context tampering. CI runs
 this against the real Vault extension in a separate job.
+
+
+## Wrap USDC
+
+`POST /wrap` builds an unsigned v0 devnet transaction that configures the company
+ATA when necessary, wraps USDC 1:1 and deposits it into the confidential pending
+balance. `POST /wrap/confirm` verifies the finalized transaction and persists
+its signature. The browser wallet remains the only signer.
+
+See the [wrap API contract](../../docs/dev/WRAP_API.md) for public setup artifacts,
+request/response examples, blockhash retries, the restricted Supabase storage
+role, required environment variables and targeted verification commands.
+Wrap returns `transaction_version: 0`, needs no lookup tables, and enforces the
+1,232-byte limit; larger confidential transfers still use v1. Brave/Phantom
+signing and signature-verified devnet simulation passed. Submission and finalized
+confirmation remain pending recoverable confidential-key setup; Phantom rejected
+the SDK derivation message for the fresh destination. Apply-pending remains #68.
+
+
+Wrap requests are bounded before RPC work by peer and wallet quotas, a global
+quota and a concurrency cap. Expired unsigned preparations are collected after
+24 hours by the restricted cleanup function. Apply the wrap cleanup migration
+before deploying this version. See the API contract for quota values, delayed
+confirmation handling and proxy/replica deployment requirements.
