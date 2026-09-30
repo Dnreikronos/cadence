@@ -5,7 +5,7 @@ import { ArrowDown, Check } from "lucide-react"
 import { toast } from "sonner"
 import gsap from "gsap"
 import { ScrollTrigger } from "gsap/ScrollTrigger"
-import { AvatarPerson } from "./AvatarPerson"
+import { AvatarPerson } from "@/components/ui/avatar-person"
 
 gsap.registerPlugin(ScrollTrigger)
 

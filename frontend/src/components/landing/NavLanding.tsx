@@ -1,7 +1,8 @@
 import Link from "next/link"
 import { ArrowRight } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { buttonPrimary, iconNudge } from "./button-styles"
+import { buttonVariants, iconNudge } from "@/components/ui/button"
+import { Wordmark } from "@/components/ui/logo"
 
 export function NavLanding() {
   return (
@@ -23,31 +24,13 @@ export function NavLanding() {
           <Link href="/sign-in" className="link-underline hidden pb-0.5 text-sm text-ink-muted hover:text-ink sm:block">
             Sign in
           </Link>
-          <Link href="/sign-in" className={cn(buttonPrimary, "h-9 gap-1.5 pr-3.5 pl-4 text-sm")}>
+          <Link href="/sign-in" className={buttonVariants({ className: "gap-1.5 pr-3.5 pl-4 text-sm" })}>
             Start paying <ArrowRight className={cn("size-3.5", iconNudge)} />
           </Link>
         </div>
       </nav>
       <span data-progress className="absolute bottom-[-1px] left-0 h-px w-full origin-left scale-x-0 bg-ink" aria-hidden />
     </header>
-  )
-}
-
-export function LogoMark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 20 20" className={className} aria-hidden>
-      <circle cx="10" cy="10" r="8.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M10 1.75a8.25 8.25 0 0 0 0 16.5Z" fill="currentColor" />
-    </svg>
-  )
-}
-
-export function Wordmark({ className }: { className?: string }) {
-  return (
-    <span className={cn("font-display flex items-center gap-2 text-[21px] font-semibold tracking-[-0.04em] text-ink", className)}>
-      <LogoMark className="size-[18px]" />
-      cadence
-    </span>
   )
 }
 

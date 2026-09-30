@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { ArrowLeftRight, ArrowRight, Binary, Eye, KeyRound, Scale, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { buttonPrimary, buttonSecondary, iconNudge } from "./button-styles"
+import { buttonVariants, iconNudge } from "@/components/ui/button"
 import { HeroGlass } from "./HeroGlass"
 import { HeroProduct } from "./HeroProduct"
 import { SplitWords } from "./LandingMotion"
@@ -23,10 +23,10 @@ export function SectionHero() {
             Everyone else sees that a payment happened, and nothing more.
           </p>
           <div className="mt-9 flex flex-wrap items-center justify-center gap-3" data-reveal>
-            <Link href="/sign-in" className={buttonPrimary}>
+            <Link href="/sign-in" className={buttonVariants({ size: "lg" })}>
               Start paying privately <ArrowRight className={cn("size-4", iconNudge)} />
             </Link>
-            <a href="#vault" className={buttonSecondary}>
+            <a href="#vault" className={buttonVariants({ variant: "secondary", size: "lg" })}>
               <Eye className="size-4 text-ink-muted group-hover/btn:scale-110" /> See who sees what
             </a>
           </div>

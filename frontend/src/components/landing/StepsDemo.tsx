@@ -3,7 +3,7 @@
 import { useRef, useState } from "react"
 import { ArrowDown, ArrowDownToLine, ArrowUpFromLine, Check, Globe, Lock, Send, TriangleAlert, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { AvatarPerson } from "./AvatarPerson"
+import { AvatarPerson } from "@/components/ui/avatar-person"
 import { DemoCursor } from "./DemoCursor"
 import { formatUsd, payments } from "./landing-data"
 import { Redacted } from "./Redacted"

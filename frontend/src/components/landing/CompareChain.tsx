@@ -1,7 +1,7 @@
 import { Globe, Lock, UserRound, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { AvatarPerson } from "./AvatarPerson"
-import { ButtonCopy } from "./ButtonCopy"
+import { AvatarPerson } from "@/components/ui/avatar-person"
+import { ButtonCopy } from "@/components/ui/button-copy"
 import { formatUsd, payments, recipientId } from "./landing-data"
 import { Redacted } from "./Redacted"
 import { SealGuilloche } from "./SealGuilloche"
@@ -19,7 +19,12 @@ export function CompareChain() {
           </p>
           <span className="mt-3 flex items-center gap-3">
             <span className="min-w-0 truncate font-mono text-caption text-ink-muted">{cipherText}</span>
-            <ButtonCopy value={cipherText} />
+            <ButtonCopy
+              value={cipherText}
+              label="Copy ciphertext"
+              toastTitle="Ciphertext copied"
+              toastDescription="That's all anyone can read from this payment."
+            />
           </span>
         </div>
       </PanelView>

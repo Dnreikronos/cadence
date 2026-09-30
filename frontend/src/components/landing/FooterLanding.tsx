@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, BookOpenText } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { buttonPrimary, buttonSecondary, iconNudge } from "./button-styles";
+import { buttonVariants, iconNudge } from "@/components/ui/button";
 import { SplitWords } from "./LandingMotion";
 import { SealGuilloche } from "./SealGuilloche";
 
@@ -39,19 +39,13 @@ export function FooterLanding() {
             <div className="mt-9 flex flex-wrap gap-3" data-reveal>
               <Link
                 href="/sign-in"
-                className={cn(
-                  buttonPrimary,
-                  "bg-white text-ink hover:bg-white/90",
-                )}
+                className={buttonVariants({ size: "lg", className: "bg-white text-ink hover:bg-white/90" })}
               >
                 Start a pilot <ArrowRight className={cn("size-4", iconNudge)} />
               </Link>
               <a
                 href="#faq"
-                className={cn(
-                  buttonSecondary,
-                  "border-white/20 bg-transparent text-white hover:border-white/50",
-                )}
+                className={buttonVariants({ variant: "secondary", size: "lg", className: "border-white/20 bg-transparent text-white hover:border-white/50" })}
               >
                 <BookOpenText
                   className="size-4 opacity-70"

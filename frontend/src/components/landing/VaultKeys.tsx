@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Check, Globe, Lock, Minus } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { AvatarPerson } from "./AvatarPerson"
+import { AvatarPerson } from "@/components/ui/avatar-person"
 import { canSee, formatUsd, payments, perspectives, type Perspective } from "./landing-data"
 import { Redacted } from "./Redacted"
 import { SealGuilloche } from "./SealGuilloche"
