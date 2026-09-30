@@ -3,6 +3,7 @@ pub mod audit {
 }
 pub mod config;
 pub mod error;
+pub mod wrap_store;
 pub mod keys {
     pub mod elgamal;
     pub mod vault;
