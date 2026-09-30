@@ -4,6 +4,8 @@ use serde_json::json;
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("{0}")]
+    BadRequest(&'static str),
+    #[error("{0}")]
     Conflict(&'static str),
     #[error("wrap request not found")]
     NotFound,
@@ -22,6 +24,7 @@ pub enum AppError {
 impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
+            Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::RpcUnavailable | Self::StorageUnavailable => StatusCode::SERVICE_UNAVAILABLE,
@@ -33,7 +36,7 @@ impl AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
         let code = match self {
-            Self::Conflict(code) => code,
+            Self::BadRequest(code) | Self::Conflict(code) => code,
             Self::NotFound => "wrap_not_found",
             Self::StorageUnavailable => "wrap_storage_unavailable",
             Self::RpcUnavailable => "rpc_unavailable",

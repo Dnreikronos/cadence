@@ -17,6 +17,7 @@ pub mod solana {
     pub mod token_wrap;
     pub mod v0;
     pub mod v1;
+    pub mod wrap;
 }
 
 use axum::{routing::get, Router};
