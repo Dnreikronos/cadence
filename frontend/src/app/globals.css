@@ -356,3 +356,11 @@ details.faq[open] .faq-answer {
     radial-gradient(circle var(--hole) at 50% 0, #0000 98%, #000) top / var(--pitch) 51% repeat-x,
     radial-gradient(circle var(--hole) at 50% 100%, #0000 98%, #000) bottom / var(--pitch) 51% repeat-x;
 }
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}

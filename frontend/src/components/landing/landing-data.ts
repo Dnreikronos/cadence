@@ -1,3 +1,5 @@
+export { formatUsd } from "@/lib/format"
+
 export type Perspective = "company" | "recipient" | "auditor" | "public"
 
 export type Payment = {
@@ -36,8 +38,4 @@ export function canSee(perspective: Perspective, payment: Payment) {
   if (perspective === "public") return false
   if (perspective === "recipient") return payment.id === recipientId
   return true
-}
-
-export function formatUsd(amount: number) {
-  return amount.toLocaleString("en-US", { style: "currency", currency: "USD" })
 }
