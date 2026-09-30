@@ -236,3 +236,10 @@ Wrap returns `transaction_version: 0`, needs no lookup tables, and enforces the
 signing and signature-verified devnet simulation passed. Submission and finalized
 confirmation remain pending recoverable confidential-key setup; Phantom rejected
 the SDK derivation message for the fresh destination. Apply-pending remains #68.
+
+
+Wrap requests are bounded before RPC work by peer and wallet quotas, a global
+quota and a concurrency cap. Expired unsigned preparations are collected after
+24 hours by the restricted cleanup function. Apply the wrap cleanup migration
+before deploying this version. See the API contract for quota values, delayed
+confirmation handling and proxy/replica deployment requirements.

@@ -13,7 +13,8 @@ and access only to wrap records, and grants role switching to PostgREST's
 `authenticator`. Anonymous, authenticated and broad service_role clients have
 no table access. Prepared message fields cannot be updated; confirmed signatures
 and slots cannot be replaced or cleared. Only the migration administrator may
-remove records, including expired unsigned requests.
+remove arbitrary records. The cleanup migration below grants only bounded
+removal of expired unsigned requests.
 
 | Environment | Value |
 |---|---|
@@ -29,6 +30,33 @@ viewing-key operations retain the separate audited key-access boundary from #50.
 All three settings are required together. With none, health still works and wrap
 endpoints return `503 wrap_storage_unavailable`; partial configuration fails
 startup. Provider bodies and credentials are never returned in endpoint errors.
+
+### Request limits and retention
+
+Apply `supabase/migrations/20260930000001_wrap_cleanup.sql` after the wrap table
+migration. The service checks the finalized devnet block height once a minute
+and calls a restricted cleanup function. Each pass deletes at most 1,000 rows
+with no recorded signature, an expired blockhash and a creation time more than
+24 hours ago. Confirmed receipts are never deleted. RPC or database failures
+skip the pass and log a fixed warning; monitor that warning and table growth.
+
+Confirm submitted transactions within 24 hours. A transaction may have landed
+on chain even if its local preparation record was collected. A later 404 is not
+evidence that the deposit failed. Reconcile the chain signature before preparing
+another deposit.
+
+Both wrap endpoints share fixed 60-second quotas of 120 requests per service
+instance and 30 per socket peer, plus a cap of eight active requests. Preparation
+also allows ten requests per wallet per window across peers. Limits return 429
+with `Retry-After` before Solana RPC or storage work. The global quota bounds the
+in-memory peer and wallet maps. Restarting the service resets these quotas.
+
+Forwarded IP headers are deliberately ignored. Behind a proxy, all clients share
+that proxy's peer quota, which is conservative but may reject legitimate traffic.
+These limits are enforced inside every deployed service instance even without
+a gateway. Before scaling to multiple replicas, enforce a shared quota at the
+gateway and restrict direct backend access; local limits multiply with replicas.
+This repository does not configure a hosted gateway or distributed limiter.
 
 ### Browser access (CORS)
 
