@@ -22,17 +22,17 @@ export function SectionPrivate() {
           <li
             key={item.title}
             tabIndex={0}
-            className="group/case relative flex flex-col border-line px-6 pt-8 pb-7 outline-none focus-visible:bg-white max-sm:not-last:border-b sm:px-8 sm:nth-[-n+2]:border-b sm:nth-[odd]:border-r lg:nth-[-n+2]:border-b-0 lg:not-last:border-r [@media(hover:hover)]:hover:bg-white"
+            className="group/case relative flex flex-col border-line px-6 pt-8 pb-7 outline-none focus-visible:bg-surface max-sm:not-last:border-b sm:px-8 sm:nth-[-n+2]:border-b sm:nth-[odd]:border-r lg:nth-[-n+2]:border-b-0 lg:not-last:border-r [@media(hover:hover)]:hover:bg-surface"
           >
             <span
               aria-hidden
               className="absolute inset-x-0 top-0 h-px origin-left scale-x-0 bg-ink transition-transform duration-500 ease-[var(--ease-out)] group-hover/case:scale-x-100 group-focus-visible/case:scale-x-100"
             />
             <item.icon className="size-5 text-ink" strokeWidth={1.6} />
-            <h3 className="mt-10 text-[17px] font-medium tracking-[-0.01em] text-ink">{item.title}</h3>
-            <p className="mt-2 flex-1 text-[14.5px] leading-[1.55] text-ink-muted">{item.body}</p>
+            <h3 className="mt-10 text-lead font-medium tracking-[-0.01em] text-ink">{item.title}</h3>
+            <p className="mt-2 flex-1 text-body text-ink-muted">{item.body}</p>
 
-            <div className="mt-10 rounded-xl border border-line bg-white px-3.5 py-3 transition-[border-color,box-shadow] duration-300 group-hover/case:border-ink/15 group-hover/case:shadow-[0_12px_24px_-16px_rgba(20,20,10,0.3)]">
+            <div className="mt-10 rounded-xl border border-line bg-surface px-3.5 py-3 transition-[border-color,box-shadow] duration-300 group-hover/case:border-ink/15 group-hover/case:shadow-[0_12px_24px_-16px_rgba(20,20,10,0.3)]">
               <div className="flex items-center justify-between font-mono text-[11px] text-ink-muted">
                 <span className="truncate">{item.line}</span>
                 <span className="relative flex h-4 w-[84px] shrink-0 justify-end">

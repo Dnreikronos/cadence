@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { ArrowLeftRight, ArrowRight, Binary, Eye, KeyRound, Scale, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { buttonPrimary, buttonSecondary, iconNudge } from "./button-styles"
+import { buttonVariants, iconNudge } from "@/components/ui/button"
 import { HeroGlass } from "./HeroGlass"
 import { HeroProduct } from "./HeroProduct"
 import { SplitWords } from "./LandingMotion"
@@ -9,24 +9,24 @@ import { SplitWords } from "./LandingMotion"
 export function SectionHero() {
   return (
     <section className="border-b border-line">
-      <div className="relative mx-auto max-w-[1248px] border-x border-line bg-white">
+      <div className="relative mx-auto max-w-[1248px] border-x border-line bg-surface">
         <GridCells />
         <div className="relative px-6 pt-16 text-center sm:pt-24">
-          <p className="font-mono text-[11px] tracking-[0.14em] text-ink-muted uppercase" data-reveal>
+          <p className="text-eyebrow tracking-[0.14em] text-ink-muted" data-reveal>
             Confidential payments on Solana
           </p>
           <h1 className="font-display mx-auto mt-6 max-w-[820px] text-[46px] leading-[0.98] font-semibold tracking-[-0.032em] text-balance text-ink sm:text-[76px]">
             <SplitWords>Private dollars on a public chain.</SplitWords>
           </h1>
-          <p className="mx-auto mt-7 max-w-[560px] text-[17px] leading-[1.6] text-ink-muted sm:text-[18px]" data-reveal>
+          <p className="mx-auto mt-7 max-w-[560px] text-lead leading-[1.6] text-ink-muted sm:text-[18px]" data-reveal>
             Cadence seals the amount of every USDC payment your company sends. The people you choose can read it.
             Everyone else sees that a payment happened, and nothing more.
           </p>
           <div className="mt-9 flex flex-wrap items-center justify-center gap-3" data-reveal>
-            <Link href="/sign-in" className={buttonPrimary}>
+            <Link href="/sign-in" className={buttonVariants({ size: "lg" })}>
               Start paying privately <ArrowRight className={cn("size-4", iconNudge)} />
             </Link>
-            <a href="#vault" className={buttonSecondary}>
+            <a href="#vault" className={buttonVariants({ variant: "secondary", size: "lg" })}>
               <Eye className="size-4 text-ink-muted group-hover/btn:scale-110" /> See who sees what
             </a>
           </div>
@@ -40,7 +40,7 @@ export function SectionHero() {
               key={fact.label}
               className="group/fact border-line px-6 py-7 not-last:border-r max-lg:nth-2:border-r-0 max-lg:nth-[-n+2]:border-b sm:px-10"
             >
-              <dt className="flex items-center gap-2 text-[13px] text-ink-muted">
+              <dt className="flex items-center gap-2 text-ui text-ink-muted">
                 <fact.icon className="size-4 transition-transform duration-300 ease-[var(--ease-out)] group-hover/fact:-translate-y-0.5" strokeWidth={1.75} />
                 {fact.label}
               </dt>

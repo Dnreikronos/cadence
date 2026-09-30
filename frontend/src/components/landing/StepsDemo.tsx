@@ -3,7 +3,7 @@
 import { useRef, useState } from "react"
 import { ArrowDown, ArrowDownToLine, ArrowUpFromLine, Check, Globe, Lock, Send, TriangleAlert, type LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { AvatarPerson } from "./AvatarPerson"
+import { AvatarPerson } from "@/components/ui/avatar-person"
 import { DemoCursor } from "./DemoCursor"
 import { formatUsd, payments } from "./landing-data"
 import { Redacted } from "./Redacted"
@@ -35,18 +35,18 @@ export function StepsDemo() {
                 type="button"
                 onClick={() => select(index)}
                 aria-current={isCurrent ? "step" : undefined}
-                className="group/step relative w-full px-6 py-6 text-left outline-none focus-visible:bg-white sm:px-10"
+                className="group/step relative w-full px-6 py-6 text-left outline-none focus-visible:bg-surface sm:px-10"
               >
                 <span className="flex items-center gap-3">
                   <span
                     className={cn(
                       "grid size-8 place-items-center rounded-lg border transition-[background-color,border-color,color] duration-300",
-                      isCurrent ? "border-ink bg-ink text-white" : "border-line bg-white text-ink-muted group-hover/step:text-ink",
+                      isCurrent ? "border-ink bg-ink text-white" : "border-line bg-surface text-ink-muted group-hover/step:text-ink",
                     )}
                   >
                     <step.icon className="size-4" strokeWidth={1.75} />
                   </span>
-                  <span className={cn("text-[17px] font-medium transition-colors", isCurrent ? "text-ink" : "text-ink-muted group-hover/step:text-ink")}>
+                  <span className={cn("text-lead font-medium transition-colors", isCurrent ? "text-ink" : "text-ink-muted group-hover/step:text-ink")}>
                     {step.title}
                   </span>
                   <span className="ml-auto font-mono text-[11px] text-ink-muted">0{index + 1}</span>
@@ -95,16 +95,16 @@ function DemoDeposit({ isActive, onDone }: DemoProps) {
 
   return (
     <div ref={stageRef} className="relative flex h-full flex-col items-center justify-center gap-3 px-5 py-10">
-      <div className="w-full max-w-[380px] rounded-2xl border border-line bg-white p-4 shadow-[0_18px_40px_-28px_rgba(20,20,10,0.35)]">
+      <div className="w-full max-w-[380px] rounded-2xl border border-line bg-surface p-4 shadow-card">
         <div className="flex items-center justify-between">
-          <span className="text-[13px] font-medium text-ink">Treasury wallet</span>
-          <span className="flex items-center gap-1 rounded-full border border-line px-2 py-0.5 font-mono text-[10.5px] text-ink-muted">
+          <span className="text-ui font-medium text-ink">Treasury wallet</span>
+          <span className="flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-label text-ink-muted">
             <Globe className="size-3" /> public
           </span>
         </div>
         <div className="mt-3 flex items-end justify-between gap-3">
-          <p key={String(isWrapped)} className="animate-[fade-in_400ms_var(--ease-out)] font-mono text-[24px] tracking-[-0.02em] text-ink tabular-nums">
-            {isWrapped ? "$0.00" : "$84,000.00"} <span className="text-[12px] text-ink-muted">USDC</span>
+          <p key={String(isWrapped)} className="animate-[fade-in_400ms_var(--ease-out)] text-amount text-ink tabular-nums">
+            {isWrapped ? "$0.00" : "$84,000.00"} <span className="text-caption text-ink-muted">USDC</span>
           </p>
           <span
             data-cursor="wrap"
@@ -120,7 +120,7 @@ function DemoDeposit({ isActive, onDone }: DemoProps) {
         </div>
       </div>
 
-      <span className={cn("grid size-7 place-items-center rounded-full border border-line bg-white text-ink-muted transition-[opacity,translate] duration-500 ease-[var(--ease-out)]", isWrapped ? "opacity-100" : "-translate-y-1 opacity-0")}>
+      <span className={cn("grid size-7 place-items-center rounded-full border border-line bg-surface text-ink-muted transition-[opacity,translate] duration-500 ease-[var(--ease-out)]", isWrapped ? "opacity-100" : "-translate-y-1 opacity-0")}>
         <ArrowDown className="size-3.5" />
       </span>
 
@@ -138,12 +138,12 @@ function DemoDeposit({ isActive, onDone }: DemoProps) {
           )}
         />
         <div className="relative flex items-center justify-between">
-          <span className="text-[13px] font-medium">Private USDC</span>
-          <span className="flex items-center gap-1 rounded-full border border-white/15 px-2 py-0.5 font-mono text-[10.5px] text-white/60">
+          <span className="text-ui font-medium">Private USDC</span>
+          <span className="flex items-center gap-1 rounded-full border border-white/15 px-2 py-0.5 text-label text-white/60">
             <Lock className="size-3" /> sealed · 1:1
           </span>
         </div>
-        <dl className="relative mt-4 grid grid-cols-2 gap-3 font-mono text-[12px]">
+        <dl className="relative mt-4 grid grid-cols-2 gap-3 font-mono text-caption">
           <div>
             <dt className="text-white/45">Solaris sees</dt>
             <dd className="mt-1 text-[16px] tabular-nums">$84,000.00</dd>
@@ -181,7 +181,7 @@ function DemoPay({ isActive, onDone }: DemoProps) {
         <span
           data-cursor="send"
           className={cn(
-            "relative mt-4 inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium transition-[transform,background-color,color] duration-200",
+            "relative mt-4 inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-caption font-medium transition-[transform,background-color,color] duration-200",
             isSent ? "bg-glow text-ink" : "bg-white text-ink",
             phase === 2 && "scale-[0.95]",
           )}
@@ -218,7 +218,7 @@ function DemoPay({ isActive, onDone }: DemoProps) {
                 className="absolute top-0 left-0 block"
                 style={{ animation: `packet-y-${index} ${flightMs}ms var(--ease-in-out) ${index * flightGap}ms both` }}
               >
-                <span className="block -translate-x-1/2 -translate-y-1/2 rounded-full border border-uv/40 bg-white px-2 py-0.5 font-mono text-[10.5px] whitespace-nowrap text-ink shadow-[0_4px_14px_-4px_var(--uv)]">
+                <span className="block -translate-x-1/2 -translate-y-1/2 rounded-full border border-uv/40 bg-surface px-2 py-0.5 text-label whitespace-nowrap text-ink shadow-[0_4px_14px_-4px_var(--uv)]">
                   <span className="inline-block blur-[3px]">{formatUsd(payment.amount)}</span>
                 </span>
               </span>
@@ -229,10 +229,10 @@ function DemoPay({ isActive, onDone }: DemoProps) {
       <ul className="relative z-10 flex h-[300px] w-[150px] shrink-0 flex-col justify-between sm:w-[190px]">
         {payments.map((payment, index) => {
           return (
-            <li key={payment.id} className="flex items-center gap-2 rounded-xl border border-line bg-white px-2.5 py-1.5 shadow-[0_8px_20px_-16px_rgba(20,20,10,0.4)]">
+            <li key={payment.id} className="flex items-center gap-2 rounded-xl border border-line bg-surface px-2.5 py-1.5 shadow-[0_8px_20px_-16px_rgba(20,20,10,0.4)]">
               <AvatarPerson initials={payment.initials} size={24} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[12px] font-medium text-ink">{payment.name.split(" ")[0]}</span>
+                <span className="block truncate text-caption font-medium text-ink">{payment.name.split(" ")[0]}</span>
                 <span className="block font-mono text-[11px] text-ink tabular-nums">
                   <Redacted isRevealed={isSent} delay={isReduced ? 0 : index * flightGap + flightMs}>
                     {formatUsd(payment.amount)}
@@ -264,16 +264,16 @@ function DemoWithdraw({ isActive, onDone }: DemoProps) {
 
   return (
     <div ref={stageRef} className="relative flex h-full flex-col items-center px-5 pt-10 pb-10 sm:pt-14">
-      <div className="w-full max-w-[400px] rounded-2xl border border-line bg-white p-5 shadow-[0_18px_40px_-28px_rgba(20,20,10,0.35)]">
+      <div className="w-full max-w-[400px] rounded-2xl border border-line bg-surface p-5 shadow-card">
         <div className="flex items-center gap-2.5">
           <AvatarPerson initials="BC" size={28} />
-          <span className="text-[13px] font-medium text-ink">Bruno&apos;s balance</span>
-          <span className="ml-auto flex items-center gap-1 font-mono text-[10.5px] text-ink-muted">
+          <span className="text-ui font-medium text-ink">Bruno&apos;s balance</span>
+          <span className="ml-auto flex items-center gap-1 text-label text-ink-muted">
             <Lock className="size-3" /> only he sees it
           </span>
         </div>
-        <p className="mt-3 font-mono text-[24px] tracking-[-0.02em] text-ink tabular-nums">
-          {isDone ? "$3,200.00" : "$4,200.00"} <span className="text-[12px] text-ink-muted">private USDC</span>
+        <p className="mt-3 text-amount text-ink tabular-nums">
+          {isDone ? "$3,200.00" : "$4,200.00"} <span className="text-caption text-ink-muted">private USDC</span>
         </p>
 
         <label className="mt-5 block font-mono text-[11px] text-ink-muted">Withdraw to normal USDC</label>
@@ -287,13 +287,13 @@ function DemoWithdraw({ isActive, onDone }: DemoProps) {
 
         <div className={cn("grid transition-[grid-template-rows,opacity] duration-400 ease-[var(--ease-out)]", hasWarning ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
           <div className="overflow-hidden">
-            <div className="mt-3 flex gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12.5px] leading-[1.5] text-amber-900">
+            <div className="mt-3 flex gap-2.5 rounded-xl border border-warning-border bg-warning-bg p-3 text-[12.5px] leading-[1.5] text-warning-fg">
               <TriangleAlert className="mt-0.5 size-4 shrink-0" />
               <div>
                 <p>This matches a payment you received exactly. Withdrawing it in one piece shows the amount.</p>
                 <span
                   data-cursor="parts"
-                  className={cn("mt-2 inline-flex h-7 items-center rounded-full bg-amber-900 px-3 text-[12px] font-medium text-amber-50 transition-transform duration-150", phase === 5 && "scale-[0.95]")}
+                  className={cn("mt-2 inline-flex h-7 items-center rounded-full bg-warning-fg px-3 text-caption font-medium text-warning-bg transition-transform duration-150", phase === 5 && "scale-[0.95]")}
                 >
                   Withdraw in parts
                 </span>
@@ -305,7 +305,7 @@ function DemoWithdraw({ isActive, onDone }: DemoProps) {
         <span
           data-cursor="withdraw"
           className={cn(
-            "mt-4 flex h-10 items-center justify-center gap-2 rounded-full text-[13px] font-medium transition-[transform,background-color,color] duration-200",
+            "mt-4 flex h-10 items-center justify-center gap-2 rounded-full text-ui font-medium transition-[transform,background-color,color] duration-200",
             isDone ? "bg-glow text-ink" : "bg-ink text-white",
             phase === 8 && "scale-[0.97]",
           )}
@@ -316,7 +316,7 @@ function DemoWithdraw({ isActive, onDone }: DemoProps) {
       </div>
       <p
         className={cn(
-          "mt-4 flex items-center gap-2 rounded-full border border-line bg-white px-3 py-1.5 font-mono text-[11px] text-ink-muted transition-[opacity,translate,filter] duration-500 ease-[var(--ease-out)]",
+          "mt-4 flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 font-mono text-[11px] text-ink-muted transition-[opacity,translate,filter] duration-500 ease-[var(--ease-out)]",
           isDone ? "opacity-100" : "translate-y-2 opacity-0 blur-[3px]",
         )}
       >

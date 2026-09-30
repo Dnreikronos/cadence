@@ -2,15 +2,30 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
-
 @theme inline {
   --color-ink: var(--ink);
   --color-ink-muted: var(--ink-muted);
+  --color-night: var(--night);
+  --color-night-raised: var(--night-raised);
   --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-subtle: var(--surface-subtle);
   --color-line: var(--line);
   --color-glow: var(--glow);
   --color-uv: var(--uv);
+  --color-pending: var(--pending);
+  --color-success-bg: var(--success-bg);
+  --color-success-border: var(--success-border);
+  --color-success-fg: var(--success-fg);
+  --color-success-dot: var(--success-dot);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-border: var(--warning-border);
+  --color-warning-fg: var(--warning-fg);
+  --color-warning-dot: var(--warning-dot);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-border: var(--danger-border);
+  --color-danger-fg: var(--danger-fg);
+  --color-danger-dot: var(--danger-dot);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-ui);
@@ -54,73 +69,104 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-:root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+/* UI type scale. Sizes that recur across the app; one-off and marketing sizes stay arbitrary. */
+@theme {
+  --text-label: 10.5px;
+  --text-eyebrow: 11px;
+  --text-caption: 12px;
+  --text-ui: 13px;
+  --text-body: 14.5px;
+  --text-body--line-height: 1.55;
+  --text-button: 15px;
+  --text-button--font-weight: 500;
+  --text-lead: 17px;
+  --text-title: 20px;
+  --text-title--font-weight: 500;
+  --text-title--letter-spacing: -0.02em;
+  --text-amount: 24px;
+  --text-amount--letter-spacing: -0.02em;
+
+  --shadow-raise: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-card: 0 18px 40px -28px rgba(20, 20, 10, 0.35);
+  --shadow-frame: 0 1px 2px rgba(0, 0, 0, 0.04), 0 40px 80px -40px rgba(20, 20, 10, 0.28);
 }
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+/* A font-size token cannot carry a family or case, so the mono sizes add theirs here. */
+@utility text-label {
+  font-family: var(--font-mono);
+}
+@utility text-eyebrow {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+}
+@utility text-amount {
+  font-family: var(--font-mono);
+}
+
+/* Light only. The palette is the API; shadcn's tokens alias it so its components match. */
+:root {
+  --ink: #0e0f0c;
+  --ink-muted: #6a6b63;
+  --night: #0b0c09;
+  --night-raised: #121310;
+  --canvas: #f2f2ef;
+  --surface: #fff;
+  --surface-subtle: #fafaf9;
+  --line: #e2e2dc;
+  --glow: #d6f53d;
+  --uv: #a393ff;
+  --font-ui: var(--font-instrument);
+  --font-code: var(--font-jetbrains);
+
+  /* Status. Glow marks a completed action, never a status. */
+  --pending: var(--uv);
+  --success-bg: var(--color-emerald-50);
+  --success-border: var(--color-emerald-200);
+  --success-fg: var(--color-emerald-800);
+  --success-dot: var(--color-emerald-500);
+  --warning-bg: var(--color-amber-50);
+  --warning-border: var(--color-amber-200);
+  --warning-fg: var(--color-amber-900);
+  --warning-dot: var(--color-amber-500);
+  --danger-bg: var(--color-red-50);
+  --danger-border: var(--color-red-200);
+  --danger-fg: var(--color-red-800);
+  --danger-dot: var(--color-red-500);
+
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: #fff;
+  --secondary: var(--canvas);
+  --secondary-foreground: var(--ink);
+  --muted: var(--canvas);
+  --muted-foreground: var(--ink-muted);
+  --accent: var(--canvas);
+  --accent-foreground: var(--ink);
+  --destructive: var(--danger-fg);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--ink);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* Radii: rounded-md for inputs and small tiles, rounded-lg for nav items, rounded-xl for cards and popovers,
+     rounded-2xl for large panels, rounded-full for buttons, pills and avatars. */
+  --radius: 0.625rem;
+  --sidebar: var(--surface-subtle);
+  --sidebar-foreground: var(--ink);
+  --sidebar-primary: var(--ink);
+  --sidebar-primary-foreground: #fff;
+  --sidebar-accent: var(--surface);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--ink);
 }
 
 @layer base {
@@ -133,17 +179,6 @@
   html {
     @apply font-sans;
   }
-}
-
-:root {
-  --ink: #0e0f0c;
-  --ink-muted: #6a6b63;
-  --canvas: #f2f2ef;
-  --line: #e2e2dc;
-  --glow: #d6f53d;
-  --uv: #a393ff;
-  --font-ui: var(--font-instrument);
-  --font-code: var(--font-jetbrains);
 }
 
 .font-display {
@@ -320,4 +355,12 @@ details.faq[open] .faq-answer {
   mask:
     radial-gradient(circle var(--hole) at 50% 0, #0000 98%, #000) top / var(--pitch) 51% repeat-x,
     radial-gradient(circle var(--hole) at 50% 100%, #0000 98%, #000) bottom / var(--pitch) 51% repeat-x;
+}
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
 }

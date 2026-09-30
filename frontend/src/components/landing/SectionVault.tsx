@@ -4,7 +4,7 @@ import { VaultKeys } from "./VaultKeys"
 
 export function SectionVault() {
   return (
-    <section id="vault" className="perforated relative overflow-hidden bg-[#0b0c09] pb-24 text-white sm:pb-32">
+    <section id="vault" className="perforated relative overflow-hidden bg-night pb-24 text-white sm:pb-32">
       <NoiseTexture className="opacity-[0.22] mix-blend-soft-light" frequency={0.85} />
       <div
         aria-hidden
