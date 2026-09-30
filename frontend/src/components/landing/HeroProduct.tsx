@@ -98,8 +98,8 @@ export function HeroProduct() {
                 </ul>
               </div>
               <p className="mt-4 flex items-center gap-2 text-[12.5px] text-ink-muted">
-                <ShieldCheck className="size-3.5" strokeWidth={1.75} />
-                Readable by each recipient, Solaris and Carla Reis (auditor).
+                <ShieldCheck className="size-3.5 shrink-0" strokeWidth={1.75} />
+                Readable by each recipient, Solaris, Carla Reis (auditor) and Cadence.
               </p>
             </main>
             <PanelPublic sealedCount={sealedCount} />
@@ -163,7 +163,7 @@ function Sidebar({ balance }: { balance: number }) {
         <p key={balance} className="mt-1.5 animate-[fade-in_400ms_var(--ease-out)] font-mono text-[14px] text-ink tabular-nums">
           {formatUsd(balance)}
         </p>
-        <p className="mt-1 text-[11px] text-ink-muted">Only Solaris and Carla can read this.</p>
+        <p className="mt-1 text-[11px] text-ink-muted">Only Solaris, Carla and Cadence can read this.</p>
       </div>
     </aside>
   )
