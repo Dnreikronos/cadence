@@ -2,12 +2,18 @@
 
 import { useEffect, useRef, useState } from "react"
 
-export function useInView(ref: React.RefObject<Element | null>, margin = "-15% 0px") {
+export function useInView(
+  ref: React.RefObject<Element | null>,
+  margin = "-15% 0px",
+) {
   const [isInView, setIsInView] = useState(false)
   useEffect(() => {
     const element = ref.current
     if (!element) return
-    const observer = new IntersectionObserver(([entry]) => setIsInView(entry.isIntersecting), { rootMargin: margin })
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsInView(entry.isIntersecting),
+      { rootMargin: margin },
+    )
     observer.observe(element)
     return () => observer.disconnect()
   }, [ref, margin])
@@ -29,7 +35,11 @@ export function useReducedMotion() {
 /** Steps through `durations` while active; each entry is how long that phase is held, in ms. */
 export function useSequence(
   durations: number[],
-  { isActive, isLooping = false, onDone }: { isActive: boolean; isLooping?: boolean; onDone?: () => void },
+  {
+    isActive,
+    isLooping = false,
+    onDone,
+  }: { isActive: boolean; isLooping?: boolean; onDone?: () => void },
 ) {
   const [phase, setPhase] = useState(0)
   const isReduced = useReducedMotion()

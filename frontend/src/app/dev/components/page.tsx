@@ -1,7 +1,7 @@
-import { Showcase } from "./showcase";
+import { Showcase } from "./showcase"
 
-export const metadata = { title: "Components · Cadence" };
+export const metadata = { title: "Components · Cadence" }
 
 export default function ComponentsPage() {
-  return <Showcase />;
+  return <Showcase />
 }

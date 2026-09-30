@@ -1,24 +1,35 @@
-"use client";
+"use client"
 
-import { ArrowRight, Plus, Send } from "lucide-react";
-import { AmountDisplay, type AmountState } from "@/components/ui/amount-display";
-import { AvatarPerson } from "@/components/ui/avatar-person";
-import { buttonVariants, iconNudge } from "@/components/ui/button";
-import { ButtonCopy } from "@/components/ui/button-copy";
-import { EmptyState } from "@/components/ui/empty-state";
-import { ErrorState } from "@/components/ui/error-state";
-import { LogoMark, Wordmark } from "@/components/ui/logo";
-import { Skeleton } from "@/components/ui/skeleton";
-import { StatusPill, type PaymentStatus } from "@/components/ui/status-pill";
-import { TransparentBadge } from "@/components/ui/transparent-badge";
-import { WhoCanSee, whoCanSee } from "@/components/ui/who-can-see";
-import type { Role } from "@/lib/auth/guard";
-import { cn } from "@/lib/utils";
+import { ArrowRight, Plus, Send } from "lucide-react"
+import { AmountDisplay, type AmountState } from "@/components/ui/amount-display"
+import { AvatarPerson } from "@/components/ui/avatar-person"
+import { buttonVariants, iconNudge } from "@/components/ui/button"
+import { ButtonCopy } from "@/components/ui/button-copy"
+import { EmptyState } from "@/components/ui/empty-state"
+import { ErrorState } from "@/components/ui/error-state"
+import { LogoMark, Wordmark } from "@/components/ui/logo"
+import { Skeleton } from "@/components/ui/skeleton"
+import { StatusPill, type PaymentStatus } from "@/components/ui/status-pill"
+import { TransparentBadge } from "@/components/ui/transparent-badge"
+import { WhoCanSee, whoCanSee } from "@/components/ui/who-can-see"
+import type { Role } from "@/lib/auth/guard"
+import { cn } from "@/lib/utils"
 
-const statuses: PaymentStatus[] = ["pending", "confirmed", "failed"];
-const amountStates: AmountState[] = ["revealed", "hidden", "loading"];
-const roles: Role[] = ["admin", "recipient", "auditor"];
-const colors = ["ink", "ink-muted", "night", "night-raised", "canvas", "surface", "surface-subtle", "line", "glow", "uv"];
+const statuses: PaymentStatus[] = ["pending", "confirmed", "failed"]
+const amountStates: AmountState[] = ["revealed", "hidden", "loading"]
+const roles: Role[] = ["admin", "recipient", "auditor"]
+const colors = [
+  "ink",
+  "ink-muted",
+  "night",
+  "night-raised",
+  "canvas",
+  "surface",
+  "surface-subtle",
+  "line",
+  "glow",
+  "uv",
+]
 // Literal class names, so Tailwind can find them.
 const typeScale = {
   label: "text-label",
@@ -30,23 +41,28 @@ const typeScale = {
   lead: "text-lead",
   title: "text-title",
   amount: "text-amount",
-};
+}
 
 export function Showcase() {
   return (
     <div className="min-h-svh bg-canvas">
       <header className="border-b border-line bg-surface">
-        <div className="mx-auto flex h-14 max-w-[1120px] items-center justify-between px-4 sm:px-6">
+        <div className="mx-auto flex h-14 max-w-280 items-center justify-between px-4 sm:px-6">
           <Wordmark />
-          <span className="text-label text-ink-muted uppercase">/dev/components</span>
+          <span className="text-label text-ink-muted uppercase">
+            /dev/components
+          </span>
         </div>
       </header>
-      <main className="mx-auto max-w-[1120px] space-y-10 px-4 py-10 sm:px-6">
+      <main className="mx-auto max-w-280 space-y-10 px-4 py-10 sm:px-6">
         <Section title="Colors">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
             {colors.map((color) => (
               <div key={color}>
-                <div className="h-12 rounded-lg ring-1 ring-line" style={{ background: `var(--${color})` }} />
+                <div
+                  className="h-12 rounded-lg ring-1 ring-line"
+                  style={{ background: `var(--${color})` }}
+                />
                 <p className="mt-1.5 text-label text-ink-muted">{color}</p>
               </div>
             ))}
@@ -56,9 +72,16 @@ export function Showcase() {
         <Section title="Type scale">
           <div className="space-y-2">
             {Object.entries(typeScale).map(([size, className]) => (
-              <p key={size} className={cn(className, "flex items-baseline gap-4 text-ink")}>
-                <span className="w-20 shrink-0 font-mono text-[11px] tracking-normal text-ink-muted normal-case">{size}</span>
-                {size === "amount" ? "$84,000.00" : "Private dollars on a public chain"}
+              <p
+                key={size}
+                className={cn(className, "flex items-baseline gap-4 text-ink")}
+              >
+                <span className="w-20 shrink-0 font-mono text-[11px] tracking-normal text-ink-muted normal-case">
+                  {size}
+                </span>
+                {size === "amount"
+                  ? "$84,000.00"
+                  : "Private dollars on a public chain"}
               </p>
             ))}
           </div>
@@ -69,11 +92,20 @@ export function Showcase() {
             {(["primary", "secondary"] as const).map((variant) => (
               <div key={variant} className="flex flex-wrap items-center gap-3">
                 {(["sm", "md", "lg"] as const).map((size) => (
-                  <button key={size} type="button" className={buttonVariants({ variant, size })}>
-                    {variant} {size} <ArrowRight className={cn("size-3.5", iconNudge)} />
+                  <button
+                    key={size}
+                    type="button"
+                    className={buttonVariants({ variant, size })}
+                  >
+                    {variant} {size}{" "}
+                    <ArrowRight className={cn("size-3.5", iconNudge)} />
                   </button>
                 ))}
-                <button type="button" disabled className={buttonVariants({ variant })}>
+                <button
+                  type="button"
+                  disabled
+                  className={buttonVariants({ variant })}
+                >
                   disabled
                 </button>
               </div>
@@ -91,7 +123,12 @@ export function Showcase() {
               ))}
             </span>
             <span className="flex items-center gap-2 font-mono text-caption text-ink-muted">
-              0x9f3ae71b…c3f1 <ButtonCopy value="0x9f3ae71b04c2c21e8e0ac3f1" label="Copy ciphertext" toastTitle="Ciphertext copied" />
+              0x9f3ae71b…c3f1{" "}
+              <ButtonCopy
+                value="0x9f3ae71b04c2c21e8e0ac3f1"
+                label="Copy ciphertext"
+                toastTitle="Ciphertext copied"
+              />
             </span>
           </div>
         </Section>
@@ -112,10 +149,21 @@ export function Showcase() {
         <Section title="AmountDisplay">
           <div className="grid gap-4 sm:grid-cols-3">
             {amountStates.map((state) => (
-              <div key={state} className="rounded-xl border border-line bg-surface p-4">
+              <div
+                key={state}
+                className="rounded-xl border border-line bg-surface p-4"
+              >
                 <p className="text-label text-ink-muted">{state}</p>
-                <AmountDisplay amount={state === "loading" ? undefined : 4200} state={state} className="mt-2 text-amount" />
-                <AmountDisplay amount={state === "loading" ? undefined : 4200} state={state} className="mt-1 block text-ui" />
+                <AmountDisplay
+                  amount={state === "loading" ? undefined : 4200}
+                  state={state}
+                  className="mt-2 text-amount"
+                />
+                <AmountDisplay
+                  amount={state === "loading" ? undefined : 4200}
+                  state={state}
+                  className="mt-1 block text-ui"
+                />
               </div>
             ))}
           </div>
@@ -124,32 +172,47 @@ export function Showcase() {
         <Section title="WhoCanSee">
           <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
             {roles.flatMap((role) =>
-              (role === "auditor" ? [true] : [true, false]).map((hasAuditor) => (
-                <li key={`${role}-${hasAuditor}`} className="flex items-start gap-3 px-4 py-3">
-                  <span className="w-40 shrink-0 text-label text-ink-muted">
-                    {role}
-                    {role !== "auditor" && (hasAuditor ? " · auditor" : " · no auditor")}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <AmountDisplay amount={4200} className="text-ui" />
-                    <WhoCanSee viewerRole={role} hasAuditor={hasAuditor} />
-                  </span>
-                  <span className="text-caption text-ink-muted">{whoCanSee(role, hasAuditor)}</span>
-                </li>
-              )),
+              (role === "auditor" ? [true] : [true, false]).map(
+                (hasAuditor) => (
+                  <li
+                    key={`${role}-${hasAuditor}`}
+                    className="flex items-start gap-3 px-4 py-3"
+                  >
+                    <span className="w-40 shrink-0 text-label text-ink-muted">
+                      {role}
+                      {role !== "auditor" &&
+                        (hasAuditor ? " · auditor" : " · no auditor")}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <AmountDisplay amount={4200} className="text-ui" />
+                      <WhoCanSee viewerRole={role} hasAuditor={hasAuditor} />
+                    </span>
+                    <span className="text-caption text-ink-muted">
+                      {whoCanSee(role, hasAuditor)}
+                    </span>
+                  </li>
+                ),
+              ),
             )}
           </ul>
         </Section>
 
         <Section title="EmptyState">
           <div className="grid gap-4 md:grid-cols-2">
-            <EmptyState icon={Send} title="No payments yet" description="Deposit USDC, then pay your first recipient." />
+            <EmptyState
+              icon={Send}
+              title="No payments yet"
+              description="Deposit USDC, then pay your first recipient."
+            />
             <EmptyState
               icon={Send}
               title="No payments yet"
               description="Deposit USDC, then pay your first recipient."
               action={
-                <button type="button" className={buttonVariants({ size: "sm" })}>
+                <button
+                  type="button"
+                  className={buttonVariants({ size: "sm" })}
+                >
                   <Plus className="size-3.5" /> New payment
                 </button>
               }
@@ -171,8 +234,14 @@ export function Showcase() {
 
         <Section title="ErrorState">
           <div className="grid gap-4 md:grid-cols-2">
-            <ErrorState description="We couldn't load your payments." onRetry={() => {}} />
-            <ErrorState title="Payment failed" description="The transaction expired before it landed. Nothing was sent." />
+            <ErrorState
+              description="We couldn't load your payments."
+              onRetry={() => {}}
+            />
+            <ErrorState
+              title="Payment failed"
+              description="The transaction expired before it landed. Nothing was sent."
+            />
           </div>
         </Section>
 
@@ -188,28 +257,46 @@ export function Showcase() {
         </Section>
       </main>
     </div>
-  );
+  )
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+}: {
+  title: string
+  children: React.ReactNode
+}) {
   return (
     <section>
-      <h2 className="mb-4 text-eyebrow tracking-[0.1em] text-ink-muted">{title}</h2>
+      <h2 className="mb-4 text-eyebrow tracking-widest text-ink-muted">
+        {title}
+      </h2>
       {children}
     </section>
-  );
+  )
 }
 
-function Frame({ role, label, width }: { role: Role; label: string; width?: number }) {
+function Frame({
+  role,
+  label,
+  width,
+}: {
+  role: Role
+  label: string
+  width?: number
+}) {
   return (
     <figure>
-      <figcaption className="mb-2 text-label text-ink-muted">{label}</figcaption>
+      <figcaption className="mb-2 text-label text-ink-muted">
+        {label}
+      </figcaption>
       <iframe
         title={label}
         src={`/dev/components/shell/${role}`}
-        className="h-[560px] max-w-full rounded-xl border border-line bg-surface shadow-card"
+        className="h-140 max-w-full rounded-xl border border-line bg-surface shadow-card"
         style={{ width: width ?? "100%" }}
       />
     </figure>
-  );
+  )
 }

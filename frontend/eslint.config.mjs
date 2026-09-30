@@ -1,16 +1,50 @@
-import { dirname } from "path";
-import { fileURLToPath } from "url";
-import { FlatCompat } from "@eslint/eslintrc";
+import { dirname } from "path"
+import { fileURLToPath } from "url"
+import { FlatCompat } from "@eslint/eslintrc"
+import prettier from "eslint-config-prettier/flat"
+import tailwind from "eslint-plugin-better-tailwindcss"
+import { getDefaultSelectors } from "eslint-plugin-better-tailwindcss/defaults"
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 
 const compat = new FlatCompat({
   baseDirectory: __dirname,
-});
+})
 
 const eslintConfig = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
+  prettier,
+  {
+    files: ["**/*.{ts,tsx}"],
+    plugins: { "better-tailwindcss": tailwind },
+    settings: {
+      "better-tailwindcss": {
+        entryPoint: "src/app/globals.css",
+        rootFontSize: 16,
+        // Class strings also live in plain constants and variant maps
+        // (e.g. `const base = "..."` in button.ts), not only in cn()/className.
+        selectors: [
+          ...getDefaultSelectors(),
+          {
+            kind: "variable",
+            name: ".*",
+            match: [{ type: "strings" }, { type: "objectValues" }],
+          },
+        ],
+      },
+    },
+    rules: {
+      "better-tailwindcss/enforce-canonical-classes": [
+        "error",
+        {
+          // The radius scale derives from var(--radius) (10px), which Tailwind
+          // can't resolve, so it wrongly maps e.g. rounded-[4px] to rounded-lg.
+          ignore: ["^rounded(-[a-z]+)?-\\["],
+        },
+      ],
+    },
+  },
   {
     ignores: [
       "node_modules/**",
@@ -20,6 +54,6 @@ const eslintConfig = [
       "next-env.d.ts",
     ],
   },
-];
+]
 
-export default eslintConfig;
+export default eslintConfig

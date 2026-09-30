@@ -1,19 +1,19 @@
-import Link from "next/link";
-import { ArrowRight, ArrowUpRight, BookOpenText } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { buttonVariants, iconNudge } from "@/components/ui/button";
-import { SplitWords } from "./LandingMotion";
-import { SealGuilloche } from "./SealGuilloche";
+import Link from "next/link"
+import { ArrowRight, ArrowUpRight, BookOpenText } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { buttonVariants, iconNudge } from "@/components/ui/button"
+import { SplitWords } from "./LandingMotion"
+import { SealGuilloche } from "./SealGuilloche"
 
 export function FooterLanding() {
   return (
     <footer>
-      <div className="mx-auto max-w-[1248px] overflow-hidden border-x border-line bg-surface px-3 pt-3 sm:px-6 sm:pt-6">
+      <div className="mx-auto max-w-312 overflow-hidden border-x border-line bg-surface px-3 pt-3 sm:px-6 sm:pt-6">
         <div className="relative overflow-hidden rounded-[24px] bg-night px-6 py-20 text-white sm:px-14 sm:py-28">
           <FlowLines />
           <div
             aria-hidden
-            className="absolute top-1/2 -right-40 size-[640px] -translate-y-1/2 sm:-right-24"
+            className="absolute top-1/2 -right-40 size-160 -translate-y-1/2 sm:-right-24"
             data-parallax="0.08"
           >
             <SealGuilloche
@@ -21,8 +21,8 @@ export function FooterLanding() {
               rings={10}
             />
           </div>
-          <div className="absolute inset-0 bg-gradient-to-r from-night via-night/80 to-transparent" />
-          <div className="relative max-w-[560px]">
+          <div className="absolute inset-0 bg-linear-to-r from-night via-night/80 to-transparent" />
+          <div className="relative max-w-140">
             <p className="text-eyebrow tracking-[0.14em] text-white/50">
               Pilot program
             </p>
@@ -30,7 +30,7 @@ export function FooterLanding() {
               <SplitWords>Make your next payment private.</SplitWords>
             </h2>
             <p
-              className="mt-6 max-w-[440px] text-lead leading-[1.6] text-white/60"
+              className="mt-6 max-w-110 text-lead leading-[1.6] text-white/60"
               data-reveal
             >
               Free for pilot companies while we onboard the first teams. Your
@@ -39,13 +39,21 @@ export function FooterLanding() {
             <div className="mt-9 flex flex-wrap gap-3" data-reveal>
               <Link
                 href="/sign-in"
-                className={buttonVariants({ size: "lg", className: "bg-white text-ink hover:bg-white/90" })}
+                className={buttonVariants({
+                  size: "lg",
+                  className: "bg-white text-ink hover:bg-white/90",
+                })}
               >
                 Start a pilot <ArrowRight className={cn("size-4", iconNudge)} />
               </Link>
               <a
                 href="#faq"
-                className={buttonVariants({ variant: "secondary", size: "lg", className: "border-white/20 bg-transparent text-white hover:border-white/50" })}
+                className={buttonVariants({
+                  variant: "secondary",
+                  size: "lg",
+                  className:
+                    "border-white/20 bg-transparent text-white hover:border-white/50",
+                })}
               >
                 <BookOpenText
                   className="size-4 opacity-70"
@@ -66,7 +74,7 @@ export function FooterLanding() {
           </div>
           {columns.map((column) => (
             <div key={column.title}>
-              <p className="text-eyebrow tracking-[0.1em] text-ink-muted">
+              <p className="text-eyebrow tracking-widest text-ink-muted">
                 {column.title}
               </p>
               <ul className="mt-4 space-y-2.5">
@@ -79,7 +87,7 @@ export function FooterLanding() {
                       <span className="link-underline pb-0.5">
                         {link.label}
                       </span>
-                      <ArrowUpRight className="size-3.5 -translate-x-1 translate-y-1 opacity-0 transition-[opacity,translate] duration-200 ease-[var(--ease-out)] group-hover/link:translate-0 group-hover/link:opacity-100" />
+                      <ArrowUpRight className="size-3.5 -translate-x-1 translate-y-1 opacity-0 transition-[opacity,translate] duration-200 ease-out group-hover/link:translate-0 group-hover/link:opacity-100" />
                     </a>
                   </li>
                 ))}
@@ -90,13 +98,13 @@ export function FooterLanding() {
 
         <p
           aria-hidden
-          className="font-display -mb-[3vw] bg-[radial-gradient(circle_at_center,color-mix(in_oklab,var(--ink)_30%,transparent)_1.6px,transparent_1.8px)] bg-clip-text [background-size:9px_9px] text-transparent text-center text-[25vw] leading-[0.8] font-semibold tracking-[-0.07em] select-none lg:text-[300px]"
+          className="font-display mb-[-3vw] bg-[radial-gradient(circle_at_center,color-mix(in_oklab,var(--ink)_30%,transparent)_1.6px,transparent_1.8px)] bg-size-[9px_9px] bg-clip-text text-center text-[25vw] leading-[0.8] font-semibold tracking-[-0.07em] text-transparent select-none lg:text-[300px]"
         >
           cadence
         </p>
       </div>
     </footer>
-  );
+  )
 }
 
 function FlowLines() {
@@ -121,7 +129,7 @@ function FlowLines() {
         />
       ))}
     </svg>
-  );
+  )
 }
 
 const columns = [
@@ -140,4 +148,4 @@ const columns = [
       { label: "Sign in", href: "/sign-in" },
     ],
   },
-];
+]

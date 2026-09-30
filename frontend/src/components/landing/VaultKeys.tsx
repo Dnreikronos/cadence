@@ -4,7 +4,13 @@ import { useState } from "react"
 import { Check, Globe, Lock, Minus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AvatarPerson } from "@/components/ui/avatar-person"
-import { canSee, formatUsd, payments, perspectives, type Perspective } from "./landing-data"
+import {
+  canSee,
+  formatUsd,
+  payments,
+  perspectives,
+  type Perspective,
+} from "./landing-data"
 import { Redacted } from "./Redacted"
 import { SealGuilloche } from "./SealGuilloche"
 
@@ -13,32 +19,66 @@ const rowStagger = 110
 export function VaultKeys() {
   const [perspective, setPerspective] = useState<Perspective>("public")
   const active = perspectives.find((item) => item.id === perspective)!
-  const readable = payments.filter((payment) => canSee(perspective, payment)).length
+  const readable = payments.filter((payment) =>
+    canSee(perspective, payment),
+  ).length
 
   function selectWithArrows(event: React.KeyboardEvent) {
-    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key]
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[
+      event.key
+    ]
     if (!step) return
     event.preventDefault()
     const index = perspectives.findIndex((item) => item.id === perspective)
-    const next = perspectives[(index + step + perspectives.length) % perspectives.length].id
+    const next =
+      perspectives[(index + step + perspectives.length) % perspectives.length]
+        .id
     setPerspective(next)
-    document.querySelector<HTMLButtonElement>(`[data-perspective="${next}"]`)?.focus()
+    document
+      .querySelector<HTMLButtonElement>(`[data-perspective="${next}"]`)
+      ?.focus()
   }
 
   return (
     <div>
-      <div role="tablist" aria-label="Whose key reads the ledger" onKeyDown={selectWithArrows} className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div
+        role="tablist"
+        aria-label="Whose key reads the ledger"
+        onKeyDown={selectWithArrows}
+        className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+      >
         {perspectives.map((item) => (
-          <CardKey key={item.id} item={item} isActive={item.id === perspective} onSelect={() => setPerspective(item.id)} />
+          <CardKey
+            key={item.id}
+            item={item}
+            isActive={item.id === perspective}
+            onSelect={() => setPerspective(item.id)}
+          />
         ))}
       </div>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-12">
-        <div role="tabpanel" aria-label={`${active.label} key`} className="relative overflow-hidden rounded-2xl border border-white/10 bg-night-raised lg:col-span-8">
+        <div
+          role="tabpanel"
+          aria-label={`${active.label} key`}
+          className="relative overflow-hidden rounded-2xl border border-white/10 bg-night-raised lg:col-span-8"
+        >
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
-            <p className="text-eyebrow tracking-[0.1em] text-white/45">Solaris · payments · March 2026</p>
-            <p key={perspective} className="flex animate-[fade-in_300ms_var(--ease-out)] items-center gap-2 text-ui text-white/70">
-              <span className={cn("size-1.5 rounded-full", readable ? "bg-glow shadow-[0_0_8px_var(--glow)]" : "bg-white/25")} />
+            <p className="text-eyebrow tracking-widest text-white/45">
+              Solaris · payments · March 2026
+            </p>
+            <p
+              key={perspective}
+              className="flex animate-[fade-in_300ms_var(--ease-out)] items-center gap-2 text-ui text-white/70"
+            >
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  readable
+                    ? "bg-glow shadow-[0_0_8px_var(--glow)]"
+                    : "bg-white/25",
+                )}
+              />
               {readable} of {payments.length} amounts readable
             </p>
           </div>
@@ -57,16 +97,32 @@ export function VaultKeys() {
                     className="grid grid-cols-[1fr_auto] items-center gap-4 border-b border-white/[0.07] px-5 py-3.5 last:border-0 sm:grid-cols-[1.3fr_0.8fr_1fr]"
                   >
                     <span className="flex min-w-0 items-center gap-3">
-                      <AvatarPerson initials={payment.initials} size={28} className="ring-white/10" />
-                      <span className="truncate text-[14px] text-white/85">{payment.name}</span>
+                      <AvatarPerson
+                        initials={payment.initials}
+                        size={28}
+                        className="ring-white/10"
+                      />
+                      <span className="truncate text-[14px] text-white/85">
+                        {payment.name}
+                      </span>
                     </span>
-                    <span className="hidden text-ui text-white/40 sm:block">{payment.kind}</span>
+                    <span className="hidden text-ui text-white/40 sm:block">
+                      {payment.kind}
+                    </span>
                     <span className="flex items-center justify-end gap-2 font-mono text-[14px] text-white tabular-nums">
                       <Lock
-                        className={cn("size-3 text-white/35 transition-opacity duration-300", isReadable ? "opacity-0" : "opacity-100")}
-                        style={{ transitionDelay: `${120 + index * rowStagger}ms` }}
+                        className={cn(
+                          "size-3 text-white/35 transition-opacity duration-300",
+                          isReadable ? "opacity-0" : "opacity-100",
+                        )}
+                        style={{
+                          transitionDelay: `${120 + index * rowStagger}ms`,
+                        }}
                       />
-                      <Redacted isRevealed={isReadable} delay={120 + index * rowStagger}>
+                      <Redacted
+                        isRevealed={isReadable}
+                        delay={120 + index * rowStagger}
+                      >
                         {formatUsd(payment.amount)}
                       </Redacted>
                     </span>
@@ -77,8 +133,13 @@ export function VaultKeys() {
           </div>
         </div>
 
-        <dl key={perspective} className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 lg:col-span-4">
-          <p className="text-eyebrow tracking-[0.1em] text-white/45">{active.label} key can</p>
+        <dl
+          key={perspective}
+          className="rounded-2xl border border-white/10 bg-white/2 p-5 lg:col-span-4"
+        >
+          <p className="text-eyebrow tracking-widest text-white/45">
+            {active.label} key can
+          </p>
           {abilities[perspective].map((ability, index) => (
             <div
               key={ability.label}
@@ -88,14 +149,22 @@ export function VaultKeys() {
               <span
                 className={cn(
                   "mt-0.5 grid size-5 shrink-0 place-items-center rounded-full",
-                  ability.isAllowed ? "bg-glow text-ink" : "bg-white/[0.08] text-white/45",
+                  ability.isAllowed
+                    ? "bg-glow text-ink"
+                    : "bg-white/8 text-white/45",
                 )}
               >
-                {ability.isAllowed ? <Check className="size-3" strokeWidth={2.5} /> : <Minus className="size-3" strokeWidth={2.5} />}
+                {ability.isAllowed ? (
+                  <Check className="size-3" strokeWidth={2.5} />
+                ) : (
+                  <Minus className="size-3" strokeWidth={2.5} />
+                )}
               </span>
               <div>
                 <dt className="text-[14px] text-white">{ability.label}</dt>
-                <dd className="mt-0.5 text-ui leading-[1.5] text-white/45">{ability.note}</dd>
+                <dd className="mt-0.5 text-ui/normal text-white/45">
+                  {ability.note}
+                </dd>
               </div>
             </div>
           ))}
@@ -123,34 +192,61 @@ function CardKey({
       tabIndex={isActive ? 0 : -1}
       onClick={onSelect}
       className={cn(
-        "group/key relative flex h-[138px] flex-col justify-between overflow-hidden rounded-2xl border p-4 text-left transition-[border-color,background-color,transform] duration-200 ease-[var(--ease-out)] outline-none focus-visible:ring-2 focus-visible:ring-glow/60 active:scale-[0.98] sm:p-5",
-        isActive ? "border-glow/50 bg-white/[0.06]" : "border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]",
+        "group/key relative flex h-34.5 flex-col justify-between overflow-hidden rounded-2xl border p-4 text-left transition-[border-color,background-color,transform] duration-200 ease-out outline-none focus-visible:ring-2 focus-visible:ring-glow/60 active:scale-[0.98] sm:p-5",
+        isActive
+          ? "border-glow/50 bg-white/6"
+          : "border-white/10 bg-white/2 hover:border-white/20 hover:bg-white/4",
       )}
     >
       <span
         aria-hidden
-        className={cn("absolute inset-x-5 top-0 h-px bg-glow transition-transform duration-300 ease-[var(--ease-out)]", isActive ? "scale-x-100" : "scale-x-0")}
+        className={cn(
+          "absolute inset-x-5 top-0 h-px bg-glow transition-transform duration-300 ease-out",
+          isActive ? "scale-x-100" : "scale-x-0",
+        )}
       />
       <SealGuilloche
         rings={6}
         className={cn(
-          "pointer-events-none absolute -right-10 -bottom-12 size-40 transition-[color,rotate] duration-700 ease-[var(--ease-out)]",
-          isActive ? "rotate-45 text-glow/35" : "text-white/[0.08] group-hover/key:rotate-12",
+          "pointer-events-none absolute -right-10 -bottom-12 size-40 transition-[color,rotate] duration-700 ease-out",
+          isActive
+            ? "rotate-45 text-glow/35"
+            : "text-white/8 group-hover/key:rotate-12",
         )}
       />
       <span className="relative flex items-center gap-2.5">
         {item.initials ? (
-          <AvatarPerson initials={item.initials} size={30} className="ring-white/10" />
+          <AvatarPerson
+            initials={item.initials}
+            size={30}
+            className="ring-white/10"
+          />
         ) : (
-          <span className="grid size-[30px] place-items-center rounded-full bg-white/[0.08] text-white/70">
+          <span className="grid size-7.5 place-items-center rounded-full bg-white/8 text-white/70">
             <Globe className="size-3.5" strokeWidth={1.75} />
           </span>
         )}
-        <span className={cn("text-button transition-colors", isActive ? "text-white" : "text-white/70")}>{item.label}</span>
+        <span
+          className={cn(
+            "text-button transition-colors",
+            isActive ? "text-white" : "text-white/70",
+          )}
+        >
+          {item.label}
+        </span>
       </span>
       <span className="relative">
-        <span className={cn("block text-ui transition-colors", isActive ? "text-white/75" : "text-white/45")}>{item.holder}</span>
-        <span className="mt-0.5 block text-label text-white/30">{item.initials ? keyIds[item.id] : "no key"}</span>
+        <span
+          className={cn(
+            "block text-ui transition-colors",
+            isActive ? "text-white/75" : "text-white/45",
+          )}
+        >
+          {item.holder}
+        </span>
+        <span className="mt-0.5 block text-label text-white/30">
+          {item.initials ? keyIds[item.id] : "no key"}
+        </span>
       </span>
     </button>
   )
@@ -163,25 +259,76 @@ const keyIds: Record<Perspective, string> = {
   public: "no key",
 }
 
-const abilities: Record<Perspective, { label: string; note: string; isAllowed: boolean }[]> = {
+const abilities: Record<
+  Perspective,
+  { label: string; note: string; isAllowed: boolean }[]
+> = {
   company: [
-    { label: "Read every amount", note: "Every payment Solaris made, and the treasury balance.", isAllowed: true },
-    { label: "Move funds", note: "Only with a signature from Solaris' own wallet.", isAllowed: true },
-    { label: "Add an auditor", note: "Grant read access, and revoke it later.", isAllowed: true },
+    {
+      label: "Read every amount",
+      note: "Every payment Solaris made, and the treasury balance.",
+      isAllowed: true,
+    },
+    {
+      label: "Move funds",
+      note: "Only with a signature from Solaris' own wallet.",
+      isAllowed: true,
+    },
+    {
+      label: "Add an auditor",
+      note: "Grant read access, and revoke it later.",
+      isAllowed: true,
+    },
   ],
   recipient: [
-    { label: "Read his own payments", note: "Amount, date and sender, in Cadence and by email.", isAllowed: true },
-    { label: "Read anyone else's", note: "Colleagues' pay stays sealed to him.", isAllowed: false },
-    { label: "Withdraw", note: "Signed with his own wallet. Withdrawals are public.", isAllowed: true },
+    {
+      label: "Read his own payments",
+      note: "Amount, date and sender, in Cadence and by email.",
+      isAllowed: true,
+    },
+    {
+      label: "Read anyone else's",
+      note: "Colleagues' pay stays sealed to him.",
+      isAllowed: false,
+    },
+    {
+      label: "Withdraw",
+      note: "Signed with his own wallet. Withdrawals are public.",
+      isAllowed: true,
+    },
   ],
   auditor: [
-    { label: "Read every amount", note: "And export the month as a spreadsheet.", isAllowed: true },
-    { label: "Move funds", note: "An auditor key can read, never sign.", isAllowed: false },
-    { label: "Read without a trace", note: "Every decryption is logged with who and why.", isAllowed: false },
+    {
+      label: "Read every amount",
+      note: "And export the month as a spreadsheet.",
+      isAllowed: true,
+    },
+    {
+      label: "Move funds",
+      note: "An auditor key can read, never sign.",
+      isAllowed: false,
+    },
+    {
+      label: "Read without a trace",
+      note: "Every decryption is logged with who and why.",
+      isAllowed: false,
+    },
   ],
   public: [
-    { label: "See that payments happened", note: "Addresses, times and signatures are public.", isAllowed: true },
-    { label: "Read any amount", note: "Only ciphertext reaches the chain.", isAllowed: false },
-    { label: "Read balances", note: "Balances are sealed the same way.", isAllowed: false },
+    {
+      label: "See that payments happened",
+      note: "Addresses, times and signatures are public.",
+      isAllowed: true,
+    },
+    {
+      label: "Read any amount",
+      note: "Only ciphertext reaches the chain.",
+      isAllowed: false,
+    },
+    {
+      label: "Read balances",
+      note: "Balances are sealed the same way.",
+      isAllowed: false,
+    },
   ],
 }

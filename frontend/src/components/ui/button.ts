@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils"
 
 const base =
-  "group/btn inline-flex items-center justify-center gap-2 rounded-full font-medium transition-[background-color,border-color,color,transform] duration-150 ease-[var(--ease-out)] active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:pointer-events-none disabled:opacity-50 [&_svg]:transition-transform [&_svg]:duration-200 [&_svg]:ease-[var(--ease-out)]"
+  "group/btn inline-flex items-center justify-center gap-2 rounded-full font-medium transition-[background-color,border-color,color,transform] duration-150 ease-out active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:pointer-events-none disabled:opacity-50 [&_svg]:transition-transform [&_svg]:duration-200 [&_svg]:ease-out"
 
 const variants = {
   primary: "bg-ink text-white hover:bg-ink/88",
@@ -18,8 +18,12 @@ export function buttonVariants({
   variant = "primary",
   size = "md",
   className,
-}: { variant?: keyof typeof variants; size?: keyof typeof sizes; className?: string } = {}) {
+}: {
+  variant?: keyof typeof variants
+  size?: keyof typeof sizes
+  className?: string
+} = {}) {
   return cn(base, variants[variant], sizes[size], className)
 }
 
-export const iconNudge = "group-hover/btn:translate-x-[3px]"
+export const iconNudge = "group-hover/btn:translate-x-0.75"
