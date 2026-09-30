@@ -1,10 +1,14 @@
-use cadence_proof::{config::Config, error::AppError, router, solana::client::RpcClient, AppState};
+use cadence_proof::{
+    config::Config, error::AppError, router_with_wrap, solana::client::RpcClient,
+    wrap_store::WrapStore, AppState,
+};
 use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     let config = Config::from_env()?;
     let rpc = Arc::new(RpcClient::new(config.rpc_url, config.rpc_timeout)?);
+    let wrap_store = WrapStore::from_env()?.map(Arc::new);
 
     #[cfg(unix)]
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -32,10 +36,13 @@ async fn main() -> Result<(), AppError> {
     );
     axum::serve(
         listener,
-        router(AppState {
-            rpc,
-            build_sha: config.build_sha,
-        }),
+        router_with_wrap(
+            AppState {
+                rpc,
+                build_sha: config.build_sha,
+            },
+            wrap_store,
+        ),
     )
     .with_graceful_shutdown(shutdown)
     .await?;

@@ -10,6 +10,7 @@ pub mod keys {
 }
 pub mod routes {
     pub mod health;
+    pub mod wrap;
 }
 pub mod solana {
     pub mod client;
@@ -31,7 +32,13 @@ pub struct AppState {
 }
 
 pub fn router(state: AppState) -> Router {
+    router_with_wrap(state, None)
+}
+
+pub fn router_with_wrap(state: AppState, store: Option<Arc<wrap_store::WrapStore>>) -> Router {
+    let wrap = routes::wrap::router(state.rpc.clone(), store);
     Router::new()
         .route("/health", get(routes::health::health))
         .with_state(state)
+        .merge(wrap)
 }
