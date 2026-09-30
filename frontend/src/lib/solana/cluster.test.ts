@@ -9,9 +9,7 @@ describe("readCluster", () => {
       isMainnet: false,
     });
   });
-});
 
-describe("readCluster for production", () => {
   it("selects mainnet and its public RPC", () => {
     expect(readCluster({ cluster: "mainnet" })).toEqual({
       name: "mainnet",
@@ -25,9 +23,7 @@ describe("readCluster for production", () => {
       "https://rpc.example.com",
     );
   });
-});
 
-describe("readCluster with a bad value", () => {
   it("refuses an unknown cluster instead of silently picking one", () => {
     expect(() => readCluster({ cluster: "mainnet-beta" })).toThrow(/NEXT_PUBLIC_SOLANA_CLUSTER/);
   });

@@ -36,9 +36,9 @@ pnpm build
 ## Layout
 
 ```
-src/app/            App Router. (auth)/ for sign-in; company/, me/, audit/ per role
-src/components/     app/ (signed-in shell), landing/, ui/ (shadcn)
-src/lib/            auth/ (route guard), supabase/, solana/, api/
+src/app/            App Router. sign-in/; company/, me/, audit/ per role
+src/components/     app/ (signed-in shell)
+src/lib/            auth/ (route guard), supabase/, solana/
 src/middleware.ts   role-based route guard
 ```
 

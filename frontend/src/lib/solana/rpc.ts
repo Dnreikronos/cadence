@@ -10,18 +10,9 @@ const returnsTransactions = new Set(["getBlock", "getTransaction", "getTransacti
 
 type Payload = { method: string; params: unknown[] };
 
-function isPayload(payload: unknown): payload is Payload {
-  return (
-    typeof payload === "object" &&
-    payload !== null &&
-    "method" in payload &&
-    "params" in payload &&
-    Array.isArray(payload.params)
-  );
-}
-
-function pin(payload: unknown): unknown {
-  if (!isPayload(payload) || !returnsTransactions.has(payload.method)) return payload;
+function pin(raw: unknown): unknown {
+  const payload = raw as Partial<Payload>;
+  if (!payload.method || !returnsTransactions.has(payload.method) || !Array.isArray(payload.params)) return raw;
   const [target, config] = payload.params;
   const options = typeof config === "object" && config !== null ? config : {};
   return {
