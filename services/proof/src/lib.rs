@@ -14,6 +14,7 @@ pub mod solana {
     pub mod client;
     pub mod token_client;
     pub mod token_wrap;
+    pub mod v0;
     pub mod v1;
 }
 

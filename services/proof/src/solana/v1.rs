@@ -17,7 +17,20 @@ pub fn compile_unsigned(
     payer: &Address,
     blockhash: Hash,
 ) -> Result<VersionedTransaction, AppError> {
-    let instructions: Vec<_> = instructions
+    let instructions = adapt_instructions(instructions);
+    let message = v1::Message::try_compile_with_config(payer, &instructions, blockhash, BUDGET)
+        .map_err(|_| AppError::Transaction("cannot compile v1 message"))?;
+    let signatures = vec![Signature::default(); message.header.num_required_signatures as usize];
+    let transaction = VersionedTransaction {
+        signatures,
+        message: VersionedMessage::V1(message),
+    };
+    serialize(&transaction)?;
+    Ok(transaction)
+}
+
+pub(super) fn adapt_instructions(instructions: &[Instruction]) -> Vec<V1Instruction> {
+    instructions
         .iter()
         .map(|ix| V1Instruction {
             program_id: ix.program_id,
@@ -32,24 +45,19 @@ pub fn compile_unsigned(
                 .collect(),
             data: ix.data.clone(),
         })
-        .collect();
-    let message = v1::Message::try_compile_with_config(payer, &instructions, blockhash, BUDGET)
-        .map_err(|_| AppError::Transaction("cannot compile v1 message"))?;
-    let signatures = vec![Signature::default(); message.header.num_required_signatures as usize];
-    let transaction = VersionedTransaction {
-        signatures,
-        message: VersionedMessage::V1(message),
-    };
-    serialize(&transaction)?;
-    Ok(transaction)
+        .collect()
 }
 
 pub fn serialize(transaction: &VersionedTransaction) -> Result<Vec<u8>, AppError> {
     let bytes = wincode::serialize(transaction)
-        .map_err(|_| AppError::Transaction("cannot serialize v1 transaction"))?;
-    if bytes.len() > 4096 {
+        .map_err(|_| AppError::Transaction("cannot serialize transaction"))?;
+    let limit = match transaction.message {
+        VersionedMessage::V1(_) => 4096,
+        _ => 1232,
+    };
+    if bytes.len() > limit {
         return Err(AppError::Transaction(
-            "transaction exceeds the v1 4096-byte limit",
+            "transaction exceeds its wire size limit",
         ));
     }
     Ok(bytes)
