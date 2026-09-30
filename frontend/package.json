@@ -7,8 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepare": "cd .. && husky frontend/.husky"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -40,6 +43,12 @@
     "@types/three": "^0.186.0",
     "eslint": "^9",
     "eslint-config-next": "15.5.26",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-better-tailwindcss": "^4.7.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "prettier": "^3.9.9",
+    "prettier-plugin-tailwindcss": "^0.8.1",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^5.0.2"
