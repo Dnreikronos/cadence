@@ -7,9 +7,8 @@ export function NavLanding() {
   return (
     <header className="sticky top-0 z-50 border-b border-line/80 bg-white/95 backdrop-blur-md">
       <nav className="mx-auto flex h-16 max-w-[1248px] items-center justify-between border-x border-line px-6">
-        <Link href="/" className="font-display flex items-center gap-2 text-[21px] font-semibold tracking-[-0.04em] text-ink">
-          <LogoMark className="size-[18px] text-ink" />
-          cadence
+        <Link href="/">
+          <Wordmark />
         </Link>
         <ul className="hidden items-center gap-8 text-sm text-ink-muted md:flex">
           {links.map((link) => (
@@ -40,6 +39,15 @@ export function LogoMark({ className }: { className?: string }) {
       <circle cx="10" cy="10" r="8.25" fill="none" stroke="currentColor" strokeWidth="1.5" />
       <path d="M10 1.75a8.25 8.25 0 0 0 0 16.5Z" fill="currentColor" />
     </svg>
+  )
+}
+
+export function Wordmark({ className }: { className?: string }) {
+  return (
+    <span className={cn("font-display flex items-center gap-2 text-[21px] font-semibold tracking-[-0.04em] text-ink", className)}>
+      <LogoMark className="size-[18px]" />
+      cadence
+    </span>
   )
 }
 
