@@ -20,7 +20,7 @@ export function SectionVault() {
         <SectionHeading
           index="02"
           eyebrow="Who sees what"
-          title="One ledger. Four keys."
+          title="One ledger. Five keys."
           muted="What you can read depends on the key you hold."
           isDark
         />

@@ -4,6 +4,7 @@ import { useState } from "react"
 import { Check, Globe, Lock, Minus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AvatarPerson } from "@/components/ui/avatar-person"
+import { LogoMark } from "@/components/ui/logo"
 import {
   canSee,
   formatUsd,
@@ -45,7 +46,7 @@ export function VaultKeys() {
         role="tablist"
         aria-label="Whose key reads the ledger"
         onKeyDown={selectWithArrows}
-        className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+        className="grid grid-cols-2 gap-3 lg:grid-cols-5"
       >
         {perspectives.map((item) => (
           <CardKey
@@ -192,7 +193,7 @@ function CardKey({
       tabIndex={isActive ? 0 : -1}
       onClick={onSelect}
       className={cn(
-        "group/key relative flex h-34.5 flex-col justify-between overflow-hidden rounded-2xl border p-4 text-left transition-[border-color,background-color,transform] duration-200 ease-out outline-none focus-visible:ring-2 focus-visible:ring-glow/60 active:scale-[0.98] sm:p-5",
+        "group/key relative flex h-34.5 flex-col justify-between overflow-hidden rounded-2xl border p-4 text-left transition-[border-color,background-color,transform] duration-200 ease-out outline-none focus-visible:ring-2 focus-visible:ring-glow/60 active:scale-[0.98] max-lg:last:col-span-2 sm:p-5",
         isActive
           ? "border-glow/50 bg-white/6"
           : "border-white/10 bg-white/2 hover:border-white/20 hover:bg-white/4",
@@ -223,7 +224,11 @@ function CardKey({
           />
         ) : (
           <span className="grid size-7.5 place-items-center rounded-full bg-white/8 text-white/70">
-            <Globe className="size-3.5" strokeWidth={1.75} />
+            {item.id === "cadence" ? (
+              <LogoMark className="size-3.5" />
+            ) : (
+              <Globe className="size-3.5" strokeWidth={1.75} />
+            )}
           </span>
         )}
         <span
@@ -245,7 +250,7 @@ function CardKey({
           {item.holder}
         </span>
         <span className="mt-0.5 block text-label text-white/30">
-          {item.initials ? keyIds[item.id] : "no key"}
+          {keyIds[item.id]}
         </span>
       </span>
     </button>
@@ -256,6 +261,7 @@ const keyIds: Record<Perspective, string> = {
   company: "key 4Nd1…mB7z",
   recipient: "key 7xKX…gAsU",
   auditor: "key a4…9f",
+  cadence: "viewing keys only",
   public: "no key",
 }
 
@@ -306,6 +312,23 @@ const abilities: Record<
     {
       label: "Move funds",
       note: "An auditor key can read, never sign.",
+      isAllowed: false,
+    },
+    {
+      label: "Read without a trace",
+      note: "Every decryption is logged with who and why.",
+      isAllowed: false,
+    },
+  ],
+  cadence: [
+    {
+      label: "Read every amount",
+      note: "The proof service needs viewing keys to seal each payment.",
+      isAllowed: true,
+    },
+    {
+      label: "Move funds",
+      note: "Cadence holds no signing key. Only your wallet can sign.",
       isAllowed: false,
     },
     {

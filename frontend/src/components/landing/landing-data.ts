@@ -1,6 +1,7 @@
 export { formatUsd } from "@/lib/format"
 
-export type Perspective = "company" | "recipient" | "auditor" | "public"
+export type Perspective =
+  "company" | "recipient" | "auditor" | "cadence" | "public"
 
 export type Payment = {
   id: string
@@ -38,6 +39,13 @@ export const perspectives: {
     holder: "Carla Reis",
     initials: "CR",
     caption: "Sees every amount. Every read is logged.",
+  },
+  {
+    id: "cadence",
+    label: "Cadence",
+    holder: "The proof service",
+    initials: null,
+    caption: "Reads amounts to generate proofs. Can never move funds.",
   },
   {
     id: "public",
