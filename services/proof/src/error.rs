@@ -3,6 +3,8 @@ use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    #[error("wrap rate limit exceeded")]
+    RateLimited,
     #[error("{0}")]
     BadRequest(&'static str),
     #[error("{0}")]
@@ -24,6 +26,7 @@ pub enum AppError {
 impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
+            Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::NotFound => StatusCode::NOT_FOUND,
@@ -35,6 +38,14 @@ impl AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
+        if matches!(self, Self::RateLimited) {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                [("retry-after", "60")],
+                Json(json!({"error": "wrap_rate_limited"})),
+            )
+                .into_response();
+        }
         let code = match self {
             Self::BadRequest(code) | Self::Conflict(code) => code,
             Self::NotFound => "wrap_not_found",

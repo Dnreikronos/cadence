@@ -1,3 +1,4 @@
+use super::wrap_limits::{self, Limits};
 use crate::{
     error::AppError,
     solana::{
@@ -24,14 +25,20 @@ use std::{str::FromStr, sync::Arc};
 struct WrapState {
     rpc: Arc<RpcClient>,
     store: Option<Arc<WrapStore>>,
+    limits: Arc<Limits>,
 }
 
 pub fn router(rpc: Arc<RpcClient>, store: Option<Arc<WrapStore>>) -> Router {
+    let limits = Arc::new(Limits::new());
     Router::new()
         .route("/wrap", post(prepare))
         .route("/wrap/confirm", post(confirm))
         .layer(DefaultBodyLimit::max(8192))
-        .with_state(WrapState { rpc, store })
+        .layer(axum::middleware::from_fn_with_state(
+            limits.clone(),
+            wrap_limits::enforce,
+        ))
+        .with_state(WrapState { rpc, store, limits })
 }
 
 #[derive(Deserialize)]
@@ -65,6 +72,9 @@ async fn prepare(
         .map_err(|_| AppError::BadRequest("invalid_wallet"))?;
     if !wallet.is_on_curve() {
         return Err(AppError::BadRequest("invalid_wallet"));
+    }
+    if !state.limits.wallet(wallet) {
+        return Err(AppError::RateLimited);
     }
     let amount = wrap::amount(&request.amount)?;
     let store = state.store.ok_or(AppError::StorageUnavailable)?;

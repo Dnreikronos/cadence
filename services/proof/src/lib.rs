@@ -12,6 +12,7 @@ pub mod keys {
 pub mod routes {
     pub mod health;
     pub mod wrap;
+    mod wrap_limits;
 }
 pub mod solana {
     pub mod client;

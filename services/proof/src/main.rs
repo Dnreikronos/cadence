@@ -44,7 +44,8 @@ async fn main() -> Result<(), AppError> {
             },
             wrap_store,
         )
-        .layer(cors),
+        .layer(cors)
+        .into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown)
     .await?;
