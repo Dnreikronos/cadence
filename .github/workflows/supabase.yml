@@ -1,0 +1,26 @@
+name: Supabase
+
+on:
+  pull_request:
+    paths: ['supabase/**', '.github/workflows/supabase.yml']
+  push:
+    branches: [main]
+    paths: ['supabase/**', '.github/workflows/supabase.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.118.0
+      - name: Apply every migration to a fresh database
+        run: supabase db start
+      - name: Prove tenant isolation and invite rules
+        run: supabase test db
