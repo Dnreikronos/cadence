@@ -4,11 +4,17 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Dialog } from "@base-ui/react/dialog"
-import { Lock, Menu, X } from "lucide-react"
+import { ChevronDown, Lock, LogOut, Menu, X } from "lucide-react"
 import type { Role } from "@/lib/auth/guard"
 import { cn } from "@/lib/utils"
 import { AmountDisplay, type AmountState } from "@/components/ui/amount-display"
+import { signOut } from "@/lib/auth/actions"
 import { buttonVariants } from "@/components/ui/button"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { isActive, navByRole, roleLabels } from "./nav"
 
 export type ShellCompany = { name: string }
@@ -17,11 +23,13 @@ export type ShellBalance = { amount?: number; state: AmountState }
 export function AppShell({
   role,
   company,
+  email,
   balance,
   children,
 }: {
   role: Role
   company: ShellCompany
+  email: string
   balance?: ShellBalance
   children: React.ReactNode
 }) {
@@ -35,6 +43,7 @@ export function AppShell({
       <BarTop
         role={role}
         company={company}
+        email={email}
         onMenu={() => setIsDrawerOpen(true)}
       />
       <div className="lg:grid lg:grid-cols-[232px_minmax(0,1fr)]">
@@ -91,10 +100,12 @@ function useCloseAtDesktop(
 function BarTop({
   role,
   company,
+  email,
   onMenu,
 }: {
   role: Role
   company: ShellCompany
+  email: string
   onMenu: () => void
 }) {
   return (
@@ -119,7 +130,39 @@ function BarTop({
           {roleLabels[role]}
         </span>
       </span>
+      <UserMenu email={email} />
     </header>
+  )
+}
+
+function UserMenu({ email }: { email: string }) {
+  return (
+    <Popover>
+      <PopoverTrigger className="ml-auto flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-ui text-ink-muted hover:bg-canvas hover:text-ink">
+        <span
+          aria-hidden
+          className="grid size-6 shrink-0 place-items-center rounded-full border border-line bg-surface-subtle text-[11px] font-medium text-ink"
+        >
+          {email.charAt(0).toUpperCase()}
+        </span>
+        <span className="hidden max-w-48 truncate sm:inline">{email}</span>
+        <ChevronDown aria-hidden className="size-3.5" />
+        <span className="sr-only sm:hidden">Account</span>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-60">
+        <p className="truncate text-label text-ink-muted">Signed in as</p>
+        <p className="-mt-1.5 truncate font-medium text-ink">{email}</p>
+        {/* Clears the Supabase session; the Turnkey session joins it with the wallet (#77). */}
+        <form action={signOut} className="border-t border-line pt-2">
+          <button
+            type="submit"
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-ink-muted hover:bg-canvas hover:text-ink"
+          >
+            <LogOut className="size-4" strokeWidth={1.75} /> Sign out
+          </button>
+        </form>
+      </PopoverContent>
+    </Popover>
   )
 }
 

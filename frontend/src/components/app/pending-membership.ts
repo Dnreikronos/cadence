@@ -1,5 +1,4 @@
-import type { ShellBalance, ShellCompany } from "./app-shell"
+import type { ShellBalance } from "./app-shell"
 
-// Stand-ins until the viewer's membership and balance are read (#75, #76).
-export const pendingCompany: ShellCompany = { name: "Your company" }
+// Stand-in until the viewer's private balance is read from the chain.
 export const pendingBalance: ShellBalance = { state: "hidden" }
