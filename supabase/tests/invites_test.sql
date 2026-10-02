@@ -1,11 +1,24 @@
 -- create_company and accept_invite are the only ways to gain a membership.
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(38);
+SELECT plan(46);
 
 CREATE FUNCTION pg_temp.login(uid uuid) RETURNS void LANGUAGE sql AS $$
     SELECT set_config('request.jwt.claims',
         json_build_object('sub', uid, 'role', 'authenticated')::text, true);
+$$;
+
+-- The hint is the stable code the web app maps to a message (#76).
+CREATE FUNCTION pg_temp.hint_of(stmt text) RETURNS text LANGUAGE plpgsql AS $$
+DECLARE
+    v_hint text;
+BEGIN
+    EXECUTE stmt;
+    RETURN NULL;
+EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS v_hint = PG_EXCEPTION_HINT;
+    RETURN v_hint;
+END;
 $$;
 
 INSERT INTO auth.users (id, email, email_confirmed_at) VALUES
@@ -109,8 +122,12 @@ RESET ROLE;
 SELECT pg_temp.login('00000000-0000-0000-0000-0000000000c2');
 SET LOCAL ROLE authenticated;
 SELECT throws_ok($$SELECT public.accept_invite('no-such-token')$$, 'P0001', 'invite not found', 'unknown tokens fail');
+SELECT is(pg_temp.hint_of($$SELECT public.accept_invite('no-such-token')$$), 'invite_not_found',
+    'invite not found carries hint invite_not_found');
 SELECT throws_ok($$SELECT public.accept_invite('tok-recipient')$$, 'P0001', 'invite is for another email',
     'a recipient invite needs the person''s email');
+SELECT is(pg_temp.hint_of($$SELECT public.accept_invite('tok-recipient')$$), 'invite_wrong_email',
+    'invite is for another email carries hint invite_wrong_email');
 RESET ROLE;
 SELECT pg_temp.login('00000000-0000-0000-0000-0000000000c1');
 SET LOCAL ROLE authenticated;
@@ -122,6 +139,8 @@ SELECT results_eq('SELECT id FROM public.people',
     $$VALUES ('00000000-0000-0000-0001-0000000000c1'::uuid)$$, 'accepting links the person to the user');
 SELECT throws_ok($$SELECT public.accept_invite('tok-recipient')$$, 'P0001', 'invite already accepted',
     'an invite is accepted once');
+SELECT is(pg_temp.hint_of($$SELECT public.accept_invite('tok-recipient')$$), 'invite_already_accepted',
+    'invite already accepted carries hint invite_already_accepted');
 RESET ROLE;
 SELECT isnt((SELECT accepted_at FROM public.invites WHERE id = '00000000-0000-0000-0002-0000000000c1'),
     NULL, 'accepting stamps accepted_at');
@@ -134,11 +153,15 @@ SELECT pg_temp.login('00000000-0000-0000-0000-0000000000c2');
 SET LOCAL ROLE authenticated;
 SELECT throws_ok($$SELECT public.accept_invite('tok-relink')$$, 'P0001', 'person already linked',
     'a linked person cannot be claimed by another user');
+SELECT is(pg_temp.hint_of($$SELECT public.accept_invite('tok-relink')$$), 'invite_person_linked',
+    'person already linked carries hint invite_person_linked');
 RESET ROLE;
 
 SELECT pg_temp.login('00000000-0000-0000-0000-0000000000c3');
 SET LOCAL ROLE authenticated;
 SELECT throws_ok($$SELECT public.accept_invite('tok-late')$$, 'P0001', 'invite expired', 'expired invites fail');
+SELECT is(pg_temp.hint_of($$SELECT public.accept_invite('tok-late')$$), 'invite_expired',
+    'invite expired carries hint invite_expired');
 RESET ROLE;
 SET LOCAL ROLE service_role;
 SELECT lives_ok($$UPDATE public.invites SET token_hash = sha256('tok-late-resent'), expires_at = now() + interval '7 days'
@@ -153,6 +176,8 @@ RESET ROLE;
 SELECT pg_temp.login('00000000-0000-0000-0000-0000000000c4');
 SET LOCAL ROLE authenticated;
 SELECT throws_ok($$SELECT public.accept_invite('tok-gone')$$, 'P0001', 'person was removed', 'removed people cannot accept');
+SELECT is(pg_temp.hint_of($$SELECT public.accept_invite('tok-gone')$$), 'invite_person_removed',
+    'person was removed carries hint invite_person_removed');
 RESET ROLE;
 
 -- The admin corrects a typo after the invite went out; the current email wins.
@@ -188,11 +213,15 @@ SELECT pg_temp.login('00000000-0000-0000-0000-0000000000d3');
 SET LOCAL ROLE authenticated;
 SELECT throws_ok($$SELECT public.accept_invite('tok-unconfirmed')$$, 'P0001', 'email not confirmed',
     'an unconfirmed email cannot accept');
+SELECT is(pg_temp.hint_of($$SELECT public.accept_invite('tok-unconfirmed')$$), 'invite_email_unconfirmed',
+    'email not confirmed carries hint invite_email_unconfirmed');
 RESET ROLE;
 SELECT pg_temp.login('00000000-0000-0000-0000-0000000000b1');
 SET LOCAL ROLE authenticated;
 SELECT throws_ok($$SELECT public.accept_invite('tok-admin-b')$$, 'P0001', 'already a member of a company',
     'a member of another company cannot accept');
+SELECT is(pg_temp.hint_of($$SELECT public.accept_invite('tok-admin-b')$$), 'invite_already_member',
+    'already a member of a company carries hint invite_already_member');
 RESET ROLE;
 
 -- Admin deletes a pending auditor invite, but not an accepted one.
