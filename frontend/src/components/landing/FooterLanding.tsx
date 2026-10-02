@@ -38,7 +38,7 @@ export function FooterLanding() {
             </p>
             <div className="mt-9 flex flex-wrap gap-3" data-reveal>
               <Link
-                href="/sign-in"
+                href="/sign-up"
                 className={buttonVariants({
                   size: "lg",
                   className: "bg-white text-ink hover:bg-white/90",
