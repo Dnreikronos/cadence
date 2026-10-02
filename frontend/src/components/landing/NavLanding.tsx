@@ -4,7 +4,8 @@ import { cn } from "@/lib/utils"
 import { buttonVariants, iconNudge } from "@/components/ui/button"
 import { Wordmark } from "@/components/ui/logo"
 
-export function NavLanding() {
+// `home` is the signed-in member's dashboard, or null when signed out.
+export function NavLanding({ home }: { home: string | null }) {
   return (
     <header className="sticky top-0 z-50 border-b border-line/80 bg-white/95 backdrop-blur-md">
       <nav className="mx-auto flex h-16 max-w-312 items-center justify-between border-x border-line px-6">
@@ -23,22 +24,33 @@ export function NavLanding() {
             </li>
           ))}
         </ul>
-        <div className="flex items-center gap-5">
+        {home ? (
           <Link
-            href="/sign-in"
-            className="link-underline hidden pb-0.5 text-sm text-ink-muted hover:text-ink sm:block"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/sign-in"
+            href={home}
             className={buttonVariants({
               className: "gap-1.5 pr-3.5 pl-4 text-sm",
             })}
           >
-            Start paying <ArrowRight className={cn("size-3.5", iconNudge)} />
+            Open dashboard <ArrowRight className={cn("size-3.5", iconNudge)} />
           </Link>
-        </div>
+        ) : (
+          <div className="flex items-center gap-5">
+            <Link
+              href="/sign-in"
+              className="link-underline hidden pb-0.5 text-sm text-ink-muted hover:text-ink sm:block"
+            >
+              Sign in
+            </Link>
+            <Link
+              href="/sign-up"
+              className={buttonVariants({
+                className: "gap-1.5 pr-3.5 pl-4 text-sm",
+              })}
+            >
+              Start paying <ArrowRight className={cn("size-3.5", iconNudge)} />
+            </Link>
+          </div>
+        )}
       </nav>
       <span
         data-progress

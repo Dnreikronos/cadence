@@ -1,8 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server"
-import { guard, requiredRole, type Role, type Viewer } from "@/lib/auth/guard"
+import { guard, requiredRole, type Role } from "@/lib/auth/guard"
+import { membershipOf } from "@/lib/supabase/membership"
 import { createMiddlewareClient } from "@/lib/supabase/middleware"
-
-const signedOut: Viewer = { signedIn: false, roles: [] }
 
 export async function middleware(request: NextRequest) {
   const guarded = requiredRole(request.nextUrl.pathname) !== null
@@ -13,45 +12,54 @@ export async function middleware(request: NextRequest) {
     // Without Supabase configured nobody can sign in: fail closed on guarded areas only.
     if (!guarded) return NextResponse.next()
     console.error(error)
-    return decide(request, signedOut, NextResponse.next())
+    return decide(request, null, NextResponse.next())
   }
 
   // getUser() revalidates the token with Supabase Auth and refreshes the cookie.
   const { data } = await session.supabase.auth.getUser()
-  const user = data.user
-  let viewer: Viewer = signedOut
-  if (user) {
-    viewer = {
-      signedIn: true,
-      roles: guarded ? await rolesOf(session.supabase, user.id) : [],
-    }
+  if (!data.user) {
+    return decide(request, null, session.response(), session.cacheHeaders)
   }
-  return decide(request, viewer, session.response(), session.cacheHeaders)
-}
-
-// Contract with the memberships table (#75); RLS lets a user read their own rows.
-async function rolesOf(
-  supabase: ReturnType<typeof createMiddlewareClient>["supabase"],
-  userId: string,
-): Promise<Role[]> {
-  const { data, error } = await supabase
-    .from("memberships")
-    .select("role")
-    .eq("user_id", userId)
-  if (error) console.error("memberships lookup failed", error.message)
-  return (data ?? []).map((row: { role: Role }) => row.role)
+  let role: Role
+  try {
+    const membership = await membershipOf(session.supabase, data.user.id)
+    if (!membership) {
+      // Every session belongs to a company; one without (e.g. removed) is ended here.
+      await session.supabase.auth.signOut()
+      return redirect(
+        request,
+        "/sign-in?error=no_company",
+        session.response(),
+        session.cacheHeaders,
+      )
+    }
+    role = membership.role
+  } catch (error) {
+    console.error(error)
+    return decide(request, null, session.response(), session.cacheHeaders)
+  }
+  return decide(request, role, session.response(), session.cacheHeaders)
 }
 
 function decide(
   request: NextRequest,
-  viewer: Viewer,
+  role: Role | null,
   response: NextResponse,
   cacheHeaders: Record<string, string> = {},
 ) {
-  const decision = guard(request.nextUrl.pathname, viewer)
+  const decision = guard(request.nextUrl.pathname, role)
   if (decision.kind === "next") return response
-  // Carry refreshed session cookies and their no-store headers across the redirect.
-  const redirect = NextResponse.redirect(new URL(decision.to, request.url), {
+  return redirect(request, decision.to, response, cacheHeaders)
+}
+
+// Carry refreshed session cookies and their no-store headers across the redirect.
+function redirect(
+  request: NextRequest,
+  to: string,
+  response: NextResponse,
+  cacheHeaders: Record<string, string>,
+) {
+  const redirect = NextResponse.redirect(new URL(to, request.url), {
     headers: cacheHeaders,
   })
   for (const cookie of response.cookies.getAll()) redirect.cookies.set(cookie)

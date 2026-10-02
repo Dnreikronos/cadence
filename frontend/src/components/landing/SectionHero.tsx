@@ -41,7 +41,7 @@ export function SectionHero() {
             className="mt-9 flex flex-wrap items-center justify-center gap-3"
             data-reveal
           >
-            <Link href="/sign-in" className={buttonVariants({ size: "lg" })}>
+            <Link href="/sign-up" className={buttonVariants({ size: "lg" })}>
               Start paying privately{" "}
               <ArrowRight className={cn("size-4", iconNudge)} />
             </Link>

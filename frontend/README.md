@@ -36,16 +36,17 @@ pnpm build
 ## Layout
 
 ```
-src/app/            App Router. sign-in/; company/, me/, audit/ per role
+src/app/            App Router. (auth)/sign-in, sign-up; auth/confirm; company/, me/, audit/ per role
 src/components/     app/ (signed-in shell)
-src/lib/            auth/ (route guard), supabase/, solana/
+src/lib/            auth/ (guard, sign-in, invites), supabase/, solana/
 src/middleware.ts   role-based route guard
 ```
 
 ## Route guard
 
 `src/middleware.ts` refreshes the Supabase session on every request and guards
-three areas by the role in the viewer's `memberships` rows:
+three areas by the viewer's role. A user holds at most one membership, so one
+role:
 
 | Path         | Role        |
 | ------------ | ----------- |
@@ -53,12 +54,42 @@ three areas by the role in the viewer's `memberships` rows:
 | `/me/*`      | `recipient` |
 | `/audit/*`   | `auditor`   |
 
-A signed-out visit goes to `/sign-in?next=<path>`. A signed-in user without the
-role goes to `/`. If Supabase is unreachable or unconfigured, guarded areas are
-treated as signed out. The rules live in `src/lib/auth/guard.ts`.
+Every session belongs to a company: the middleware signs out a session that has
+no membership (for example, after a removal) and sends it to
+`/sign-in?error=no_company`. A signed-out visit goes to `/sign-in?next=<path>`,
+and a member with another role goes to their own area. If Supabase is
+unreachable or unconfigured, guarded areas are treated as signed out. The rules
+live in `src/lib/auth/guard.ts`.
 
 Row-level security is still the authorization boundary: the middleware only
 decides which page to show.
+
+## Sign-in and sign-up
+
+There are no passwords. Each email carries a 6-digit code and a link, from the
+templates in `supabase/templates/`. The code is entered on the form; the link
+lands on `/auth/confirm`, which verifies its `token_hash` and works in any
+browser. Both paths end in `completeSignIn` (`src/lib/auth/complete-sign-in.ts`).
+
+Accounts exist only to belong to a company, and there are two ways to get one:
+
+- **Admin**: `/sign-up` asks for the company name and an email. Confirming the
+  email creates the company (`create_company`) and lands on `/company`.
+- **Recipient or auditor**: an invite link, `/sign-in?invite=<token>`.
+  Confirming the email accepts the invite (`accept_invite`) and lands on the
+  area for the role.
+
+`/sign-in` without an invite never creates an account; an unknown email is told
+to create a company or use its invite. If a confirmation ends without a
+membership (an expired invite, for instance), the session is signed out again
+and the form shows why (`?error=<code>`, mapped in
+`src/lib/auth/sign-in-errors.ts`).
+
+The invite token and company name ride through sign-in as form fields and
+inside the emailed link, so they survive opening the email on another device.
+The link is built from `{{ .RedirectTo }}`. Every deployed origin must therefore
+be listed under the Supabase Auth redirect URLs (`additional_redirect_urls`
+locally) as `<origin>/**`.
 
 ## Solana
 
