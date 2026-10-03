@@ -185,6 +185,12 @@ async fn three_recipient_run_recovers_partial_failure_without_repaying_successes
         .iter()
         .map(|r| json!({"recipient":r,"amount":"1000000"}))
         .collect::<Vec<_>>());
+    {
+        let mut delays = h.backend.delayed_accounts.lock().unwrap();
+        for (recipient, delay) in recipients.iter().zip([50, 1, 10]) {
+            delays.insert(recipient.clone(), std::time::Duration::from_millis(delay));
+        }
+    }
     let app = h.app();
     assert_eq!(
         request(&app, "/runs", "expired", Some(body.clone()))
@@ -208,6 +214,11 @@ async fn three_recipient_run_recovers_partial_failure_without_repaying_successes
     let (status, run) = request(&app, "/runs", "test-user", Some(body.clone())).await;
     assert_eq!(status, StatusCode::OK, "{run}");
     assert_eq!(run["payments"].as_array().unwrap().len(), 3);
+    for (i, payment) in run["payments"].as_array().unwrap().iter().enumerate() {
+        assert_eq!(payment["position"], i);
+        assert_eq!(payment["destination"], recipients[i]);
+    }
+    assert!(h.backend.peak_account_reads.load(Ordering::SeqCst) > 1);
     assert_eq!(h.audit_count().await, 1);
     let id = run["run_id"].as_str().unwrap();
     let get = format!("/runs/{id}");
