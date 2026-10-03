@@ -15,6 +15,13 @@ jobs:
   wrap-storage:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      matrix:
+        include:
+          - suite: wrap_storage
+            filter: wrap_records
+          - suite: runs_storage
+            filter: run_storage
     services:
       postgres:
         image: postgres:17
@@ -35,10 +42,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: services/proof
-      - name: Verify wrap storage permissions and immutable confirmations
+      - name: Verify receipt permissions and immutable confirmations
         env:
           WRAP_TEST_DATABASE_URL: postgres://postgres:wrap-test-only@localhost:5432/wrap_test
-        run: cargo test --locked --test wrap_storage wrap_records -- --ignored
+          RUNS_TEST_DATABASE_URL: postgres://postgres:wrap-test-only@localhost:5432/wrap_test
+        run: cargo test --locked --test ${{ matrix.suite }} ${{ matrix.filter }} -- --ignored
   vault:
     runs-on: ubuntu-latest
     timeout-minutes: 20
