@@ -59,7 +59,7 @@ pub(super) async fn confirm(
             if p.request_id.as_deref() != Some(&item.request_id) {
                 return Err(AppError::Conflict("payment_attempt_changed"));
             }
-            reconcile(&state, &user, &run, item.position, &item.signature).await
+            reconcile(&state, &user, &run, item.position, &item.signature, false).await
         }
         .await;
         if let Err(error) = result {
@@ -104,13 +104,14 @@ pub(super) fn signature(run: &Run, p: &Payment, value: &str) -> Result<Signature
     Ok(signature)
 }
 
-/// Verify the original signed attempt against finalized RPC before storage.
+/// Expiry is terminal only after checking the original signed attempt on finalized RPC.
 pub(super) async fn reconcile(
     state: &RunState,
     user: &str,
     run: &Run,
     position: i16,
     value: &str,
+    expire: bool,
 ) -> Result<(), AppError> {
     let p = run
         .payments
@@ -126,9 +127,17 @@ pub(super) async fn reconcile(
         };
     }
     state.devnet().await?;
+    // Observe expiry first, then check history, so a landing between the reads
+    // cannot be mistaken for an unsubmitted expired transaction.
+    let expired = expire
+        && state.rpc.finalized_block_height().await?
+            > p.last_valid_block_height.ok_or(AppError::RunUnavailable)? as u64;
     let mut result = state.rpc.finalized_transaction(value).await?;
     let (status, slot, error) = if result.is_null() {
-        return Err(AppError::Conflict("transaction_not_finalized"));
+        if !expired {
+            return Err(AppError::Conflict("transaction_not_finalized"));
+        }
+        (Status::Expired, None, Some("transaction_expired".into()))
     } else {
         let failed = match result.get("meta").and_then(|m| m.get("err")) {
             Some(Value::Null) => false,

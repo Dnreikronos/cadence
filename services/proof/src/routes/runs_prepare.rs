@@ -1,5 +1,6 @@
 use super::{
     runs::{self, RunResponse, RunState},
+    runs_confirm,
     transfer::proof_error,
 };
 use crate::{
@@ -10,7 +11,7 @@ use crate::{
     wrap_store::request_id,
 };
 use axum::{
-    extract::{rejection::JsonRejection, State},
+    extract::{rejection::JsonRejection, Path, State},
     http::HeaderMap,
     Json,
 };
@@ -46,6 +47,29 @@ impl Drop for RunRequest {
     fn drop(&mut self) {
         self.aes_key.zeroize();
         self.wallet_signature.zeroize();
+    }
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct RetryRequest {
+    aes_key: String,
+    payments: Vec<RetryPayment>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RetryPayment {
+    position: i16,
+    amount: String,
+    signature: Option<String>,
+}
+impl Drop for RetryPayment {
+    fn drop(&mut self) {
+        self.amount.zeroize();
+    }
+}
+impl Drop for RetryRequest {
+    fn drop(&mut self) {
+        self.aes_key.zeroize();
     }
 }
 struct Entry {
@@ -120,6 +144,83 @@ pub(super) async fn prepare(
         .prepare(&user, &wallet.to_string(), &sender.to_string(), &payments)
         .await?;
     Ok(Json(runs::response(run, true)))
+}
+
+pub(super) async fn retry(
+    State(state): State<RunState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: Result<Json<RetryRequest>, JsonRejection>,
+) -> Result<Json<RunResponse>, AppError> {
+    runs::valid_id(&id)?;
+    let Json(request) = body.map_err(|_| AppError::BadRequest("invalid_request"))?;
+    count(request.payments.len())?;
+    let aes = aes(&request.aes_key)?;
+    let mut positions = HashSet::new();
+    for p in &request.payments {
+        wrap::amount(&p.amount)?;
+        if !positions.insert(p.position) {
+            return Err(AppError::BadRequest("invalid_payments"));
+        }
+    }
+    let (service, user) = state.authenticate(&headers).await?;
+    let mut run = service.runs.get(&user, &id).await?;
+    let wallet = runs::address(&run.company_wallet)?;
+    if !state.limits.wallet(wallet) {
+        return Err(AppError::TransferRateLimited);
+    }
+    if run
+        .payments
+        .iter()
+        .any(|p| p.status == Status::Prepared && !positions.contains(&p.position))
+    {
+        return Err(AppError::Conflict("outstanding_payments"));
+    }
+    for item in &request.payments {
+        let p = run
+            .payments
+            .iter()
+            .find(|p| p.position == item.position)
+            .ok_or(AppError::BadRequest("invalid_payment"))?;
+        if p.status == Status::Prepared {
+            let sig = item
+                .signature
+                .as_deref()
+                .ok_or(AppError::Conflict("original_signature_required"))?;
+            runs_confirm::reconcile(&state, &user, &run, item.position, sig, true).await?;
+        }
+    }
+    run = service.runs.get(&user, &id).await?;
+    let mut entries = vec![];
+    for item in &request.payments {
+        let p = run
+            .payments
+            .iter()
+            .find(|p| p.position == item.position)
+            .ok_or(AppError::BadRequest("invalid_payment"))?;
+        if p.status == Status::Finalized {
+            continue;
+        }
+        if p.status == Status::Prepared {
+            return Err(AppError::Conflict("transaction_not_finalized"));
+        }
+        entries.push(Entry {
+            position: p.position,
+            recipient: runs::address(&p.destination)?,
+            amount: wrap::amount(&item.amount)?,
+            attempt: p.attempt,
+        });
+    }
+    if entries.is_empty() {
+        return Ok(Json(runs::response(run, false)));
+    }
+    entries.sort_by_key(|p| p.position);
+    let sender = runs::address(&run.sender)?;
+    let payments = build(&state, &user, wallet, sender, aes, entries).await?;
+    Ok(Json(runs::response(
+        service.runs.retry(&user, &id, &payments).await?,
+        true,
+    )))
 }
 
 async fn build(

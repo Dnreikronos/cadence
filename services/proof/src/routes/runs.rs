@@ -49,6 +49,7 @@ pub fn router(rpc: Arc<RpcClient>, service: Option<Arc<Service>>) -> Router {
         .route("/runs", post(runs_prepare::prepare))
         .route("/runs/{id}", get(status))
         .route("/runs/{id}/confirm", post(runs_confirm::confirm))
+        .route("/runs/{id}/retry", post(runs_prepare::retry))
         .layer(DefaultBodyLimit::max(32768))
         .layer(axum::middleware::from_fn_with_state(
             limits.clone(),
