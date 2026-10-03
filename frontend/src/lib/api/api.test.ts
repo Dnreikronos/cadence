@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
+import { ZodError } from "zod"
 import { createApiClient } from "./client"
 import { ApiError, ContractError, messageFor } from "./errors"
 import {
@@ -9,14 +10,24 @@ import {
   seedPeople,
   db,
 } from "./mocks/db"
-import { scenarios } from "./mocks/scenario"
+import { scenarios, timing } from "./mocks/scenario"
 import { server } from "./mocks/server"
 import { UnexpectedSignerError, signAndConfirm, type Signer } from "./sign"
 
 const BASE = "http://mock.cadence.test"
 
-beforeAll(() => server.listen({ onUnhandledFrame: "error" }))
+// Every request that reaches the mock, so a test can prove none was sent.
+const requests: string[] = []
+
+beforeAll(() => {
+  server.listen({ onUnhandledFrame: "error" })
+  server.events.on("request:start", ({ request }) => {
+    requests.push(`${request.method} ${new URL(request.url).pathname}`)
+  })
+})
 afterEach(() => {
+  requests.length = 0
+  timing.slowMs = 1500
   server.resetHandlers()
   scenarios.clear()
   resetDb()
@@ -54,11 +65,13 @@ describe("contract validation", () => {
   it("refuses a float or number amount before sending", async () => {
     await expect(
       api.wrap.prepare({ company_wallet: COMPANY_WALLET, amount: "1.5" }),
-    ).rejects.toThrow()
+    ).rejects.toBeInstanceOf(ZodError)
     await expect(
       // @ts-expect-error amounts are strings of base units, never numbers
       api.wrap.prepare({ company_wallet: COMPANY_WALLET, amount: 1000000 }),
-    ).rejects.toThrow()
+    ).rejects.toBeInstanceOf(ZodError)
+    // Not one request reached the mock.
+    expect(requests).toEqual([])
   })
 
   it("accepts exactly 2^48-1 base units and refuses one more", async () => {
@@ -67,18 +80,22 @@ describe("contract validation", () => {
       amount: "281474976710655",
     })
     expect(ok.transaction_version).toBe(0)
+    expect(requests).toEqual(["POST /wrap"])
     await expect(
       api.wrap.prepare({
         company_wallet: COMPANY_WALLET,
         amount: "281474976710656",
       }),
-    ).rejects.toThrow()
+    ).rejects.toBeInstanceOf(ZodError)
+    expect(requests).toEqual(["POST /wrap"])
   })
 
   it("fails loudly when a response drifts from the contract", async () => {
     const { http, HttpResponse } = await import("msw")
     server.use(
-      http.get("*/me/balance", () => HttpResponse.json({ available: 12.5 })),
+      http.get(`${BASE}/me/balance`, () =>
+        HttpResponse.json({ available: 12.5 }),
+      ),
     )
     expect(await caught(api.me.balance())).toBeInstanceOf(ContractError)
   })
@@ -91,6 +108,7 @@ describe("authentication and errors", () => {
       status: 401,
       code: "authentication_required",
     })
+    expect(requests).toEqual([])
   })
 
   it("reads the error code and nothing else", async () => {
@@ -122,7 +140,7 @@ describe("authentication and errors", () => {
   it("handles an unknown code as its status class", async () => {
     const { http, HttpResponse } = await import("msw")
     server.use(
-      http.get("*/me/balance", () =>
+      http.get(`${BASE}/me/balance`, () =>
         HttpResponse.json({ error: "brand_new_code" }, { status: 409 }),
       ),
     )
@@ -133,10 +151,52 @@ describe("authentication and errors", () => {
 
   it("reports a network failure as retryable", async () => {
     const { http, HttpResponse } = await import("msw")
-    server.use(http.get("*/me/balance", () => HttpResponse.error()))
+    server.use(http.get(`${BASE}/me/balance`, () => HttpResponse.error()))
     const error = (await caught(api.me.balance())) as ApiError
     expect(error).toMatchObject({ code: "network_error" })
     expect(error.isRetryable).toBe(true)
+  })
+
+  it("treats a 502 from a proxy as retryable", async () => {
+    const { http, HttpResponse } = await import("msw")
+    server.use(
+      http.get(`${BASE}/me/balance`, () =>
+        HttpResponse.text("<html>Bad gateway</html>", { status: 502 }),
+      ),
+    )
+    const error = (await caught(api.me.balance())) as ApiError
+    expect(error).toMatchObject({ status: 502, code: "service_unavailable" })
+    expect(error.isRetryable).toBe(true)
+  })
+
+  it("answers service-down on confirm with a retryable 503 that signAndConfirm outlasts", async () => {
+    scenarios.set("instant")
+    const prepared = await api.wrap.prepare({
+      company_wallet: COMPANY_WALLET,
+      amount: "1000000",
+    })
+    scenarios.set("instant", "service-down")
+    const error = (await caught(
+      api.wrap.confirm({ request_id: prepared.request_id, signature: SIG }),
+    )) as ApiError
+    expect(error).toMatchObject({ status: 503, code: "auth_unavailable" })
+    expect(error.isRetryable).toBe(true)
+    expect(db.company.pending).toBe(0n)
+
+    // The service comes back while signAndConfirm is waiting.
+    let confirms = 0
+    const receipt = await signAndConfirm(prepared, {
+      signer,
+      submit,
+      sleep: async () => scenarios.set("instant"),
+      confirm: (signature) => {
+        confirms++
+        return api.wrap.confirm({ request_id: prepared.request_id, signature })
+      },
+    })
+    expect(receipt.status).toBe("finalized")
+    expect(confirms).toBe(2)
+    expect(db.company.pending).toBe(1_000_000n)
   })
 
   it("keeps a role out of other roles' routes", async () => {
@@ -218,16 +278,26 @@ describe("prepare, sign, confirm", () => {
       aes_key: "AAAAAAAAAAAAAAAAAAAAAA==",
     })
     expect(prepared.transaction_version).toBe(1)
+    let confirms = 0
     const error = await caught(
       signAndConfirm(prepared, {
         signer,
         submit,
         sleep: noSleep,
-        confirm: (signature) =>
-          api.transfer.confirm({ request_id: prepared.request_id, signature }),
+        confirm: (signature) => {
+          confirms++
+          return api.transfer.confirm({
+            request_id: prepared.request_id,
+            signature,
+          })
+        },
       }),
     )
     expect(error).toMatchObject({ status: 409, code: "transaction_failed" })
+    expect(confirms).toBe(1)
+    expect(requests.filter((r) => r === "POST /transfer/confirm")).toHaveLength(
+      1,
+    )
   })
 
   it("asks for the activation artifacts when setup is missing", async () => {
@@ -250,12 +320,14 @@ describe("prepare, sign, confirm", () => {
   it("apply-pending moves pending to available, and reports a counter mismatch", async () => {
     scenarios.set("instant")
     db.me.pending = 3_000_000n
+    const before = db.me.available
     const prepared = await api.accounts.applyPending(ME_WALLET)
     await api.accounts.confirmApplyPending({
       request_id: prepared.request_id,
       signature: SIG,
     })
     expect(db.me.pending).toBe(0n)
+    expect(db.me.available).toBe(before + 3_000_000n)
 
     scenarios.set("instant", "credit-mismatch")
     const next = await api.accounts.applyPending(ME_WALLET)
@@ -290,6 +362,20 @@ describe("payroll runs", () => {
     expect(run.payments.map((p) => p.person_id)).toEqual([bruno.id, diego.id])
     expect(new Set(run.payments.map((p) => p.request_id)).size).toBe(2)
     expect(await api.runs.create(body)).toEqual(run)
+  })
+
+  it("replays a key whose first create failed as a fresh create, then as the same run", async () => {
+    const body = request([bruno.id, mariana.id])
+    expect(await caught(api.runs.create(body))).toMatchObject({
+      code: "recipient_not_activated",
+    })
+    // The failed call stored nothing under the key.
+    expect(db.runs.size).toBe(0)
+    const fixed = { ...body, payments: [body.payments[0]] }
+    const run = await api.runs.create(fixed)
+    expect(run.payments).toHaveLength(1)
+    expect(await api.runs.create(fixed)).toEqual(run)
+    expect(db.runs.size).toBe(1)
   })
 
   it("refuses people who have not activated", async () => {
@@ -374,9 +460,34 @@ describe("unwrap and the reveal-risk flag", () => {
     expect(JSON.stringify(ok.reveal_risk)).not.toMatch(/amount|4200/)
   })
 
-  it("flags a near match within 1%", async () => {
+  it("flags a near match within 1%, and needs an acknowledgement for it too", async () => {
+    expect(await caught(unwrap("4190000000"))).toMatchObject({
+      status: 409,
+      code: "reveal_risk_not_acknowledged",
+    })
     const ok = await unwrap("4190000000", true)
     expect(ok.reveal_risk.level).toBe("near")
+    expect(ok.reveal_risk.matches).toHaveLength(1)
+  })
+
+  // 1% of 4,200 USDC is 42,000,000 base units, on both sides of the payment.
+  it.each([
+    ["4158000000", "near"],
+    ["4242000000", "near"],
+    ["4157999999", "none"],
+    ["4242000001", "none"],
+  ])("puts %s at %s", async (amount, level) => {
+    const prepared = await unwrap(amount, true)
+    expect(prepared.reveal_risk.level).toBe(level)
+    // Without an acknowledgement only the risky ones are stopped.
+    const plain = expect(unwrap(amount))
+    if (level === "none") {
+      await plain.resolves.toMatchObject({ reveal_risk: { level: "none" } })
+    } else {
+      await plain.rejects.toMatchObject({
+        code: "reveal_risk_not_acknowledged",
+      })
+    }
   })
 
   it("lets a safe amount through without a flag", async () => {
@@ -448,5 +559,42 @@ describe("reads and exports", () => {
   it("sends an invite and answers the health check without a token", async () => {
     expect((await api.company.invite(seedPeople[1].id)).status).toBe("sent")
     expect((await signedOut.health()).status).toBe("ok")
+  })
+
+  it("does not invite someone who is not on the roster", async () => {
+    expect(await caught(api.company.invite(crypto.randomUUID()))).toMatchObject(
+      { status: 404, code: "person_not_found" },
+    )
+  })
+
+  it("reports an unavailable service from /health as data, not an error", async () => {
+    scenarios.set("service-down")
+    expect(await signedOut.health()).toMatchObject({
+      status: "unavailable",
+      rpc_reachable: false,
+    })
+  })
+
+  it("reads the company balance", async () => {
+    expect(await api.company.balance()).toMatchObject({
+      available: "84000000000",
+      pending: "0",
+    })
+  })
+
+  it("delays every response under the slow scenario", async () => {
+    timing.slowMs = 40
+    scenarios.set("slow")
+    const start = performance.now()
+    await api.me.balance()
+    const slow = performance.now() - start
+    // Timers do not fire early, bar a millisecond of rounding.
+    expect(slow).toBeGreaterThanOrEqual(39)
+    // The delay is applied to the confirm routes too, before any check.
+    const confirm = performance.now()
+    await caught(
+      api.wrap.confirm({ request_id: "a".repeat(64), signature: SIG }),
+    )
+    expect(performance.now() - confirm).toBeGreaterThanOrEqual(39)
   })
 })
