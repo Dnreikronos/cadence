@@ -1,4 +1,4 @@
-import type { PaymentStatus, RunCreated } from "../schemas"
+import type { PaymentStatus, Receipt, RunCreated } from "../schemas"
 
 // Fixed ids so tests and screens can refer to the seed data.
 export const COMPANY_ID = "c0000000-0000-4000-8000-000000000001"
@@ -23,12 +23,7 @@ export type MockRequest = {
   amount?: bigint
   // How many confirm calls have asked so far.
   polls: number
-  receipt?: {
-    request_id: string
-    signature: string
-    slot: number
-    status: "finalized"
-  }
+  receipt?: Receipt
 }
 
 export type MockRunPayment = {
@@ -40,6 +35,9 @@ export type MockRunPayment = {
   signature: string | null
   request: string
   polls: number
+  // Transactions issued for this payment: the first, then one per retry.
+  attempts: number
+  receipt?: Receipt
 }
 
 export const seedPeople: MockPerson[] = [
@@ -102,7 +100,7 @@ function seed() {
     amount: amount as bigint,
     status: "confirmed" as const,
     paidAt: paidAt as string,
-    signature: `seedSignature${(id as string).slice(-1)}`.padEnd(32, "x"),
+    signature: `seedSignature${(id as string).slice(-1)}`.padEnd(64, "x"),
   }))
   return {
     counter: 0,

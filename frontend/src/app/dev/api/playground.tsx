@@ -1,15 +1,17 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   apiConfig,
   api,
   messageFor,
   isApiError,
   signAndConfirm,
+  whenApiReady,
 } from "@/lib/api"
 import { COMPANY_WALLET, ME_WALLET, seedPeople } from "@/lib/api/mocks/db"
 import { mockSigner, mockSubmit } from "@/lib/api/mocks/signer"
+import { randomUuid } from "@/lib/api/uuid"
 import {
   scenarioNames,
   scenarios,
@@ -21,9 +23,34 @@ import { buttonVariants } from "@/components/ui/button"
 // failure scenarios, until the real screens use the client.
 export function ApiPlayground() {
   const [log, setLog] = useState<string[]>([])
-  const [active, setActive] = useState<Scenario[]>(scenarios.list())
+  // Empty until mounted: the worker applies `?mock=` only once it has started.
+  const [active, setActive] = useState<Scenario[]>([])
   const [busy, setBusy] = useState(false)
   const write = (line: string) => setLog((lines) => [...lines, line])
+  // The flows use fake wallets, so against the real service they only fail.
+  const mock = apiConfig.mode === "mock"
+
+  useEffect(() => {
+    let live = true
+    whenApiReady()
+      .then(() => live && setActive(scenarios.list()))
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [])
+
+  // aria-disabled keeps focus on the button, so the click is guarded here.
+  const off = busy || !mock
+  const guarded = (action: () => void) => () => {
+    if (!off) action()
+  }
+  const button = (variant?: "secondary") =>
+    buttonVariants({
+      size: "sm",
+      variant,
+      className: "aria-disabled:pointer-events-none aria-disabled:opacity-50",
+    })
 
   async function run(title: string, flow: () => Promise<void>) {
     setBusy(true)
@@ -70,7 +97,7 @@ export function ApiPlayground() {
           person_id: p.id,
           amount: "1000000000",
         })),
-        idempotency_key: crypto.randomUUID(),
+        idempotency_key: randomUuid(),
       })
       for (const payment of created.payments) {
         try {
@@ -123,9 +150,15 @@ export function ApiPlayground() {
           Mode: <code className="font-mono">{apiConfig.mode}</code>. Runs the
           contract&apos;s flows and flips the mock&apos;s failure scenarios.
         </p>
+        {!mock && (
+          <p className="mt-2 text-ui text-ink" role="note">
+            The controls are off: they send fake wallets, which would hit the
+            real service. Set NEXT_PUBLIC_API_MODE to mock to use them.
+          </p>
+        )}
       </header>
 
-      <fieldset className="flex flex-wrap gap-2">
+      <fieldset disabled={!mock} className="flex flex-wrap gap-2">
         <legend className="mb-2 text-label text-ink-muted uppercase">
           Scenarios
         </legend>
@@ -146,50 +179,48 @@ export function ApiPlayground() {
 
       <div className="flex flex-wrap gap-2">
         <button
-          disabled={busy}
-          onClick={wrap}
-          className={buttonVariants({ size: "sm" })}
+          aria-disabled={off || undefined}
+          onClick={guarded(wrap)}
+          className={button()}
         >
           Wrap 2,500
         </button>
         <button
-          disabled={busy}
-          onClick={payroll}
-          className={buttonVariants({ size: "sm" })}
+          aria-disabled={off || undefined}
+          onClick={guarded(payroll)}
+          className={button()}
         >
           Pay three people
         </button>
         <button
-          disabled={busy}
-          onClick={unwrap("4200000000", false)}
-          className={buttonVariants({ size: "sm", variant: "secondary" })}
+          aria-disabled={off || undefined}
+          onClick={guarded(unwrap("4200000000", false))}
+          className={button("secondary")}
         >
           Withdraw 4,200 (no ack)
         </button>
         <button
-          disabled={busy}
-          onClick={unwrap("4200000000", true)}
-          className={buttonVariants({ size: "sm", variant: "secondary" })}
+          aria-disabled={off || undefined}
+          onClick={guarded(unwrap("4200000000", true))}
+          className={button("secondary")}
         >
           Withdraw 4,200 (ack)
         </button>
         <button
-          disabled={busy}
-          onClick={unwrap("1234567", false)}
-          className={buttonVariants({ size: "sm", variant: "secondary" })}
+          aria-disabled={off || undefined}
+          onClick={guarded(unwrap("1234567", false))}
+          className={button("secondary")}
         >
           Withdraw 1.23
         </button>
-        <button
-          onClick={() => setLog([])}
-          className={buttonVariants({ size: "sm", variant: "secondary" })}
-        >
+        <button onClick={() => setLog([])} className={button("secondary")}>
           Clear
         </button>
       </div>
 
       <pre
-        aria-live="polite"
+        role="log"
+        aria-label="Flow log"
         className="min-h-40 overflow-x-auto rounded-xl border border-line bg-surface p-4 font-mono text-caption/relaxed"
       >
         {log.join("\n") || "Nothing run yet."}

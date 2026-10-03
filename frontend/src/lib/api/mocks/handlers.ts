@@ -1,8 +1,10 @@
 import { http, HttpResponse, delay } from "msw"
-import type { z } from "zod"
+import { z } from "zod"
 import { formatBaseUnits } from "@/lib/deposit/schema"
 import { base64FromBytes } from "../base64"
+import { MOCK_ORIGIN } from "../config"
 import * as s from "../schemas"
+import { randomUuid } from "../uuid"
 import {
   COMPANY_ID,
   COMPANY_WALLET,
@@ -13,7 +15,7 @@ import {
   type MockPayment,
   type MockRunPayment,
 } from "./db"
-import { scenarios } from "./scenario"
+import { scenarios, timing } from "./scenario"
 
 // Mock of the proof service, written against docs/dev/API_CONTRACT.md. It answers
 // in the contract's shapes and errors with only `{ "error": code }`.
@@ -21,15 +23,23 @@ import { scenarios } from "./scenario"
 const fail = (status: number, code: string, headers?: Record<string, string>) =>
   HttpResponse.json({ error: code }, { status, headers })
 
+// Patterns carry the origin, so a Next route on the app's own origin that shares
+// a path (say /me/payments) is never answered by the mock.
+const at = (path: string) => `${MOCK_ORIGIN}${path}`
+
 type Role = "admin" | "recipient" | "auditor"
 
 // Common checks, in the order the real service makes them. Returns a response
 // when the call should stop.
-async function guard(request: Request, role?: Role) {
-  if (scenarios.has("slow")) await delay(1500)
+async function guard(
+  request: Request,
+  role?: Role,
+  rateLimitCode = "transfer_rate_limited",
+) {
+  if (scenarios.has("slow")) await delay(timing.slowMs)
   if (scenarios.has("service-down")) return fail(503, "auth_unavailable")
   if (scenarios.has("rate-limited")) {
-    return fail(429, "transfer_rate_limited", { "retry-after": "60" })
+    return fail(429, rateLimitCode, { "retry-after": "60" })
   }
   const header = request.headers.get("authorization") ?? ""
   if (scenarios.has("unauthenticated") || !/^Bearer .+/.test(header)) {
@@ -40,14 +50,57 @@ async function guard(request: Request, role?: Role) {
   return null
 }
 
+// Never a 500: whatever goes wrong in validation is a bad request.
 async function parse<T extends z.ZodType>(request: Request, schema: T) {
   const json = await request.json().catch(() => undefined)
-  const parsed = schema.safeParse(json)
-  if (parsed.success) return { data: parsed.data as z.output<T> }
-  const amountIssue = parsed.error.issues.some((i) => i.path[0] === "amount")
-  return {
-    error: fail(400, amountIssue ? "invalid_amount" : "invalid_request"),
+  try {
+    const parsed = schema.safeParse(json)
+    if (parsed.success) return { data: parsed.data as z.output<T> }
+    const amountIssue = parsed.error.issues.some((i) =>
+      i.path.includes("amount"),
+    )
+    return {
+      error: fail(400, amountIssue ? "invalid_amount" : "invalid_request"),
+    }
+  } catch {
+    return { error: fail(400, "invalid_request") }
   }
+}
+
+// Confirm bodies are only checked for shape here. The id and the signature get
+// their own codes below, as the real service answers them.
+const confirmBody = z.strictObject({
+  request_id: z.string(),
+  signature: z.string(),
+})
+const signatureBody = z.strictObject({ signature: z.string() })
+
+function badConfirm(requestId: string | undefined, signature: string) {
+  if (
+    requestId !== undefined &&
+    !s.requestIdSchema.safeParse(requestId).success
+  ) {
+    return fail(400, "invalid_request_id")
+  }
+  if (!s.signatureSchema.safeParse(signature).success) {
+    return fail(400, "invalid_signature")
+  }
+  return null
+}
+
+const alreadyConfirmedCode: Record<string, string> = {
+  wrap: "wrap_already_confirmed",
+  transfer: "transfer_already_confirmed",
+  "run-payment": "transfer_already_confirmed",
+}
+
+// A repeat with the same signature returns the stored receipt; another
+// signature for a confirmed request is a conflict.
+function replay(kind: string, receipt: s.Receipt, signature: string) {
+  if (receipt.signature !== signature) {
+    return fail(409, alreadyConfirmedCode[kind] ?? "already_confirmed")
+  }
+  return HttpResponse.json(receipt)
 }
 
 const hex = (n: number) => n.toString(16).padStart(64, "0")
@@ -95,27 +148,35 @@ function receiptFor(requestId: string, signature: string) {
 }
 
 async function confirmHandler(request: Request, kind: string) {
-  const stopped = await guard(request)
+  const stopped = await guard(
+    request,
+    undefined,
+    kind === "wrap" ? "wrap_rate_limited" : "transfer_rate_limited",
+  )
   if (stopped) return stopped
-  const { data, error } = await parse(request, s.confirmRequestSchema)
+  const { data, error } = await parse(request, confirmBody)
   if (error) return error
+  const bad = badConfirm(data.request_id, data.signature)
+  if (bad) return bad
   const record = db.requests.get(data.request_id)
   if (!record || record.kind !== kind) {
     return fail(404, notFoundCode[kind] ?? "request_not_found")
   }
-  // A repeat returns the stored receipt.
-  if (record.receipt) return HttpResponse.json(record.receipt)
+  if (record.receipt) return replay(kind, record.receipt, data.signature)
   if (scenarios.has("tx-failed")) return fail(409, "transaction_failed")
   record.polls += 1
   if (stillPending(record.polls)) return fail(409, "transaction_not_finalized")
   if (kind === "accounts/apply-pending" && scenarios.has("credit-mismatch")) {
     return fail(409, "credit_counter_mismatch")
   }
+  const rejected = applyEffect(kind, record.wallet, record.amount)
+  if (rejected) return rejected
   record.receipt = receiptFor(data.request_id, data.signature)
-  applyEffect(kind, record.wallet, record.amount)
   return HttpResponse.json(record.receipt)
 }
 
+// What a finalized transaction does to the ledgers. A ledger never goes
+// negative: a confirm that would is refused, and changes nothing.
 function applyEffect(kind: string, wallet: string, amount?: bigint) {
   if (kind === "wrap" && amount) {
     db.company.pending += amount
@@ -124,8 +185,10 @@ function applyEffect(kind: string, wallet: string, amount?: bigint) {
     ledger.available += ledger.pending
     ledger.pending = 0n
   } else if (kind === "unwrap" && amount) {
+    if (amount > db.me.available) return fail(409, "invalid_confidential_state")
     db.me.available -= amount
   }
+  return null
 }
 
 // ---- Reads ------------------------------------------------------------------
@@ -149,13 +212,22 @@ function paymentItem(
   }
 }
 
+// A whole number of at least `min`, the fallback when absent, null when malformed.
+function count(raw: string | null, fallback: number, min: number) {
+  if (raw === null) return fallback
+  if (!/^[0-9]{1,9}$/.test(raw)) return null
+  const value = Number(raw)
+  return value >= min ? value : null
+}
+
+// The cursor is an offset here. A malformed cursor or limit is a bad request;
+// a limit past 100 is clamped.
 function paged<T>(request: Request, rows: T[]) {
   const url = new URL(request.url)
-  const limit = Math.min(
-    Math.max(Number(url.searchParams.get("limit")) || 50, 1),
-    100,
-  )
-  const start = Number(url.searchParams.get("cursor")) || 0
+  const requested = count(url.searchParams.get("limit"), 50, 1)
+  const start = count(url.searchParams.get("cursor"), 0, 0)
+  if (requested === null || start === null) return fail(400, "invalid_request")
+  const limit = Math.min(requested, 100)
   const items = rows.slice(start, start + limit)
   const next = start + limit < rows.length ? String(start + limit) : null
   return HttpResponse.json({ items, next_cursor: next })
@@ -163,6 +235,13 @@ function paged<T>(request: Request, rows: T[]) {
 
 const newestFirst = (a: MockPayment, b: MockPayment) =>
   b.paidAt.localeCompare(a.paidAt)
+
+// RFC 4180 quoting, after a spreadsheet-formula guard: a cell that starts with
+// = + - @ tab or CR gets a leading quote so Excel never runs it.
+function cell(value: string) {
+  const safe = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value
+  return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe
+}
 
 function csv(rows: MockPayment[], name: (p: MockPayment) => string) {
   const lines = rows.map((p) =>
@@ -172,7 +251,9 @@ function csv(rows: MockPayment[], name: (p: MockPayment) => string) {
       formatBaseUnits(p.amount),
       p.status,
       p.signature ?? "",
-    ].join(","),
+    ]
+      .map(cell)
+      .join(","),
   )
   return new HttpResponse(
     ["date,counterparty,amount,status,signature", ...lines].join("\n"),
@@ -206,13 +287,35 @@ function runPaymentPrepared(runPayment: MockRunPayment) {
   remember("run-payment", p, COMPANY_WALLET, runPayment.amount)
   runPayment.request = p.request_id
   runPayment.polls = 0
+  runPayment.attempts += 1
   runPayment.status = "pending"
   runPayment.failure = null
+  runPayment.receipt = undefined
   return {
     ...p,
     payment_id: runPayment.paymentId,
     person_id: runPayment.personId,
   }
+}
+
+// partial-failure: payments 2 and 3 fail on their first attempt only, so a retry
+// can be exercised end to end.
+const failsFirstAttempt = (payment: MockRunPayment, index: number) =>
+  scenarios.has("partial-failure") &&
+  (index === 1 || index === 2) &&
+  payment.attempts === 1
+
+// A payment that never confirmed outlives its blockhash: payment 3 reports
+// `expired` until it is retried.
+function reportedStatus(
+  payment: MockRunPayment,
+  index: number,
+): s.PaymentStatus {
+  return index === 2 &&
+    payment.status === "pending" &&
+    failsFirstAttempt(payment, index)
+    ? "expired"
+    : payment.status
 }
 
 function findRunPayment(runId: string, paymentId: string) {
@@ -222,7 +325,7 @@ function findRunPayment(runId: string, paymentId: string) {
 }
 
 export const handlers = [
-  http.get("*/health", async () => {
+  http.get(at("/health"), async () => {
     if (scenarios.has("service-down")) {
       return HttpResponse.json(
         { status: "unavailable", build_sha: "mock", rpc_reachable: false },
@@ -237,8 +340,8 @@ export const handlers = [
   }),
 
   // ---- Wrap
-  http.post("*/wrap", async ({ request }) => {
-    const stopped = await guard(request)
+  http.post(at("/wrap"), async ({ request }) => {
+    const stopped = await guard(request, undefined, "wrap_rate_limited")
     if (stopped) return stopped
     const { data, error } = await parse(request, s.wrapRequestSchema)
     if (error) return error
@@ -249,15 +352,17 @@ export const handlers = [
     remember("wrap", p, data.company_wallet, BigInt(data.amount))
     return HttpResponse.json({
       ...p,
-      destination: "6xHqMockToken2022Account1111111111111111111",
+      destination: "6xHqMockTokenAccount222222222222222222222222",
       mint: "CGL4U4VC8arAEUDxLh7c6K4rJnZr1T6faK9QQRn2sYmb",
       deposit_state: "pending_after_confirmation",
     })
   }),
-  http.post("*/wrap/confirm", ({ request }) => confirmHandler(request, "wrap")),
+  http.post(at("/wrap/confirm"), ({ request }) =>
+    confirmHandler(request, "wrap"),
+  ),
 
   // ---- Transfer
-  http.post("*/transfer", async ({ request }) => {
+  http.post(at("/transfer"), async ({ request }) => {
     const stopped = await guard(request)
     if (stopped) return stopped
     const { data, error } = await parse(request, s.transferRequestSchema)
@@ -271,12 +376,12 @@ export const handlers = [
       mint: "CGL4U4VC8arAEUDxLh7c6K4rJnZr1T6faK9QQRn2sYmb",
     })
   }),
-  http.post("*/transfer/confirm", ({ request }) =>
+  http.post(at("/transfer/confirm"), ({ request }) =>
     confirmHandler(request, "transfer"),
   ),
 
   // ---- Runs
-  http.post("*/runs", async ({ request }) => {
+  http.post(at("/runs"), async ({ request }) => {
     const stopped = await guard(request, "admin")
     if (stopped) return stopped
     const { data, error } = await parse(request, s.runRequestSchema)
@@ -291,12 +396,12 @@ export const handlers = [
       if (!person) return fail(404, "person_not_found")
       if (!person.activated) return fail(409, "recipient_not_activated")
     }
-    const runId = crypto.randomUUID()
+    const runId = randomUuid()
     const run: NonNullable<ReturnType<typeof db.runs.get>> = {
       id: runId,
       createdAt: new Date().toISOString(),
       payments: data.payments.map<MockRunPayment>((p) => ({
-        paymentId: crypto.randomUUID(),
+        paymentId: randomUuid(),
         personId: p.person_id,
         amount: BigInt(p.amount),
         status: "pending",
@@ -304,6 +409,7 @@ export const handlers = [
         signature: null,
         request: "",
         polls: 0,
+        attempts: 0,
       })),
     }
     db.runs.set(runId, run)
@@ -315,7 +421,7 @@ export const handlers = [
     return HttpResponse.json(run.response)
   }),
 
-  http.get("*/runs/:runId", async ({ request, params }) => {
+  http.get(at("/runs/:runId"), async ({ request, params }) => {
     const stopped = await guard(request, "admin")
     if (stopped) return stopped
     const run = db.runs.get(String(params.runId))
@@ -326,13 +432,7 @@ export const handlers = [
       payments: run.payments.map((p, index) => ({
         payment_id: p.paymentId,
         person_id: p.personId,
-        // A payment that never confirmed outlives its blockhash.
-        status:
-          scenarios.has("partial-failure") &&
-          index === 2 &&
-          p.status === "pending"
-            ? "expired"
-            : p.status,
+        status: reportedStatus(p, index),
         transparent: false,
         failure: p.failure,
         signature: p.signature,
@@ -341,27 +441,26 @@ export const handlers = [
   }),
 
   http.post(
-    "*/runs/:runId/payments/:paymentId/confirm",
+    at("/runs/:runId/payments/:paymentId/confirm"),
     async ({ request, params }) => {
       const stopped = await guard(request, "admin")
       if (stopped) return stopped
-      const { data, error } = await parse(request, s.paymentConfirmSchema)
+      const { data, error } = await parse(request, signatureBody)
       if (error) return error
+      const bad = badConfirm(undefined, data.signature)
+      if (bad) return bad
       const { run, index, payment } = findRunPayment(
         String(params.runId),
         String(params.paymentId),
       )
       if (!run || !payment) return fail(404, "payment_not_found")
-      if (payment.status === "confirmed") {
-        return HttpResponse.json(
-          receiptFor(payment.request, payment.signature ?? data.signature),
-        )
+      if (payment.receipt) {
+        return replay("run-payment", payment.receipt, data.signature)
       }
-      const failing =
-        scenarios.has("tx-failed") ||
-        (scenarios.has("partial-failure") && (index === 1 || index === 2))
-      if (failing) {
-        if (index !== 2) {
+      const firstAttempt = failsFirstAttempt(payment, index)
+      if (scenarios.has("tx-failed") || firstAttempt) {
+        // Payment 3 stays unconfirmed and is reported as expired.
+        if (!(firstAttempt && index === 2)) {
           payment.status = "failed"
           payment.failure = "transaction_failed"
         }
@@ -369,11 +468,17 @@ export const handlers = [
       }
       payment.polls += 1
       payment.status = "signed"
-      if (stillPending(payment.polls))
+      if (stillPending(payment.polls)) {
         return fail(409, "transaction_not_finalized")
+      }
+      if (payment.amount > db.company.available) {
+        return fail(409, "invalid_confidential_state")
+      }
+      db.company.available -= payment.amount
       payment.status = "confirmed"
       payment.signature = data.signature
-      db.me.pending += payment.personId === ME_PERSON ? payment.amount : 0n
+      payment.receipt = receiptFor(payment.request, data.signature)
+      if (payment.personId === ME_PERSON) db.me.pending += payment.amount
       db.payments.push({
         id: payment.paymentId,
         runId: run.id,
@@ -383,26 +488,32 @@ export const handlers = [
         paidAt: new Date().toISOString(),
         signature: data.signature,
       })
-      return HttpResponse.json(receiptFor(payment.request, data.signature))
+      return HttpResponse.json(payment.receipt)
     },
   ),
 
   http.post(
-    "*/runs/:runId/payments/:paymentId/retry",
+    at("/runs/:runId/payments/:paymentId/retry"),
     async ({ request, params }) => {
       const stopped = await guard(request, "admin")
       if (stopped) return stopped
-      const { payment } = findRunPayment(
+      const { payment, index } = findRunPayment(
         String(params.runId),
         String(params.paymentId),
       )
       if (!payment) return fail(404, "payment_not_found")
+      // Only a payment that did not land gets a new transaction: a confirmed
+      // one would be paid twice. Mock-only code; the draft contract has none.
+      const status = reportedStatus(payment, index)
+      if (status !== "failed" && status !== "expired") {
+        return fail(409, "payment_not_retryable")
+      }
       return HttpResponse.json(runPaymentPrepared(payment))
     },
   ),
 
   // ---- Unwrap
-  http.post("*/unwrap", async ({ request }) => {
+  http.post(at("/unwrap"), async ({ request }) => {
     const stopped = await guard(request, "recipient")
     if (stopped) return stopped
     const { data, error } = await parse(request, s.unwrapRequestSchema)
@@ -426,12 +537,12 @@ export const handlers = [
       },
     })
   }),
-  http.post("*/unwrap/confirm", ({ request }) =>
+  http.post(at("/unwrap/confirm"), ({ request }) =>
     confirmHandler(request, "unwrap"),
   ),
 
   // ---- Accounts and keys
-  http.post("*/accounts/configure", async ({ request }) => {
+  http.post(at("/accounts/configure"), async ({ request }) => {
     const stopped = await guard(request)
     if (stopped) return stopped
     const { data, error } = await parse(request, s.walletRequestSchema)
@@ -440,10 +551,10 @@ export const handlers = [
     remember("accounts/configure", p, data.wallet)
     return HttpResponse.json(p)
   }),
-  http.post("*/accounts/configure/confirm", ({ request }) =>
+  http.post(at("/accounts/configure/confirm"), ({ request }) =>
     confirmHandler(request, "accounts/configure"),
   ),
-  http.post("*/accounts/apply-pending", async ({ request }) => {
+  http.post(at("/accounts/apply-pending"), async ({ request }) => {
     const stopped = await guard(request)
     if (stopped) return stopped
     const { data, error } = await parse(request, s.walletRequestSchema)
@@ -452,10 +563,10 @@ export const handlers = [
     remember("accounts/apply-pending", p, data.wallet)
     return HttpResponse.json(p)
   }),
-  http.post("*/accounts/apply-pending/confirm", ({ request }) =>
+  http.post(at("/accounts/apply-pending/confirm"), ({ request }) =>
     confirmHandler(request, "accounts/apply-pending"),
   ),
-  http.post("*/keys/enroll", async ({ request }) => {
+  http.post(at("/keys/enroll"), async ({ request }) => {
     const stopped = await guard(request)
     if (stopped) return stopped
     const { data, error } = await parse(request, s.enrollRequestSchema)
@@ -466,7 +577,7 @@ export const handlers = [
   }),
 
   // ---- Reads
-  http.get("*/me/balance", async ({ request }) => {
+  http.get(at("/me/balance"), async ({ request }) => {
     const stopped = await guard(request, "recipient")
     if (stopped) return stopped
     return HttpResponse.json({
@@ -475,7 +586,7 @@ export const handlers = [
       as_of_slot: 507_000_000 + db.counter,
     })
   }),
-  http.get("*/me/payments", async ({ request }) => {
+  http.get(at("/me/payments"), async ({ request }) => {
     const stopped = await guard(request, "recipient")
     if (stopped) return stopped
     const rows = db.payments
@@ -484,7 +595,16 @@ export const handlers = [
       .map((p) => paymentItem(p, { id: COMPANY_ID, name: "Solaris" }))
     return paged(request, rows)
   }),
-  http.get("*/company/payments", async ({ request }) => {
+  http.get(at("/company/balance"), async ({ request }) => {
+    const stopped = await guard(request, "admin")
+    if (stopped) return stopped
+    return HttpResponse.json({
+      available: db.company.available.toString(),
+      pending: db.company.pending.toString(),
+      as_of_slot: 507_000_000 + db.counter,
+    })
+  }),
+  http.get(at("/company/payments"), async ({ request }) => {
     const stopped = await guard(request, "admin")
     if (stopped) return stopped
     const rows = [...db.payments]
@@ -494,7 +614,7 @@ export const handlers = [
       )
     return paged(request, rows)
   }),
-  http.get("*/company/people/amounts", async ({ request }) => {
+  http.get(at("/company/people/amounts"), async ({ request }) => {
     const stopped = await guard(request, "admin")
     if (stopped) return stopped
     const rows = [...db.amounts].map(([person_id, amount]) => ({
@@ -503,19 +623,22 @@ export const handlers = [
     }))
     return paged(request, rows)
   }),
-  http.put("*/company/people/:personId/amount", async ({ request, params }) => {
-    const stopped = await guard(request, "admin")
-    if (stopped) return stopped
-    const { data, error } = await parse(request, s.setAmountRequestSchema)
-    if (error) return error
-    const id = String(params.personId)
-    if (!seedPeople.some((p) => p.id === id))
-      return fail(404, "person_not_found")
-    db.amounts.set(id, BigInt(data.amount))
-    return HttpResponse.json({ person_id: id, amount: data.amount })
-  }),
+  http.put(
+    at("/company/people/:personId/amount"),
+    async ({ request, params }) => {
+      const stopped = await guard(request, "admin")
+      if (stopped) return stopped
+      const { data, error } = await parse(request, s.setAmountRequestSchema)
+      if (error) return error
+      const id = String(params.personId)
+      if (!seedPeople.some((p) => p.id === id))
+        return fail(404, "person_not_found")
+      db.amounts.set(id, BigInt(data.amount))
+      return HttpResponse.json({ person_id: id, amount: data.amount })
+    },
+  ),
   http.post(
-    "*/company/people/:personId/invite",
+    at("/company/people/:personId/invite"),
     async ({ request, params }) => {
       const stopped = await guard(request, "admin")
       if (stopped) return stopped
@@ -528,7 +651,7 @@ export const handlers = [
       })
     },
   ),
-  http.get("*/audit/:companyId/payments", async ({ request, params }) => {
+  http.get(at("/audit/:companyId/payments"), async ({ request, params }) => {
     const stopped = await guard(request, "auditor")
     if (stopped) return stopped
     // A grant on one company is useless against another, and never confirms it exists.
@@ -542,12 +665,12 @@ export const handlers = [
   }),
 
   // ---- CSV
-  http.get("*/company/export.csv", async ({ request }) => {
+  http.get(at("/company/export.csv"), async ({ request }) => {
     const stopped = await guard(request, "admin")
     if (stopped) return stopped
     return csv(db.payments, (p) => personName(p.personId))
   }),
-  http.get("*/me/export.csv", async ({ request }) => {
+  http.get(at("/me/export.csv"), async ({ request }) => {
     const stopped = await guard(request, "recipient")
     if (stopped) return stopped
     return csv(
@@ -555,7 +678,7 @@ export const handlers = [
       () => "Solaris",
     )
   }),
-  http.get("*/audit/:companyId/export.csv", async ({ request, params }) => {
+  http.get(at("/audit/:companyId/export.csv"), async ({ request, params }) => {
     const stopped = await guard(request, "auditor")
     if (stopped) return stopped
     if (params.companyId !== COMPANY_ID) return fail(404, "not_found")
