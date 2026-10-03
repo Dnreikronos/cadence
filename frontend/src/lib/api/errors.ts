@@ -43,13 +43,23 @@ export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError
 }
 
+// The service always answers a 429 with Retry-After: 60, but CORS does not expose
+// that header to cross-origin browser code, so an unreadable one means 60 s.
+const RATE_LIMIT_WAIT = 60
+
 export function errorFromResponse(response: Response, body: unknown) {
   const parsed = errorBodySchema.safeParse(body)
-  const retryAfter = Number(response.headers.get("retry-after"))
+  const header = Number(response.headers.get("retry-after"))
+  const retryAfter =
+    Number.isFinite(header) && header > 0
+      ? header
+      : response.status === 429
+        ? RATE_LIMIT_WAIT
+        : undefined
   return new ApiError(
     response.status,
     parsed.success ? parsed.data.error : statusFallback(response.status),
-    Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+    retryAfter,
   )
 }
 

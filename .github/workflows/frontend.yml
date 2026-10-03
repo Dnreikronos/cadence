@@ -33,4 +33,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm test
+      # The build refuses to guess whether the app talks to the real service or the mock.
       - run: pnpm build
+        env:
+          NEXT_PUBLIC_API_MODE: mock

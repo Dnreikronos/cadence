@@ -91,6 +91,19 @@ describe("errorFromResponse", () => {
     expect(JSON.stringify(error)).not.toContain("5")
   })
 
+  it("waits 60 s on a 429 whose Retry-After the browser cannot read", () => {
+    const error = errorFromResponse(new Response(null, { status: 429 }), {
+      error: "transfer_rate_limited",
+    })
+    expect(error.retryAfter).toBe(60)
+    // Other statuses stay undefined without the header.
+    expect(
+      errorFromResponse(new Response(null, { status: 503 }), {
+        error: "auth_unavailable",
+      }).retryAfter,
+    ).toBeUndefined()
+  })
+
   it("falls back to the status class when the body is not an error", () => {
     expect(
       errorFromResponse(new Response(null, { status: 502 }), "<html>"),
