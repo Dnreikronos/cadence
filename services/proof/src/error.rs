@@ -3,6 +3,8 @@ use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    #[error("{0}")]
+    TransferUnavailable(&'static str),
     #[error("wrap rate limit exceeded")]
     RateLimited,
     #[error("{0}")]
@@ -26,6 +28,7 @@ pub enum AppError {
 impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
+            Self::TransferUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Conflict(_) => StatusCode::CONFLICT,
@@ -47,6 +50,7 @@ impl IntoResponse for AppError {
                 .into_response();
         }
         let code = match self {
+            Self::TransferUnavailable(code) => code,
             Self::BadRequest(code) | Self::Conflict(code) => code,
             Self::NotFound => "wrap_not_found",
             Self::StorageUnavailable => "wrap_storage_unavailable",

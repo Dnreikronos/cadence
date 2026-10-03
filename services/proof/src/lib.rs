@@ -3,6 +3,7 @@ pub mod audit {
 }
 pub mod config;
 pub mod cors;
+pub mod database;
 pub mod error;
 pub mod wrap_store;
 pub mod keys {
