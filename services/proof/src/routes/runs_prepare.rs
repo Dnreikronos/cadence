@@ -16,6 +16,7 @@ use axum::{
     Json,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
+use futures_util::{stream, StreamExt};
 use serde::Deserialize;
 use solana_address::Address;
 use solana_zk_sdk::encryption::auth_encryption::AeKey;
@@ -255,8 +256,17 @@ async fn build(
     }
     let mut payments = vec![];
     let mut account_errors = vec![];
-    for p in &entries {
-        let (account, error) = match state.rpc.account(&p.recipient).await {
+    let requests = entries
+        .iter()
+        .map(|p| {
+            let rpc = state.rpc.clone();
+            let recipient = p.recipient;
+            async move { rpc.account(&recipient).await }
+        })
+        .collect::<Vec<_>>();
+    let accounts = stream::iter(requests).buffered(8).collect::<Vec<_>>().await;
+    for (p, fetched) in entries.iter().zip(accounts) {
+        let (account, error) = match fetched {
             Ok(account) => (account, None),
             Err(error) => (None, Some(runs::error_code(&error))),
         };
