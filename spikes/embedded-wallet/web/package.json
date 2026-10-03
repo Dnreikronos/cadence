@@ -1,0 +1,18 @@
+{
+  "name": "embedded-wallet-spike-web",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3400"
+  },
+  "dependencies": {
+    "@noble/hashes": "^2.4.0",
+    "@solana/kit": "^8.4.0",
+    "@supabase/supabase-js": "^2.117.2",
+    "@turnkey/react-wallet-kit": "^2.5.2",
+    "@turnkey/sdk-server": "^8.6.0",
+    "bs58": "^6.0.0",
+    "next": "^15.5.26",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  }
+}

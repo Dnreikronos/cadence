@@ -1,0 +1,86 @@
+# Embedded wallet spike (#77)
+
+Throwaway code for [#77](https://github.com/Dnreikronos/cadence/issues/77). The
+findings are in
+[`docs/dev/spikes/2026-10-03-embedded-wallet.md`](../../docs/dev/spikes/2026-10-03-embedded-wallet.md).
+Do not import anything from here into the product.
+
+## What is here
+
+- `lib.mjs`, `step1-nonce.mjs` to `step4-session.mjs`: Node scripts. They sign a test
+  user in to Supabase, bind a Turnkey key through the access token, create a
+  sub-organization, log in, sign a v1 transaction and a message, check the parent
+  cannot sign, and probe session lengths and renewal.
+- `whoami.mjs`: a read-only check that the Turnkey API key works.
+- `hook.sql`: the Custom Access Token Hook that copies `user_metadata.tknonce` into
+  the access token.
+- `web/`: a small Next page that runs the same flow in a browser with
+  `@turnkey/react-wallet-kit`. Its routes stand in for #78 (`/api/turnkey-login`) and
+  for the email sign-in (`/api/dev-session`).
+
+## Rerunning it
+
+You need a Turnkey organization (a disposable devnet one), Docker, and `cloudflared`.
+
+1. **Turnkey credentials** in `spikes/embedded-wallet/.env` (git-ignored):
+
+   ```
+   TURNKEY_ORGANIZATION_ID=...
+   TURNKEY_API_PUBLIC_KEY=...   # 66 hex characters, compressed P-256
+   TURNKEY_API_PRIVATE_KEY=...  # 64 hex characters
+   ```
+
+   Create the key in the Turnkey dashboard under My Profile → API Keys → New API Key.
+   The spike used a root user key; revoke it afterwards.
+
+2. **A public issuer.** Turnkey cannot reach `127.0.0.1`, so open a tunnel and make the
+   auth server use its URL as the issuer. A new tunnel URL is needed whenever the
+   signing key changes, because Turnkey caches an issuer's key set.
+
+   ```sh
+   cloudflared tunnel --url http://127.0.0.1:54321
+   ```
+
+3. **Supabase config** (temporary, do not commit) in `supabase/config.toml`:
+
+   ```toml
+   [auth]
+   external_url = "https://<your-tunnel>.trycloudflare.com/auth/v1"
+   signing_keys_path = "./signing_keys.json"
+
+   [auth.hook.custom_access_token]
+   enabled = true
+   uri = "pg-functions://postgres/public/custom_access_token_hook"
+   ```
+
+   Turnkey rejects ES256, so generate an **RS256** key (the file is a private key; keep
+   it out of git):
+
+   ```sh
+   pnpm dlx supabase gen signing-key --algorithm RS256
+   ```
+
+4. **Start Supabase and install the hook:**
+
+   ```sh
+   pnpm dlx supabase start
+   docker exec -i supabase_db_cadence psql -U postgres -d postgres < spikes/embedded-wallet/hook.sql
+   ```
+
+5. **Run the scripts** from `spikes/embedded-wallet/` after `npm install`:
+
+   ```sh
+   node whoami.mjs
+   node step1-nonce.mjs
+   node step2-turnkey.mjs        # add `bytes` to see the wrong nonce encoding fail
+   node step3-sign.mjs
+   node step4-session.mjs
+   ```
+
+6. **The browser page.** In `web/`, run `npm install`, create `web/.env.local` with
+   `NEXT_PUBLIC_TURNKEY_ORGANIZATION_ID`, `NEXT_PUBLIC_SUPABASE_URL` (the tunnel URL),
+   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY`, then `npm run dev`
+   and open http://localhost:3400. Press the buttons in order.
+
+Each run creates throwaway sub-organizations named `spike-<timestamp>` in the Turnkey
+organization. Delete them from the dashboard when you are done.
