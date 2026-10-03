@@ -233,11 +233,6 @@ async fn build(
     entries: Vec<Entry>,
 ) -> Result<Vec<Payment>, AppError> {
     let service = state.service.as_ref().ok_or(AppError::RunUnavailable)?;
-    let permit = service
-        .proof_slots
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| AppError::TransferRateLimited)?;
     state.devnet().await?;
     let mint = Addresses::for_usdc().wrapped_mint;
     let (mint_account, source) =
@@ -283,6 +278,12 @@ async fn build(
         state.rpc.minimum_balance(sizes[1]),
         state.rpc.minimum_balance(sizes[2])
     )?;
+    let (blockhash, height) = state.rpc.blockhash_with_expiry().await?;
+    let permit = service
+        .proof_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| AppError::TransferRateLimited)?;
     let client = service
         .keys
         .connect()
@@ -298,7 +299,6 @@ async fn build(
     .await
     .map_err(|_| AppError::TransferUnavailable("key_storage_unavailable"))?;
     drop(client);
-    let (blockhash, height) = state.rpc.blockhash_with_expiry().await?;
     let results = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         batch::build(
