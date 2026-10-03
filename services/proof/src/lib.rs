@@ -20,6 +20,7 @@ pub mod routes {
     mod wrap_limits;
 }
 pub mod solana {
+    pub mod batch;
     pub mod client;
     pub mod confidential;
     pub mod token_client;
