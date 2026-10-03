@@ -15,6 +15,7 @@ pub mod keys {
 }
 pub mod routes {
     pub mod health;
+    pub mod runs;
     pub mod transfer;
     pub mod wrap;
     mod wrap_limits;
@@ -54,10 +55,12 @@ pub fn router_with_payments(
     transfer: Option<Arc<routes::transfer::Service>>,
 ) -> Router {
     let wrap = routes::wrap::router(state.rpc.clone(), store);
+    let runs = routes::runs::router(state.rpc.clone(), transfer.clone());
     let transfer = routes::transfer::router(state.rpc.clone(), transfer);
     Router::new()
         .route("/health", get(routes::health::health))
         .with_state(state)
         .merge(wrap)
         .merge(transfer)
+        .merge(runs)
 }
