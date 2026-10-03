@@ -301,3 +301,14 @@ finalized transaction and records an immutable receipt for the same user.
 See the [transfer API contract](../../docs/dev/TRANSFER_API.md) for configuration,
 wallet-link message signing, transient AES-key delivery, limits and devnet
 evidence. The proof service never signs or submits a transfer.
+
+## Payment runs
+
+`POST /runs` prepares ordered confidential payments with one unsigned v1
+transaction per buildable recipient. `POST /runs/:id/confirm` records each
+payment's verified success or failure independently. `GET /runs/:id` returns
+amount-free status, and `/runs/:id/retry` reconciles old attempts before
+rebuilding unpaid payments. The endpoints reuse transfer authentication,
+audited key access and runtime configuration. Apply the runs migration after
+the transfer migration. See the [runs API contract](../../docs/dev/RUNS_API.md)
+for request shapes, signing order and safe retry behavior.
