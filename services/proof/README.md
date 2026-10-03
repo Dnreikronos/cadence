@@ -249,7 +249,7 @@ The actual audited entry point produced a 2,913-byte transfer that confirmed on
 devnet on 2026-10-03. All three context accounts were closed; sender debit and
 recipient credit were verified, and an independent RPC returned no plaintext
 amount field. See the [contract and evidence](../../docs/plans/2026-10-03-053-proof-generation.md).
-Browser signing and the public transfer API remain issue #54.
+The authenticated HTTP layer and its live provider check are described below.
 
 ```bash
 cargo test --locked --lib solana::confidential
@@ -290,3 +290,14 @@ quota and a concurrency cap. Expired unsigned preparations are collected after
 24 hours by the restricted cleanup function. Apply the wrap cleanup migration
 before deploying this version. See the API contract for quota values, delayed
 confirmation handling and proxy/replica deployment requirements.
+
+
+## Transfer API
+
+`POST /transfer` authenticates Supabase login, verifies the wallet association
+and fresh source ownership, loads the viewing key through audited Vault access,
+and returns unsigned v1 bytes. `POST /transfer/confirm` verifies the exact
+finalized transaction and records an immutable receipt for the same user.
+See the [transfer API contract](../../docs/dev/TRANSFER_API.md) for configuration,
+wallet-link message signing, transient AES-key delivery, limits and devnet
+evidence. The proof service never signs or submits a transfer.

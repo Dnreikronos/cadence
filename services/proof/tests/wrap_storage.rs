@@ -4,6 +4,13 @@ use tokio_postgres::NoTls;
 #[test]
 fn storage_configuration_requires_credentials_and_secure_transport() {
     assert!(WrapStore::parse(|_| None).unwrap().is_none());
+    assert!(WrapStore::parse(|name| match name {
+        "PROOF_SUPABASE_URL" => Some("https://example.com".into()),
+        "PROOF_SUPABASE_API_KEY" => Some("public-test-key".into()),
+        _ => None,
+    })
+    .unwrap()
+    .is_none());
     assert!(WrapStore::parse(
         |name| (name == "PROOF_SUPABASE_URL").then(|| "https://example.com".into())
     )

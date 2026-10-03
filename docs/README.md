@@ -26,6 +26,8 @@ repo's paths instead of these.
 
 - [Company wallets sign the USDC wrap transaction](plans/2026-09-29-052-plan-wrap.md) — 2026-09-29, #52. Implemented and tested locally; browser-wallet devnet acceptance remains unverified. [API contract](dev/WRAP_API.md).
 
+- [Authenticated transfer API](plans/2026-10-03-054-transfer-api.md) — 2026-10-03, #54. Supabase login and wallet association; verified locally and on devnet through a browser-driven Turnkey test adapter. [API contract](dev/TRANSFER_API.md).
+
 ## Spikes
 
 - [One confidential transfer is 2,395 bytes on devnet, and `spl-token-client` cannot send it](dev/spikes/2026-09-27-confidential-transfer.md) — 2026-09-27. Verdict: go, conditional on superseding B18. R2 and R3 confirmed on chain; the client the ADR picks cannot build a v1 transaction.

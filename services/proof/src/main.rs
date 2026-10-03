@@ -1,6 +1,6 @@
 use cadence_proof::{
-    config::Config, error::AppError, router_with_wrap, solana::client::RpcClient,
-    wrap_store::WrapStore, AppState,
+    config::Config, error::AppError, router_with_payments, routes::transfer::Service,
+    solana::client::RpcClient, wrap_store::WrapStore, AppState,
 };
 use std::sync::Arc;
 
@@ -9,6 +9,7 @@ async fn main() -> Result<(), AppError> {
     let config = Config::from_env()?;
     let rpc = Arc::new(RpcClient::new(config.rpc_url, config.rpc_timeout)?);
     let wrap_store = WrapStore::from_env()?.map(Arc::new);
+    let transfer = Service::from_env()?.map(Arc::new);
     let cors = cadence_proof::cors::from_env()?;
 
     #[cfg(unix)]
@@ -40,12 +41,13 @@ async fn main() -> Result<(), AppError> {
         .map(|store| store.clone().spawn_cleanup(rpc.clone()));
     let result = axum::serve(
         listener,
-        router_with_wrap(
+        router_with_payments(
             AppState {
                 rpc,
                 build_sha: config.build_sha,
             },
             wrap_store,
+            transfer,
         )
         .layer(cors)
         .into_make_service_with_connect_info::<std::net::SocketAddr>(),
