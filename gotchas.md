@@ -1,5 +1,9 @@
 # Gotchas
 
+- When publishing for this user, follow the supplied branch and atomic-commit
+  skills before opening the PR. Verify each staged snapshot, write casual prose
+  that explains the choice, and remove colon punctuation from the PR body.
+
 - Before treating an issue's dependencies as missing, fetch and inspect the
   remote default branch. An older feature checkout can omit already merged code.
   Preserve local changes in that checkout and use an isolated worktree.
