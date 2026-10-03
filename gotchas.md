@@ -1,5 +1,10 @@
 # Gotchas
 
+- Before claiming provider credentials are missing, check the project's ignored
+  `.env` files as well as the process environment, including the checkout used
+  for the previous experiment. Inspect setting names/presence without printing
+  values. New worktrees do not copy ignored credentials.
+
 - For #51, Turnkey is selected after a confirmed confidential v1 transfer on
   devnet. This supersedes the earlier Phantom-only preference. Keep production
   embedded onboarding and custody review open; the root-key spike does not
