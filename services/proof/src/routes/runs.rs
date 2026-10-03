@@ -1,4 +1,5 @@
 use super::{
+    runs_prepare,
     transfer::Service,
     wrap_limits::{self, Limits},
 };
@@ -10,7 +11,7 @@ use crate::{
 use axum::{
     extract::{DefaultBodyLimit, Path, State},
     http::HeaderMap,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use serde::Serialize;
@@ -45,6 +46,7 @@ impl RunState {
 pub fn router(rpc: Arc<RpcClient>, service: Option<Arc<Service>>) -> Router {
     let limits = Arc::new(Limits::new());
     Router::new()
+        .route("/runs", post(runs_prepare::prepare))
         .route("/runs/{id}", get(status))
         .layer(DefaultBodyLimit::max(32768))
         .layer(axum::middleware::from_fn_with_state(
