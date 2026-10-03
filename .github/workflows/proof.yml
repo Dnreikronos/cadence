@@ -42,6 +42,9 @@ jobs:
   vault:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      matrix:
+        suite: [keys, confidential_vault]
     services:
       postgres:
         image: supabase/postgres:17.6.1.143
@@ -67,7 +70,8 @@ jobs:
       - name: Verify encrypted storage and audited access
         env:
           VAULT_TEST_DATABASE_URL: postgres://postgres:keys-test-only@localhost:5432/keys_test
-        run: cargo test --locked --test keys -- --ignored
+          CONFIDENTIAL_VAULT_TEST_DATABASE_URL: postgres://postgres:keys-test-only@localhost:5432/keys_test
+        run: cargo test --locked --test ${{ matrix.suite }} -- --ignored
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 20

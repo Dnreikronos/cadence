@@ -221,6 +221,53 @@ concurrent transaction visibility, permit reuse, and context tampering. CI runs
 this against the real Vault extension in a separate job.
 
 
+## Confidential transfer proof module
+
+Issue [#53](https://github.com/Dnreikronos/cadence/issues/53) adds
+`solana::confidential::load_and_build`. It loads the sender's `ViewingKey`
+through the audited Vault accessor, uses `spl-token-client`'s unchanged proof
+and balance helpers, and returns an unsigned v1 transaction. The pure `build`
+entry point accepts a previously loaded key. Neither entry point signs or
+submits, and there is no transfer HTTP endpoint in this module.
+
+Callers supply fresh trusted mint/source/destination account snapshots, amount
+in base units, a recent blockhash, and rent quotes for `CONTEXT_SIZES`. They also
+lend the sender's AES balance key: the current Vault format stores only the
+ElGamal secret. Keep that AES key transient and out of request logging; #53 does
+not change key enrollment or storage. Account authorization, RPC timeouts,
+blockhash retries, and AES-key delivery belong to the authenticated calling layer.
+
+The wallet is the payer, source owner, and only signer. The builder validates
+the account states and mint, binds the stored viewing key to the source's public
+key, and reads the destination/auditor keys from the chain snapshots. It rejects
+fee and hook mints. Three seeded accounts hold the equality, validity, and range
+proof contexts. Creation, verification, transfer, and all three rent-reclaiming
+closes are ten instructions in one transaction. Serialized output must be
+strictly below 4,096 bytes; errors contain fixed descriptions without amounts.
+
+The actual audited entry point produced a 2,913-byte transfer that confirmed on
+devnet on 2026-10-03. All three context accounts were closed; sender debit and
+recipient credit were verified, and an independent RPC returned no plaintext
+amount field. See the [contract and evidence](../../docs/plans/2026-10-03-053-proof-generation.md).
+Browser signing and the public transfer API remain issue #54.
+
+```bash
+cargo test --locked --lib solana::confidential
+cargo test --locked --test confidential --test compatibility
+```
+
+The `confidential_vault` test applies the audit/key migrations and therefore
+requires its own **empty disposable** Vault database. Use the same container
+image, `keys_test` database, and `tests/support/vault.sql` fixture described
+above, with a fresh container rather than one used for the `keys` test:
+
+```bash
+CONFIDENTIAL_VAULT_TEST_DATABASE_URL=postgres://postgres:keys-test-only@localhost:55450/keys_test \
+  cargo test --locked --test confidential_vault -- --ignored
+```
+
+CI gives each Vault test suite a separate fresh instance through its test matrix.
+
 ## Wrap USDC
 
 `POST /wrap` builds an unsigned v0 devnet transaction that configures the company
