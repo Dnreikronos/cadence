@@ -1,0 +1,9 @@
+<!-- Code first, link as a shortcut (#76). The link carries the invite and destination via RedirectTo. -->
+<div style="font-family: -apple-system, Segoe UI, sans-serif; max-width: 420px; color: #0e0f0c">
+  <p style="font-size: 15px">Your Cadence sign-in code:</p>
+  <p style="font-size: 30px; font-weight: 600; letter-spacing: 0.3em; font-family: ui-monospace, monospace">{{ .Token }}</p>
+  <p style="font-size: 15px">Enter it on the sign-in page, or
+    <a href="{{ .RedirectTo }}&amp;token_hash={{ .TokenHash }}&amp;type=signup" style="color: #0e0f0c">sign in with this link</a>.
+  </p>
+  <p style="font-size: 13px; color: #6a6b63">The code expires in one hour. If you did not ask to sign in, ignore this email.</p>
+</div>

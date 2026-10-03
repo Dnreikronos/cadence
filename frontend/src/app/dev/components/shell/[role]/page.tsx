@@ -26,6 +26,7 @@ export default async function ShellPreview({
     <AppShell
       role={viewerRole}
       company={{ name: "Solaris" }}
+      email="ana@solaris.test"
       balance={{ amount: 84000, state: "revealed" }}
     >
       <div className="space-y-6">
