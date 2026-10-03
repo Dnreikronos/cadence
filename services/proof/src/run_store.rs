@@ -87,6 +87,32 @@ impl RunStore {
             .map_err(|_| unavailable())?;
         read(&client, user, &id).await
     }
+    pub async fn finish(&self, user: &str, id: &str, payment: &Payment) -> Result<(), AppError> {
+        let client = self.database.connect().await.map_err(|_| unavailable())?;
+        let count = client.execute(
+            "UPDATE public.payments p SET status=$5,signature=$6,slot=$7,error=$8 FROM public.runs r \
+             WHERE p.run_id=r.id AND r.id=$1::text::uuid AND r.user_id=$2::text::uuid AND p.position=$3 AND p.attempt=$4 AND p.status='prepared'",
+            &[&id, &user, &payment.position, &payment.attempt, &payment.status.name(), &payment.signature, &payment.slot, &payment.error],
+        ).await.map_err(|_| unavailable())?;
+        if count == 1 {
+            return Ok(());
+        }
+        let stored = read(&client, user, id).await?;
+        let existing = stored
+            .payments
+            .iter()
+            .find(|p| p.position == payment.position)
+            .ok_or(AppError::RunNotFound)?;
+        if existing.attempt == payment.attempt
+            && existing.status == payment.status
+            && existing.signature == payment.signature
+            && existing.slot == payment.slot
+        {
+            Ok(())
+        } else {
+            Err(AppError::Conflict("payment_attempt_changed"))
+        }
+    }
 }
 
 async fn read(client: &Client, user: &str, id: &str) -> Result<Run, AppError> {
