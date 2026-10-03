@@ -25,9 +25,10 @@ use tokio::sync::Semaphore;
 use zeroize::{Zeroize, Zeroizing};
 
 pub struct Service {
-    auth: SupabaseAuth,
-    store: TransferStore,
-    keys: Database,
+    pub(super) auth: SupabaseAuth,
+    pub(super) store: TransferStore,
+    pub(super) keys: Database,
+    pub(super) runs: crate::run_store::RunStore,
     pub(super) proof_slots: Arc<Semaphore>,
 }
 
@@ -37,6 +38,7 @@ impl Service {
             auth,
             store: TransferStore::new(receipts_url)?,
             keys: Database::new(keys_url, "cadence_key_service")?,
+            runs: crate::run_store::RunStore::new(receipts_url)?,
             proof_slots: Arc::new(Semaphore::new(4)),
         })
     }
@@ -344,7 +346,7 @@ fn cluster_error(error: AppError) -> AppError {
         other => other,
     }
 }
-fn proof_error(error: confidential::TransferError) -> AppError {
+pub(super) fn proof_error(error: confidential::TransferError) -> AppError {
     match error {
         confidential::TransferError::Invalid(_) => AppError::Conflict("invalid_confidential_state"),
         confidential::TransferError::ProofGeneration => {
