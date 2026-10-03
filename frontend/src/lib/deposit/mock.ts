@@ -1,26 +1,42 @@
+import { baseUnitsToUsdc, maxBaseUnits } from "./schema"
 import type { DepositInfo, MakePrivateStep } from "./types"
 
 // Stand-in for the wallet (public balance), the proof service (`POST /wrap`,
 // apply-pending) and the chain until the typed client (#79) lands.
-let info: DepositInfo = {
-  walletAddress: "4egAZELoLKWqJwHwAwaZwS2su9rewh7is3ukCagHnSQ5",
-  publicUsdc: 12_500,
-  privateUsdc: 84_000,
-  pendingUsdc: 0,
+const walletAddress = "4egAZELoLKWqJwHwAwaZwS2su9rewh7is3ukCagHnSQ5"
+
+// Balances are kept in integer base units (six decimals) so sums stay exact.
+let balances = {
+  public: 12_500_000_000n,
+  private: 84_000_000_000n,
+  pending: 0n,
+}
+
+function snapshot(): DepositInfo {
+  return {
+    walletAddress,
+    publicUsdc: baseUnitsToUsdc(balances.public),
+    publicBaseUnits: balances.public,
+    privateUsdc: baseUnitsToUsdc(balances.private),
+    pendingUsdc: baseUnitsToUsdc(balances.pending),
+  }
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export async function getDepositInfo(): Promise<DepositInfo> {
   await delay(300)
-  return { ...info }
+  return snapshot()
 }
 
+// `amount` is an integer count of base units, like the `POST /wrap` body.
 export async function makePrivate(
-  amount: number,
+  amount: bigint | string,
   onStep: (step: MakePrivateStep) => void,
 ): Promise<DepositInfo> {
-  if (amount > info.publicUsdc) throw new Error("Not enough public USDC")
+  const units = typeof amount === "string" ? parseUnits(amount) : amount
+  if (units < 1n || units > maxBaseUnits) throw new Error("Invalid amount")
+  if (units > balances.public) throw new Error("Not enough public USDC")
   onStep("preparing")
   await delay(700)
   onStep("signing")
@@ -28,17 +44,22 @@ export async function makePrivate(
   onStep("confirming")
   await delay(1200)
   // Confirmed: the wrapped amount lands in the pending balance first.
-  info = {
-    ...info,
-    publicUsdc: info.publicUsdc - amount,
-    pendingUsdc: info.pendingUsdc + amount,
+  balances = {
+    ...balances,
+    public: balances.public - units,
+    pending: balances.pending + units,
   }
   onStep("applying")
   await delay(900)
-  info = {
-    ...info,
-    privateUsdc: info.privateUsdc + info.pendingUsdc,
-    pendingUsdc: 0,
+  balances = {
+    ...balances,
+    private: balances.private + balances.pending,
+    pending: 0n,
   }
-  return { ...info }
+  return snapshot()
+}
+
+function parseUnits(amount: string): bigint {
+  if (!/^\d+$/.test(amount)) throw new Error("Invalid amount")
+  return BigInt(amount)
 }

@@ -8,7 +8,11 @@ import { buttonVariants } from "@/components/ui/button"
 import { fieldClass } from "@/components/ui/field"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import { formatUsd } from "@/lib/format"
-import { makePrivateSchema, parseAmount } from "@/lib/deposit/schema"
+import {
+  baseUnitsToUsdc,
+  formatBaseUnits,
+  toBaseUnits,
+} from "@/lib/deposit/schema"
 import { useMakePrivate } from "@/lib/deposit/queries"
 import {
   makePrivateSteps,
@@ -28,17 +32,18 @@ export function MakePrivateSection({ info }: { info: DepositInfo }) {
 
   function submit(event: React.FormEvent) {
     event.preventDefault()
-    const parsed = makePrivateSchema(info.publicUsdc).safeParse(
-      parseAmount(amount),
-    )
-    if (!parsed.success) {
-      setError(parsed.error.issues[0].message)
+    if (isBusy) return
+    const parsed = toBaseUnits(amount, info.publicBaseUnits)
+    if (!parsed.ok) {
+      setError(parsed.message)
       return
     }
     setError(undefined)
-    run.mutate(parsed.data, {
+    run.mutate(String(parsed.units), {
       onSuccess: () => {
-        toast.success(`${formatUsd(parsed.data)} is now private`)
+        toast.success(
+          `${formatUsd(baseUnitsToUsdc(parsed.units))} is now private`,
+        )
         setAmount("")
       },
       onError: (failure) => toast.error(failure.message),
@@ -82,7 +87,8 @@ export function MakePrivateSection({ info }: { info: DepositInfo }) {
               inputMode="decimal"
               autoComplete="off"
               placeholder="0.00"
-              disabled={!hasFunds || isBusy}
+              disabled={!hasFunds}
+              readOnly={isBusy}
               value={amount}
               onChange={(event) => {
                 setAmount(event.target.value)
@@ -92,27 +98,35 @@ export function MakePrivateSection({ info }: { info: DepositInfo }) {
               aria-describedby={error ? `${id}-error` : undefined}
               className={cn(
                 fieldClass,
-                "h-10 pr-14 font-mono tabular-nums disabled:opacity-50",
+                "h-10 pr-14 font-mono tabular-nums read-only:opacity-50 disabled:opacity-50",
               )}
             />
             <button
               type="button"
-              disabled={!hasFunds || isBusy}
+              disabled={!hasFunds}
+              aria-disabled={isBusy || undefined}
               onClick={() => {
-                setAmount(String(info.publicUsdc))
+                if (isBusy) return
+                setAmount(formatBaseUnits(info.publicBaseUnits))
                 setError(undefined)
               }}
-              className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded-md px-2 py-1 text-caption font-medium text-ink-muted hover:bg-canvas hover:text-ink disabled:opacity-50"
+              className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded-md px-2 py-1 text-caption font-medium text-ink-muted hover:bg-canvas hover:text-ink disabled:opacity-50 aria-disabled:opacity-50"
             >
               Max
             </button>
           </div>
           <button
             type="submit"
-            disabled={!hasFunds || isBusy}
-            className={buttonVariants({ size: "lg" })}
+            disabled={!hasFunds}
+            aria-disabled={isBusy || undefined}
+            className={cn(
+              buttonVariants({ size: "lg" }),
+              "aria-disabled:opacity-50",
+            )}
           >
-            {isBusy && <Loader2 className="size-4 animate-spin" />}
+            {isBusy && (
+              <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+            )}
             {isBusy ? "Working…" : "Make private"}
           </button>
         </div>
@@ -132,14 +146,16 @@ export function MakePrivateSection({ info }: { info: DepositInfo }) {
         )}
       </form>
 
-      {isBusy && <Progress step={run.step} />}
+      <div role="status" aria-live="polite">
+        {isBusy && <Progress step={run.step} />}
+      </div>
 
       <p className="mt-5 flex gap-2 rounded-lg border border-warning-border bg-warning-bg p-3 text-ui/normal text-warning-fg">
         <Eye aria-hidden className="mt-0.5 size-4 shrink-0" />
         <span>
           This step is public. The amount you move to private USDC is visible
-          on-chain, and so is your deposit. What you pay out from your private
-          balance afterwards stays encrypted.
+          on-chain. What you pay out from your private balance afterwards stays
+          encrypted.
         </span>
       </p>
     </section>
@@ -178,7 +194,7 @@ function Progress({
 }) {
   const current = step ? makePrivateSteps.indexOf(step) : -1
   return (
-    <ol aria-live="polite" className="mt-4 space-y-1.5">
+    <ol className="mt-4 space-y-1.5">
       {makePrivateSteps.map((name, index) => {
         const state =
           index < current ? "done" : index === current ? "active" : "todo"

@@ -39,8 +39,10 @@ export function ReceiveSection({ walletAddress }: { walletAddress: string }) {
             </div>
           </div>
           <p className="text-ui/normal text-ink-muted">
-            Send USDC on Solana {cluster.name} only, from any wallet or
-            exchange. Other tokens or networks can be lost for good.
+            Send {cluster.isMainnet ? "USDC" : "Circle devnet USDC"} on Solana{" "}
+            {cluster.name} only, from any wallet or exchange. Other tokens or
+            networks can be lost for good. The wallet also needs a little SOL
+            for network fees.
           </p>
         </div>
       </div>

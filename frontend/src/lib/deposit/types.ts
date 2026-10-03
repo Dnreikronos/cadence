@@ -2,6 +2,8 @@ export type DepositInfo = {
   walletAddress: string
   // Plain USDC in the company wallet. Public on-chain.
   publicUsdc: number
+  // The same balance in exact base units (six decimals), for validation and Max.
+  publicBaseUnits: bigint
   // Confidential balance the company can spend.
   privateUsdc: number
   // Wrapped but not yet applied: confidential credits wait here until the

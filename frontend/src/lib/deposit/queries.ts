@@ -15,7 +15,8 @@ export function useMakePrivate() {
   const queryClient = useQueryClient()
   const [step, setStep] = useState<MakePrivateStep | null>(null)
   const mutation = useMutation({
-    mutationFn: (amount: number) => makePrivate(amount, setStep),
+    // Integer base-unit string, the shape the `POST /wrap` body will take.
+    mutationFn: (amount: string) => makePrivate(amount, setStep),
     onSuccess: (next) => queryClient.setQueryData(depositKey, next),
     onSettled: () => setStep(null),
   })
