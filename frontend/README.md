@@ -42,6 +42,38 @@ src/lib/            auth/ (guard, sign-in, invites), supabase/, solana/
 src/middleware.ts   role-based route guard
 ```
 
+## API client and mocks
+
+`src/lib/api/` is the typed client for the proof service, written against
+[`docs/dev/API_CONTRACT.md`](../docs/dev/API_CONTRACT.md). Requests and responses
+go through zod schemas, so a float amount never leaves the browser and a response
+that drifts from the contract fails loudly.
+
+```ts
+import { api, signAndConfirm, messageFor } from "@/lib/api"
+
+const prepared = await api.wrap.prepare({
+  company_wallet,
+  amount: "2500000000",
+})
+const receipt = await signAndConfirm(prepared, {
+  signer, // the user's wallet
+  submit, // sends the signed bytes to Solana, returns the signature
+  confirm: (signature) =>
+    api.wrap.confirm({ request_id: prepared.request_id, signature }),
+})
+```
+
+Amounts are integer base-unit strings (`"1000000"` is 1 USDC). Errors are
+`ApiError` with a stable `code`; `messageFor(error)` gives the copy to show.
+
+`NEXT_PUBLIC_API_MODE` picks the service. `mock` (the default) answers from an
+in-browser [MSW](https://mswjs.io) handler for every route, including the
+failures that change a screen; `real` calls `NEXT_PUBLIC_PROOF_API_URL`. Mock
+mode is refused on mainnet. In the browser, `window.cadenceMock` flips
+scenarios (`slow`, `rate-limited`, `partial-failure`, ...) and `?mock=slow` in
+the page URL starts with one on. `/dev/api` runs the flows and the switches.
+
 ## Route guard
 
 `src/middleware.ts` refreshes the Supabase session on every request and guards
