@@ -177,7 +177,13 @@ async fn confirm(
     }
     state.rpc.require_devnet().await?;
     let result = state.rpc.finalized_transaction(&request.signature).await?;
-    let slot = verify_confirmation(&record, &signature, &result)?;
+    let slot = verify_confirmation(
+        &record.id,
+        &record.company_wallet,
+        &record.transaction,
+        &signature,
+        &result,
+    )?;
     store.confirm(&record.id, &request.signature, slot).await?;
     Ok(Json(ConfirmResponse {
         request_id: record.id,
@@ -187,8 +193,10 @@ async fn confirm(
     }))
 }
 
-fn verify_confirmation(
-    record: &PreparedWrap,
+pub(super) fn verify_confirmation(
+    id: &str,
+    wallet: &str,
+    transaction: &str,
     signature: &Signature,
     result: &Value,
 ) -> Result<u64, AppError> {
@@ -216,15 +224,14 @@ fn verify_confirmation(
     let actual: VersionedTransaction =
         wincode::deserialize(&bytes).map_err(|_| AppError::RpcUnavailable)?;
     let prepared_bytes = STANDARD
-        .decode(&record.transaction)
+        .decode(transaction)
         .map_err(|_| AppError::StorageUnavailable)?;
-    if request_id(&prepared_bytes) != record.id {
+    if request_id(&prepared_bytes) != id {
         return Err(AppError::StorageUnavailable);
     }
     let prepared: VersionedTransaction =
         wincode::deserialize(&prepared_bytes).map_err(|_| AppError::StorageUnavailable)?;
-    let wallet =
-        Address::from_str(&record.company_wallet).map_err(|_| AppError::StorageUnavailable)?;
+    let wallet = Address::from_str(wallet).map_err(|_| AppError::StorageUnavailable)?;
     if actual.message != prepared.message
         || actual.signatures.as_slice() != [*signature]
         || actual.message.static_account_keys().first() != Some(&wallet)
