@@ -4,15 +4,19 @@ Issue [#63](https://github.com/Dnreikronos/cadence/issues/63). This is what the
 web app builds and mocks against (#79), so the frontend and the proof service
 agree on one shape before the remaining routes exist.
 
-**Status: draft for review.** Every route is marked:
+**Status: working draft, nothing here is fixed.** The frontend wrote this so it can
+keep building screens against mocks while the backend routes do not exist. The
+backend owner is free to change any 🟡 proposal, including its shape, path or error
+codes; when that happens the client and the mocks follow, and this file is updated.
+Merging it is not a sign-off. Every route is marked:
 
 - ✅ **Implemented.** Described from [`WRAP_API.md`](WRAP_API.md),
   [`TRANSFER_API.md`](TRANSFER_API.md) and `services/proof/src`. Changing these is a
   breaking change.
 - 🟡 **Proposed.** The route does not exist yet. The shape below is the
-  frontend's request, derived from the open issue that will build it. It is not
-  settled until the backend owner signs off, and the questions that need an
-  answer are collected in [Open questions](#open-questions).
+  frontend's request, derived from the open issue that will build it. It is a
+  starting point, not a commitment, and the questions that need an answer are
+  collected in [Open questions](#open-questions).
 
 A client and a mock service (#110) already implement the shapes of the proposed
 routes as written below. Problems found in those shapes are therefore recorded in
