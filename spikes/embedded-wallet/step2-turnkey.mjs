@@ -48,4 +48,5 @@ try {
   console.log("oauth login: ok", { sessionLength: login.session?.length })
 } catch (error) {
   console.log("failed:", error?.message ?? error)
+  process.exitCode = 1
 }

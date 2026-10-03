@@ -8,13 +8,18 @@ import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
 
 const email = "spike+browser@cadence.test"
 
+// One client for the page, made on first use. Making it inside the component would build
+// a new GoTrue client on every render ("Multiple GoTrueClient instances").
+let supabaseClient
+function supabase() {
+  supabaseClient ??= createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  })
+  return supabaseClient
+}
+
 export default function Page() {
   const turnkey = useTurnkey()
-  const supabase = useRef(
-    createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, {
-      auth: { persistSession: false, autoRefreshToken: false },
-    }),
-  )
   const address = useRef(null)
   const [log, setLog] = useState([])
   const write = (line) => setLog((l) => [...l, typeof line === "string" ? line : JSON.stringify(line)])
@@ -33,7 +38,8 @@ export default function Page() {
   const supabaseSignIn = () =>
     run("Supabase sign-in (dev link instead of an email code)", async () => {
       const r = await fetch("/api/dev-session", { method: "POST", body: JSON.stringify({ email }) }).then((x) => x.json())
-      const { data, error } = await supabase.current.auth.verifyOtp({ token_hash: r.token_hash, type: r.type })
+      if (r.error) throw new Error(r.error)
+      const { data, error } = await supabase().auth.verifyOtp({ token_hash: r.token_hash, type: r.type })
       if (error) throw error
       write({ signedIn: !!data.session })
     })
@@ -45,12 +51,12 @@ export default function Page() {
       write({ publicKeyLength: publicKey.length })
       // 2. Bind the next access token to that key through user metadata and the hook.
       const tknonce = bytesToHex(sha256(utf8ToBytes(publicKey)))
-      await supabase.current.auth.updateUser({ data: { tknonce } })
-      const { data } = await supabase.current.auth.refreshSession()
+      await supabase().auth.updateUser({ data: { tknonce } })
+      const { data } = await supabase().auth.refreshSession()
       // 3. Our route holds the parent key and exchanges the token for a session.
       const res = await fetch("/api/turnkey-login", {
         method: "POST",
-        body: JSON.stringify({ oidcToken: data.session.access_token, publicKey, email, expirationSeconds: "3600" }),
+        body: JSON.stringify({ oidcToken: data.session.access_token, publicKey }),
       }).then((x) => x.json())
       if (res.error) throw new Error(res.error)
       write({ sessionReceived: !!res.session, subOrganizationCreated: res.created })

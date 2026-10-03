@@ -23,4 +23,5 @@ try {
   console.log("ok:", { organizationName: who.organizationName, username: who.username, sameOrg: who.organizationId === env.TURNKEY_ORGANIZATION_ID })
 } catch (error) {
   console.log("failed:", error?.message ?? error)
+  process.exitCode = 1
 }

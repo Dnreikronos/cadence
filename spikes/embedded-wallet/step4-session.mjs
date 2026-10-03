@@ -25,11 +25,15 @@ const subOrgId = sub.subOrganizationId
 for (const seconds of ["900", "86400", "604800", "2592000"]) {
   const k = newSessionKey()
   const token = await freshToken(k.publicKey)
+  let login
   try {
     const r = await parent.oauthLogin({ organizationId: subOrgId, oidcToken: token, publicKey: k.publicKey, expirationSeconds: seconds })
-    const exp = decodeJwt(r.session).exp
-    console.log(`login with expirationSeconds=${seconds}: ok, session lasts ${exp - Math.floor(Date.now() / 1000)} s`)
+    login = r
   } catch (e) { console.log(`login with expirationSeconds=${seconds}: refused ->`, String(e.message).slice(0, 110)) }
+  if (login) {
+    const exp = decodeJwt(login.session).exp
+    console.log(`login with expirationSeconds=${seconds}: ok, session lasts ${exp - Math.floor(Date.now() / 1000)} s`)
+  }
 }
 
 // Renew with the session's own key (what the browser does before it expires).
@@ -46,9 +50,24 @@ try {
   console.log("renewed key acts:", !!(await renewed.getWhoami()).userId)
   // The old key keeps working until its own expiry unless something revokes it.
   console.log("old key still acts after renewal:", !!(await session.getWhoami().catch(() => null)))
-} catch (e) { console.log("stampLogin with a new key: FAILED ->", String(e.message).slice(0, 140)) }
+} catch (e) {
+  console.log("stampLogin with a new key: FAILED ->", String(e.message).slice(0, 140))
+  process.exitCode = 1
+}
 
 // A session key that was never logged in must not act.
 const stranger = newSessionKey()
 const nobody = new Turnkey({ apiBaseUrl: "https://api.turnkey.com", apiPublicKey: stranger.publicKey, apiPrivateKey: stranger.privateKey, defaultOrganizationId: subOrgId }).apiClient()
-try { await nobody.getWhoami(); console.log("unregistered key acted (bad)") } catch (e) { console.log("unregistered session key: refused as intended") }
+let acted = false
+try {
+  await nobody.getWhoami()
+  acted = true
+} catch (e) {
+  // Only an authorisation refusal counts. A TypeError or a network error proves nothing.
+  if (!/not authorized|unauthorized/i.test(String(e?.message))) throw e
+  console.log("unregistered session key: refused as intended ->", String(e.message).slice(0, 120))
+}
+if (acted) {
+  console.log("unregistered key acted (bad)")
+  process.exitCode = 1
+}

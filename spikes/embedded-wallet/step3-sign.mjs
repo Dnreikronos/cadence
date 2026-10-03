@@ -24,14 +24,18 @@ const subOrgId = sub.subOrganizationId
 const address = sub.wallet.addresses[0]
 console.log("sub-organization ready, wallet address length:", address.length)
 
-// ---- Who can act in the sub-organization: the quorum check for #78.
-const { users = [] } = await parent.getUsers({ organizationId: subOrgId })
-const parentHasUser = users.some((u) => (u.apiKeys ?? []).some((k) => k.credential?.publicKey === env.TURNKEY_API_PUBLIC_KEY))
-console.log("sub-org users:", users.length, "| any user holds the parent API key:", parentHasUser, "| oauth providers on the user:", users[0]?.oauthProviders?.length)
-
 // ---- The session: log in, then act as the user with the session key.
 const ids = await parent.getSubOrgIds({ filterType: "OIDC_TOKEN", filterValue: oidcToken })
 await parent.oauthLogin({ organizationId: ids.organizationIds[0], oidcToken, publicKey: key.publicKey, expirationSeconds: "900" })
+
+// ---- Who is in the sub-organization, after the login (the login registers the session key
+// on the user as an API key, so this is where a parent-key credential would show up).
+{
+  const { users = [] } = await parent.getUsers({ organizationId: subOrgId })
+  const apiKeys = (users[0]?.apiKeys ?? []).length
+  const parentHasKey = users.some((u) => (u.apiKeys ?? []).some((k) => k.credential?.publicKey === env.TURNKEY_API_PUBLIC_KEY))
+  console.log("sub-org users:", users.length, "| oauth providers on the user:", users[0]?.oauthProviders?.length, "| api keys on the user:", apiKeys, "| any equals the parent public key:", parentHasKey)
+}
 const session = new Turnkey({ apiBaseUrl: "https://api.turnkey.com", apiPublicKey: key.publicKey, apiPrivateKey: key.privateKey, defaultOrganizationId: subOrgId }).apiClient()
 const who = await session.getWhoami()
 console.log("session whoami:", { userName: who.username, isSubOrg: who.organizationId === subOrgId })
@@ -59,7 +63,11 @@ try {
 try {
   await signTx(parent, subOrgId)
   console.log("PARENT CAN SIGN FOR THE USER (bad)")
-} catch (e) { console.log("parent signing for the user: refused as intended ->", String(e.message).slice(0, 140)) }
+} catch (e) {
+  // Only an authorisation refusal counts. A TypeError or a network error proves nothing.
+  if (!/not authorized/i.test(String(e?.message))) throw e
+  console.log("parent signing for the user: refused as intended ->", String(e.message).slice(0, 140))
+}
 
 // ---- signMessage: what Phantom rejects. Signs bytes and verifies against the address.
 try {

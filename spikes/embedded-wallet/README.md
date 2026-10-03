@@ -5,12 +5,22 @@ findings are in
 [`docs/dev/spikes/2026-10-03-embedded-wallet.md`](../../docs/dev/spikes/2026-10-03-embedded-wallet.md).
 Do not import anything from here into the product.
 
+> **Warning: local only.** Run this against a **throwaway Turnkey organization** and
+> a **local Supabase** (`supabase start`), never against a real organization or a
+> hosted Supabase project. The scripts create real sub-organizations and use real
+> credentials, and the web app has two unauthenticated routes (`/api/dev-session` mints
+> a login for a test email with the Supabase service role; `/api/turnkey-login` uses the
+> Turnkey parent key). **Never deploy the web app**, and never bind it to anything but
+> `127.0.0.1` (`npm run dev` does that).
+
 ## What is here
 
 - `lib.mjs`, `step1-nonce.mjs` to `step4-session.mjs`: Node scripts. They sign a test
   user in to Supabase, bind a Turnkey key through the access token, create a
-  sub-organization, log in, sign a v1 transaction and a message, check the parent
-  cannot sign, and probe session lengths and renewal.
+  sub-organization, log in, sign a v1 transaction and a message, check that the
+  sub-organization has one user created from the OIDC identity, check that the parent
+  cannot sign (the signing refusal is what shows the parent holds no authority over
+  the wallet), and probe session lengths and renewal.
 - `whoami.mjs`: a read-only check that the Turnkey API key works.
 - `hook.sql`: the Custom Access Token Hook that copies `user_metadata.tknonce` into
   the access token.
@@ -41,6 +51,14 @@ You need a Turnkey organization (a disposable devnet one), Docker, and `cloudfla
    cloudflared tunnel --url http://127.0.0.1:54321
    ```
 
+   **Know what this exposes.** The quick tunnel publishes the **entire local Supabase
+   gateway** on the internet: the auth admin API, the REST and Postgres REST endpoints,
+   everything behind port 54321, protected only by the CLI's well-known default keys.
+   The tunnel URL also ends up in every token's `iss` claim and in Turnkey's logs. Run
+   the tunnel only while you are testing, kill it afterwards, and keep nothing real in
+   that Supabase. Alternatively put Cloudflare Access in front of the tunnel and leave only the
+   discovery and key-set paths (`/auth/v1/.well-known/*`) public. That was not tried.
+
 3. **Supabase config** (temporary, do not commit) in `supabase/config.toml`:
 
    ```toml
@@ -54,16 +72,23 @@ You need a Turnkey organization (a disposable devnet one), Docker, and `cloudfla
    ```
 
    Turnkey rejects ES256, so generate an **RS256** key (the file is a private key; keep
-   it out of git):
+   it out of git; `supabase/.gitignore` ignores `signing_keys.json`):
 
    ```sh
-   pnpm dlx supabase gen signing-key --algorithm RS256
+   pnpm dlx supabase@2.119.0 gen signing-key --algorithm RS256
    ```
+
+   The command writes `supabase/signing_keys.json` itself (the path set above) and may
+   ask whether to overwrite an existing file. Replacing the key means a new tunnel URL
+   too, because Turnkey caches the key set.
+
+   The CLI is pinned to 2.119.0, the version the spike ran with; `lib.mjs` pins it too
+   (`SUPABASE_CLI_VERSION`) for `supabase status`.
 
 4. **Start Supabase and install the hook:**
 
    ```sh
-   pnpm dlx supabase start
+   pnpm dlx supabase@2.119.0 start
    docker exec -i supabase_db_cadence psql -U postgres -d postgres < spikes/embedded-wallet/hook.sql
    ```
 
@@ -80,7 +105,9 @@ You need a Turnkey organization (a disposable devnet one), Docker, and `cloudfla
 6. **The browser page.** In `web/`, run `npm install`, create `web/.env.local` with
    `NEXT_PUBLIC_TURNKEY_ORGANIZATION_ID`, `NEXT_PUBLIC_SUPABASE_URL` (the tunnel URL),
    `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY`, then `npm run dev`
-   and open http://localhost:3400. Press the buttons in order.
+   and open http://127.0.0.1:3400 (the dev server binds to `127.0.0.1` only). Press the
+   buttons in order. `next.config.mjs` sets `reactStrictMode: false`; Next's default is
+   `true`.
 
 Each run creates throwaway sub-organizations named `spike-<timestamp>` in the Turnkey
 organization. Delete them from the dashboard when you are done.

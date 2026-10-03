@@ -1,3 +1,8 @@
+// SERVER ONLY. This file reads the parent Turnkey credentials from disk and builds a
+// Supabase client with the service role. Import it only from route handlers, never from a
+// client component. A real app should add `import "server-only"` here (the `server-only`
+// package is not a dependency of this spike, so the build would not enforce it).
+
 import { readFileSync } from "node:fs"
 import path from "node:path"
 import { Turnkey } from "@turnkey/sdk-server"

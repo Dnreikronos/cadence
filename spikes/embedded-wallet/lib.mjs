@@ -18,11 +18,18 @@ export function loadEnv() {
 // The tunnel URL the auth server uses as its issuer, from supabase/config.toml.
 export function issuerBase() {
   const toml = readFileSync(new URL("../../supabase/config.toml", import.meta.url), "utf8")
-  return toml.match(/^external_url = "(.*)\/auth\/v1"/m)[1]
+  const match = toml.match(/^external_url = "(.*)\/auth\/v1"/m)
+  if (!match) {
+    throw new Error('supabase/config.toml has no uncommented `external_url = "https://<tunnel>/auth/v1"` under [auth]; see the README, step 3')
+  }
+  return match[1]
 }
 
+// Pinned so a spike run does not execute whatever `supabase` is newest on npm.
+export const SUPABASE_CLI_VERSION = "2.119.0"
+
 export function localKeys() {
-  const out = execFileSync("pnpm", ["dlx", "supabase", "status", "-o", "env"], {
+  const out = execFileSync("pnpm", ["dlx", `supabase@${SUPABASE_CLI_VERSION}`, "status", "-o", "env"], {
     cwd: new URL("../..", import.meta.url).pathname,
     encoding: "utf8",
   })

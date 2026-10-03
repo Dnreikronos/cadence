@@ -2,7 +2,7 @@
   "name": "embedded-wallet-spike-web",
   "private": true,
   "scripts": {
-    "dev": "next dev --port 3400"
+    "dev": "next dev -H 127.0.0.1 --port 3400"
   },
   "dependencies": {
     "@noble/hashes": "^2.4.0",
