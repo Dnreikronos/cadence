@@ -6,6 +6,7 @@ pub mod config;
 pub mod cors;
 pub mod database;
 pub mod error;
+pub mod transfer_store;
 pub mod wrap_store;
 pub mod keys {
     pub mod elgamal;

@@ -5,6 +5,8 @@ use serde_json::json;
 pub enum AppError {
     #[error("authentication required")]
     Unauthorized,
+    #[error("wallet access denied")]
+    Forbidden,
     #[error("{0}")]
     TransferUnavailable(&'static str),
     #[error("wrap rate limit exceeded")]
@@ -31,6 +33,7 @@ impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::Forbidden => StatusCode::FORBIDDEN,
             Self::TransferUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
@@ -54,6 +57,7 @@ impl IntoResponse for AppError {
         }
         let code = match self {
             Self::Unauthorized => "authentication_required",
+            Self::Forbidden => "wallet_access_denied",
             Self::TransferUnavailable(code) => code,
             Self::BadRequest(code) | Self::Conflict(code) => code,
             Self::NotFound => "wrap_not_found",
