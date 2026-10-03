@@ -28,6 +28,10 @@ repo's paths instead of these.
 
 - [Authenticated transfer API](plans/2026-10-03-054-transfer-api.md) — 2026-10-03, #54. Supabase login and wallet association; verified locally and on devnet through a browser-driven Turnkey test adapter. [API contract](dev/TRANSFER_API.md).
 
+## Contracts
+
+- [API contract for the web app](dev/API_CONTRACT.md) — #63. What the web app builds and mocks against: authentication, the prepare-sign-confirm pattern, errors that never carry an amount, and every route, marked implemented or proposed, plus the design review findings to resolve before building. Status: draft, open questions for the backend owner.
+
 ## Spikes
 
 - [One confidential transfer is 2,395 bytes on devnet, and `spl-token-client` cannot send it](dev/spikes/2026-09-27-confidential-transfer.md) — 2026-09-27. Verdict: go, conditional on superseding B18. R2 and R3 confirmed on chain; the client the ADR picks cannot build a v1 transaction.
