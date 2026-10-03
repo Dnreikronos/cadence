@@ -31,7 +31,7 @@ use spl_token_2022_interface::{
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -48,6 +48,9 @@ pub struct Backend {
     pub transactions: Mutex<HashMap<String, Value>>,
     pub finalized_height: AtomicU64,
     pub unavailable_accounts: Mutex<HashSet<String>>,
+    pub delayed_accounts: Mutex<HashMap<String, Duration>>,
+    pub active_account_reads: AtomicUsize,
+    pub peak_account_reads: AtomicUsize,
     pub calls: Mutex<Vec<Value>>,
     pub wrong_cluster: AtomicBool,
 }
@@ -80,6 +83,22 @@ async fn user(headers: HeaderMap) -> Result<Json<Value>, StatusCode> {
 }
 async fn rpc(State(state): State<Arc<Backend>>, Json(request): Json<Value>) -> Json<Value> {
     state.calls.lock().unwrap().push(request.clone());
+    let delay = if request["method"] == "getAccountInfo" {
+        state
+            .delayed_accounts
+            .lock()
+            .unwrap()
+            .get(request["params"][0].as_str().unwrap())
+            .copied()
+    } else {
+        None
+    };
+    if let Some(delay) = delay {
+        let active = state.active_account_reads.fetch_add(1, Ordering::SeqCst) + 1;
+        state.peak_account_reads.fetch_max(active, Ordering::SeqCst);
+        tokio::time::sleep(delay).await;
+        state.active_account_reads.fetch_sub(1, Ordering::SeqCst);
+    }
     if request["method"] == "getAccountInfo"
         && state
             .unavailable_accounts
