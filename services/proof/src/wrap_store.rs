@@ -41,6 +41,8 @@ impl WrapStore {
             get("PROOF_WRAP_SERVICE_JWT"),
         ) {
             (None, None, None) => Ok(None),
+            // Auth shares the origin and public key; wrap still needs its own JWT.
+            (Some(_), Some(_), None) => Ok(None),
             (Some(url), Some(api_key), Some(jwt)) => {
                 let url = url
                     .parse()
