@@ -1,6 +1,7 @@
 pub mod audit {
     pub mod log;
 }
+pub mod auth;
 pub mod config;
 pub mod cors;
 pub mod database;
