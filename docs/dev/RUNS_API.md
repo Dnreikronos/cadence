@@ -164,5 +164,26 @@ ignored suite needs a fresh container because migrations create cluster-level
 roles. CI isolates the storage and Vault suites in matrix jobs. Local tests
 cover three recipients, audited Vault reads, durable receipts, exact encrypted
 balance arithmetic, partial failure recovery, races, RLS and amount-free storage.
-RPC/Auth replies and approvals are simulated. No live three-recipient
-browser/devnet run or remote CI result is claimed for #55.
+Those integration tests simulate RPC/Auth replies and approvals.
+
+On 2026-10-03, run `0b6bf3e1-5f65-47a2-a14e-c1877f33b96a` executed three
+payments after one approval in a local browser harness. The actual run routes
+verified a real disposable Supabase Auth session, wallet ownership and one
+audited Vault key read. Each 2,913-byte v1 transaction finalized and received
+its own durable receipt:
+
+| Payment | Devnet transaction | Finalized slot |
+|---|---|---|
+| 1 | [2vMGTitk…3PLyHYS](https://explorer.solana.com/tx/2vMGTitkiE8RPf9XeHTtVyVf6XK9oXCSCU5DtgtqVENvAfqud6QUGSkZ78jpiLXLrTNgzCCZWEYvJbG7C3PLyHYS?cluster=devnet) | 507099198 |
+| 2 | [4bXi9HSF…n8uXkW](https://explorer.solana.com/tx/4bXi9HSFkuXuzRcRpdS3VYwaE26MyKMbdcgxGGUfLwcQkkhmcofvwGBAQwivw68ns5uBiv8to1mEVMUqTzn8uXkW?cluster=devnet) | 507099212 |
+| 3 | [23aXgPLL…YakiLJ](https://explorer.solana.com/tx/23aXgPLLqWQJTBk12ru71r9zXr19US72WHnuPVAMyGXjLu1PvsX9XWzyagyhCwG8F1eUaPeJKRkwTo1LgvYakiLJ?cluster=devnet) | 507099225 |
+
+The harness decrypted every recipient credit and the total sender debit,
+verified all nine proof contexts were closed, and checked ciphertext without
+plaintext amount fields through the independent OnFinality RPC. The
+[evidence record](spikes/2026-10-03-runs-devnet.json) contains public receipt
+metadata only. Signing used the existing Turnkey root test adapter outside
+the proof runtime. This verifies the batch HTTP contract and one-approval
+execution in that harness. Production user-owned embedded signing remains #77;
+the product approval UI remains #83. Hosted migration and deployment require
+the target project and runtime credentials and were not performed by this check.
