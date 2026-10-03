@@ -70,9 +70,11 @@ transaction and its wallet signature, including signed but unsubmitted attempts.
 Proofs bind to the sender's exact encrypted balance. Each payment assumes that
 preceding prepared payments succeeded. If one fails, stop sending later stale
 transactions and reprepare unpaid positions in the same run. Refreshing proofs
-and blockhashes under the original approval lets the remaining recipients
-continue. Long runs may outlive their blockhash. Never edit the returned message
-or start a second run for recipients who might already be paid. Wallet session
+and blockhashes under the original approval lets payments with verified failures
+continue. Long runs may outlive their blockhash. An expired attempt with missing
+history stays unresolved and cannot be automatically rebuilt. Never edit the
+returned message or start a second run for recipients who might already be paid.
+Wallet session
 management and the approval UI belong to #83/#77.
 
 ## Confirm and read
@@ -124,11 +126,14 @@ and retry. Aggregate status is `completed` when all payments finalized,
 Include all still-prepared positions; each requires its original valid wallet
 signature, even if never submitted. The service observes finalized block height
 before reconciling signatures. Landed successes are recorded and excluded from
-re-preparation. Finalized failures can retry. An absent transaction can be
-replaced only after finalized block-height expiry, first recording `expired`.
-A live attempt returns `409 transaction_not_finalized`. Use reliable RPC with
-recent finalized history; unavailable/pruned history cannot establish that an
-old payment never happened.
+re-preparation. Finalized failures can retry. A missing transaction before expiry
+returns `409 transaction_not_finalized`. After expiry it returns
+`409 transaction_history_unavailable` and leaves the original attempt prepared.
+A null [transaction lookup](https://solana.com/docs/rpc/http/gettransaction)
+does not prove that a payment never executed. Automatic recovery of expired,
+unsubmitted attempts is also blocked because this RPC contract cannot prove
+nonexecution. Restore finalized history for reconciliation; never start a second
+run for a recipient whose payment remains unresolved.
 
 Preparation failures need no signature. Positions/recipients stay fixed; callers
 resupply approved amounts because no plaintext intent is stored. Retry builds
