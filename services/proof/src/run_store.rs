@@ -58,6 +58,35 @@ impl RunStore {
         let client = self.database.connect().await.map_err(|_| unavailable())?;
         read(&client, user, id).await
     }
+    pub async fn prepare(
+        &self,
+        user: &str,
+        wallet: &str,
+        sender: &str,
+        payments: &[Payment],
+    ) -> Result<Run, AppError> {
+        let client = self.database.connect().await.map_err(|_| unavailable())?;
+        client
+            .batch_execute("BEGIN")
+            .await
+            .map_err(|_| unavailable())?;
+        let id: String = client.query_one(
+            "INSERT INTO public.runs (user_id, company_wallet, sender) VALUES ($1::text::uuid, $2, $3) RETURNING id::text",
+            &[&user, &wallet, &sender],
+        ).await.map_err(|_| unavailable())?.get(0);
+        for p in payments {
+            client.execute(
+                "INSERT INTO public.payments (run_id, position, destination, request_id, transaction, last_valid_block_height, status, error) \
+                 VALUES ($1::text::uuid,$2,$3,$4,$5,$6,$7,$8)",
+                &[&id, &p.position, &p.destination, &p.request_id, &p.transaction, &p.last_valid_block_height, &p.status.name(), &p.error],
+            ).await.map_err(|_| unavailable())?;
+        }
+        client
+            .batch_execute("COMMIT")
+            .await
+            .map_err(|_| unavailable())?;
+        read(&client, user, &id).await
+    }
 }
 
 async fn read(client: &Client, user: &str, id: &str) -> Result<Run, AppError> {
