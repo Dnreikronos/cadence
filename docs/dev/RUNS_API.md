@@ -160,11 +160,11 @@ permit after the RPC reads, immediately before audited Vault access. Runs and
 headers do not choose the peer.
 
 ```sh
-rtk cargo test --locked --test batch --test runs_http
+cargo test --locked --test batch --test runs_http
 RUNS_TEST_DATABASE_URL=<empty disposable PostgreSQL URL> \
-  rtk cargo test --locked --test runs_storage -- --ignored
+  cargo test --locked --test runs_storage -- --ignored
 TRANSFER_TEST_DATABASE_URL=<empty disposable Supabase/Vault URL> \
-  rtk cargo test --locked --test runs_http -- --ignored
+  cargo test --locked --test runs_http -- --ignored
 ```
 
 Apply `tests/support/vault.sql` as `supabase_admin` before the Vault test. Each
