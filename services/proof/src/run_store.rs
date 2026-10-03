@@ -87,6 +87,35 @@ impl RunStore {
             .map_err(|_| unavailable())?;
         read(&client, user, &id).await
     }
+    pub async fn retry(&self, user: &str, id: &str, payments: &[Payment]) -> Result<Run, AppError> {
+        let client = self.database.connect().await.map_err(|_| unavailable())?;
+        client
+            .batch_execute("BEGIN")
+            .await
+            .map_err(|_| unavailable())?;
+        let locked = client.query("SELECT p.position FROM public.payments p JOIN public.runs r ON r.id=p.run_id \
+            WHERE r.id=$1::text::uuid AND r.user_id=$2::text::uuid ORDER BY p.position FOR UPDATE OF p", &[&id, &user])
+            .await.map_err(|_| unavailable())?;
+        if locked.is_empty() {
+            return Err(AppError::RunNotFound);
+        }
+        for p in payments {
+            let count = client.execute(
+                "UPDATE public.payments SET attempt = attempt + 1, request_id = $4, transaction = $5, last_valid_block_height = $6, \
+                 status = $7, error = $8, signature = NULL, slot = NULL WHERE run_id = $1::text::uuid AND position = $2 AND attempt = $3 \
+                 AND status IN ('failed','expired','preparation_failed')",
+                &[&id, &p.position, &p.attempt, &p.request_id, &p.transaction, &p.last_valid_block_height, &p.status.name(), &p.error],
+            ).await.map_err(|_| unavailable())?;
+            if count != 1 {
+                return Err(AppError::Conflict("payment_attempt_changed"));
+            }
+        }
+        client
+            .batch_execute("COMMIT")
+            .await
+            .map_err(|_| unavailable())?;
+        read(&client, user, id).await
+    }
     pub async fn finish(&self, user: &str, id: &str, payment: &Payment) -> Result<(), AppError> {
         let client = self.database.connect().await.map_err(|_| unavailable())?;
         let count = client.execute(
