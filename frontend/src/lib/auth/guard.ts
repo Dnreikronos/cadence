@@ -2,31 +2,45 @@ export type Role = "admin" | "recipient" | "auditor"
 
 export type Decision = { kind: "next" } | { kind: "redirect"; to: string }
 
-export type Viewer = { signedIn: boolean; roles: readonly Role[] }
+const homes: Record<Role, string> = {
+  admin: "/company",
+  recipient: "/me",
+  auditor: "/audit",
+}
 
-const areas: Record<string, Role> = {
-  "/company": "admin",
-  "/me": "recipient",
-  "/audit": "auditor",
+// Where a member lands after sign-in.
+export function homeFor(role: Role): string {
+  return homes[role]
 }
 
 export function requiredRole(pathname: string): Role | null {
-  for (const [prefix, role] of Object.entries(areas)) {
+  for (const [role, prefix] of Object.entries(homes) as [Role, string][]) {
     if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return role
   }
   return null
 }
 
-export function guard(pathname: string, viewer: Viewer): Decision {
+// `viewer` is the signed-in member's role, or null when signed out: every session has a membership.
+export function guard(pathname: string, viewer: Role | null): Decision {
   const role = requiredRole(pathname)
   if (!role) return { kind: "next" }
-  if (!viewer.signedIn) {
+  if (!viewer) {
     return {
       kind: "redirect",
       to: `/sign-in?next=${encodeURIComponent(pathname)}`,
     }
   }
-  // The home page will route by membership (#76); until then it is a neutral landing.
-  if (!viewer.roles.includes(role)) return { kind: "redirect", to: "/" }
+  if (viewer !== role) return { kind: "redirect", to: homeFor(viewer) }
   return { kind: "next" }
+}
+
+// Where to go after sign-in: `next` only when it stays on this site and the role may visit it.
+export function safeNext(next: string | null, role: Role): string {
+  const home = homeFor(role)
+  if (!next?.startsWith("/")) return home
+  const base = "http://cadence.invalid"
+  const url = new URL(next, base)
+  if (url.origin !== base) return home
+  if (requiredRole(url.pathname) !== role) return home
+  return url.pathname + url.search
 }

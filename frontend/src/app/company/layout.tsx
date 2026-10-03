@@ -1,12 +1,20 @@
 import { AppShell } from "@/components/app/app-shell"
-import {
-  pendingBalance,
-  pendingCompany,
-} from "@/components/app/pending-membership"
+import { pendingBalance } from "@/components/app/pending-membership"
+import { requireMember } from "@/lib/auth/viewer"
 
-export default function Layout({ children }: { children: React.ReactNode }) {
+export default async function Layout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const { email, membership } = await requireMember("admin")
   return (
-    <AppShell role="admin" company={pendingCompany} balance={pendingBalance}>
+    <AppShell
+      role="admin"
+      company={membership.company}
+      email={email}
+      balance={pendingBalance}
+    >
       {children}
     </AppShell>
   )
