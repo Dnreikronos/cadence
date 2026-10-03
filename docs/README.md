@@ -35,3 +35,4 @@ repo's paths instead of these.
 ## Spikes
 
 - [One confidential transfer is 2,395 bytes on devnet, and `spl-token-client` cannot send it](dev/spikes/2026-09-27-confidential-transfer.md) — 2026-09-27. Verdict: go, conditional on superseding B18. R2 and R3 confirmed on chain; the client the ADR picks cannot build a v1 transaction.
+- [A Supabase user can sign with a Turnkey wallet from the browser, with security decisions open](dev/spikes/2026-10-03-embedded-wallet.md) — 2026-10-03, #77. Verdict: go, conditional on an RS256 key on hosted Supabase, a real v1 transfer from a user session confirmed on devnet, the behaviour at session expiry, and the production-security decisions in its security review.
