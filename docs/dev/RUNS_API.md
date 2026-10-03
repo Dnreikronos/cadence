@@ -151,7 +151,10 @@ membership and recipient/auditor read models remain separate work.
 
 Runs share 120 requests/minute per process, 30 per direct peer, eight concurrent
 HTTP requests, ten preparations/retries per wallet per minute and a 32 KiB body
-limit. Runs and `/transfer` share four CPU proof workers. HTTP work has a
+limit. Recipient accounts are fetched with up to eight concurrent RPC reads,
+preserving payment order and individual errors. Runs acquire a shared proof
+permit after the RPC reads, immediately before audited Vault access. Runs and
+`/transfer` share four CPU proof workers. HTTP work has a
 30-second limit; timed-out workers retain permits until completion. Existing
 `transfer_rate_limited` and `transfer_timeout` codes apply to runs. Forwarded
 headers do not choose the peer.
