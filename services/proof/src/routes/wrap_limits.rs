@@ -69,17 +69,49 @@ impl Limits {
     }
 }
 pub async fn enforce(State(limits): State<Arc<Limits>>, request: Request, next: Next) -> Response {
+    enforce_request(limits, request, next, false).await
+}
+
+pub async fn enforce_transfer(
+    State(limits): State<Arc<Limits>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    enforce_request(limits, request, next, true).await
+}
+
+async fn enforce_request(
+    limits: Arc<Limits>,
+    request: Request,
+    next: Next,
+    transfer: bool,
+) -> Response {
+    let rate_limited = || {
+        if transfer {
+            crate::error::AppError::TransferRateLimited
+        } else {
+            crate::error::AppError::RateLimited
+        }
+    };
     let peer = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|p| p.0.ip().to_canonical());
     if !limits.window.lock().unwrap().peer(peer, Instant::now()) {
-        return crate::error::AppError::RateLimited.into_response();
+        return rate_limited().into_response();
     }
     let Ok(_permit) = limits.active.try_acquire() else {
-        return crate::error::AppError::RateLimited.into_response();
+        return rate_limited().into_response();
     };
-    next.run(request).await
+    if transfer {
+        tokio::time::timeout(Duration::from_secs(30), next.run(request))
+            .await
+            .unwrap_or_else(|_| {
+                crate::error::AppError::TransferUnavailable("transfer_timeout").into_response()
+            })
+    } else {
+        next.run(request).await
+    }
 }
 
 #[cfg(test)]

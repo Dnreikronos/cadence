@@ -11,6 +11,8 @@ pub enum AppError {
     TransferNotFound,
     #[error("{0}")]
     TransferUnavailable(&'static str),
+    #[error("transfer rate limit exceeded")]
+    TransferRateLimited,
     #[error("wrap rate limit exceeded")]
     RateLimited,
     #[error("{0}")]
@@ -38,6 +40,7 @@ impl AppError {
             Self::Forbidden => StatusCode::FORBIDDEN,
             Self::TransferNotFound => StatusCode::NOT_FOUND,
             Self::TransferUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::TransferRateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Conflict(_) => StatusCode::CONFLICT,
@@ -50,11 +53,16 @@ impl AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
-        if matches!(self, Self::RateLimited) {
+        if matches!(self, Self::RateLimited | Self::TransferRateLimited) {
+            let code = if matches!(self, Self::TransferRateLimited) {
+                "transfer_rate_limited"
+            } else {
+                "wrap_rate_limited"
+            };
             return (
                 StatusCode::TOO_MANY_REQUESTS,
                 [("retry-after", "60")],
-                Json(json!({"error": "wrap_rate_limited"})),
+                Json(json!({"error": code})),
             )
                 .into_response();
         }
