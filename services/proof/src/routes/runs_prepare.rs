@@ -359,3 +359,7 @@ async fn build(
         })
         .collect()
 }
+
+#[cfg(test)]
+#[path = "runs_prepare_tests.rs"]
+mod tests;
