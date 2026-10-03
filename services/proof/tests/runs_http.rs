@@ -275,6 +275,22 @@ async fn three_recipient_run_recovers_partial_failure_without_repaying_successes
         "transaction_not_finalized"
     );
     h.backend.finalized_height.store(501, Ordering::SeqCst);
+    let (status, unresolved) = request(&app, &retry, "test-user", Some(retry_body.clone())).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(unresolved["error"], "transaction_history_unavailable");
+    let (_, unchanged) = request(&app, &get, "test-user", None).await;
+    assert_eq!(unchanged["payments"][2]["status"], "prepared");
+    assert_eq!(unchanged["payments"][2]["attempt"], 0);
+    assert_eq!(
+        unchanged["payments"][2]["request_id"],
+        run["payments"][2]["request_id"]
+    );
+    assert_eq!(h.audit_count().await, 1);
+    h.backend
+        .transactions
+        .lock()
+        .unwrap()
+        .insert(txs[2].signatures[0].to_string(), chain(&txs[2], true));
     let (status, reprepared) = request(&app, &retry, "test-user", Some(retry_body)).await;
     assert_eq!(status, StatusCode::OK, "{reprepared}");
     assert_eq!(reprepared["payments"][0]["status"], "finalized");
@@ -334,13 +350,31 @@ async fn three_recipient_run_recovers_partial_failure_without_repaying_successes
     // Expiry must reconcile an already-landed success rather than pay it twice.
     let id = skip["run_id"].as_str().unwrap();
     let tx = sign(&h, &skip["payments"][0]);
-    h.backend
-        .transactions
-        .lock()
-        .unwrap()
-        .insert(tx.signatures[0].to_string(), chain(&tx, false));
     let retry = json!({"aes_key":body["aes_key"],"payments":[{"position":0,"amount":"1000000","signature":tx.signatures[0].to_string()},{"position":2,"amount":"1000000","signature":last.signatures[0].to_string()}]});
     apply_sender(&h, &tx);
+    let audit = h.audit_count().await;
+    let (status, ambiguous) = request(
+        &h.app(),
+        &format!("/runs/{id}/retry"),
+        "test-user",
+        Some(retry.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(ambiguous["error"], "transaction_history_unavailable");
+    let (_, unchanged) = request(&h.app(), &format!("/runs/{id}"), "test-user", None).await;
+    assert_eq!(unchanged["payments"][0]["status"], "prepared");
+    assert_eq!(unchanged["payments"][0]["attempt"], 0);
+    assert_eq!(
+        unchanged["payments"][0]["request_id"],
+        skip["payments"][0]["request_id"]
+    );
+    assert_eq!(h.audit_count().await, audit);
+    {
+        let mut transactions = h.backend.transactions.lock().unwrap();
+        transactions.insert(tx.signatures[0].to_string(), chain(&tx, false));
+        transactions.insert(last.signatures[0].to_string(), chain(&last, true));
+    }
     let (_, resolved) = request(
         &h.app(),
         &format!("/runs/{id}/retry"),

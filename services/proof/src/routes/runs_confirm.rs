@@ -104,7 +104,7 @@ pub(super) fn signature(run: &Run, p: &Payment, value: &str) -> Result<Signature
     Ok(signature)
 }
 
-/// Expiry is terminal only after checking the original signed attempt on finalized RPC.
+/// Persist verified finalized outcomes; expiry alone cannot resolve missing history.
 pub(super) async fn reconcile(
     state: &RunState,
     user: &str,
@@ -127,17 +127,18 @@ pub(super) async fn reconcile(
         };
     }
     state.devnet().await?;
-    // Observe expiry first, then check history, so a landing between the reads
-    // cannot be mistaken for an unsubmitted expired transaction.
+    // Observe finalized expiry before classifying a missing history response.
     let expired = expire
         && state.rpc.finalized_block_height().await?
             > p.last_valid_block_height.ok_or(AppError::RunUnavailable)? as u64;
     let mut result = state.rpc.finalized_transaction(value).await?;
     let (status, slot, error) = if result.is_null() {
-        if !expired {
-            return Err(AppError::Conflict("transaction_not_finalized"));
-        }
-        (Status::Expired, None, Some("transaction_expired".into()))
+        // An executed payment can disappear from RPC history. Never replace it on absence alone.
+        return Err(AppError::Conflict(if expired {
+            "transaction_history_unavailable"
+        } else {
+            "transaction_not_finalized"
+        }));
     } else {
         let failed = match result.get("meta").and_then(|m| m.get("err")) {
             Some(Value::Null) => false,
