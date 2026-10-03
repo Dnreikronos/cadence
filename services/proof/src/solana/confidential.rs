@@ -280,3 +280,39 @@ fn validate(
         ElGamalPubkey::try_from(destination.elgamal_pubkey).map_err(|_| invalid())?;
     Ok((*source, destination_key, auditor))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_a_transaction_that_cannot_fit_the_atomic_limit() {
+        let instructions = [Instruction {
+            program_id: Address::new_from_array([9; 32]),
+            accounts: vec![],
+            data: vec![0; 4096],
+        }];
+        assert!(compile(
+            &instructions,
+            &Address::new_from_array([8; 32]),
+            Hash::default()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn rejects_exactly_4096_bytes_even_when_the_v1_serializer_accepts_it() {
+        let wallet = Address::new_from_array([8; 32]);
+        let mut instructions = [Instruction {
+            program_id: Address::new_from_array([9; 32]),
+            accounts: vec![],
+            data: vec![0; 3800],
+        }];
+        let probe = v1::compile_unsigned(&instructions, &wallet, Hash::default()).unwrap();
+        let overhead = v1::serialize(&probe).unwrap().len() - 3800;
+        instructions[0].data.resize(4096 - overhead, 0);
+        let boundary = v1::compile_unsigned(&instructions, &wallet, Hash::default()).unwrap();
+        assert_eq!(v1::serialize(&boundary).unwrap().len(), 4096);
+        assert!(compile(&instructions, &wallet, Hash::default()).is_err());
+    }
+}
