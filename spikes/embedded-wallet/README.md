@@ -109,5 +109,10 @@ You need a Turnkey organization (a disposable devnet one), Docker, and `cloudfla
    buttons in order. `next.config.mjs` sets `reactStrictMode: false`; Next's default is
    `true`.
 
+Next copies a file that a route reads by path into its build output: the spike's
+routes read `../.env`, so a copy of it (private key included) ends up under
+`web/.next/`. That folder is git-ignored, but delete it (`rm -rf web/.next`) when you
+are done, and never copy this pattern: real code reads secrets from `process.env`.
+
 Each run creates throwaway sub-organizations named `spike-<timestamp>` in the Turnkey
 organization. Delete them from the dashboard when you are done.

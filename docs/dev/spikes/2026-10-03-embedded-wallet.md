@@ -242,6 +242,15 @@ and `/api/turnkey-login` ignores `email` and `expirationSeconds` from the body, 
 the email from the token and fixes the session length at one hour. Those changes
 were applied after the runs described above and not re-run.
 
+Found while reviewing, and worth knowing before #78: the spike's routes read the
+Turnkey credentials with `readFileSync(path.join(process.cwd(), "..", ".env"))`. Next's
+build treated that file as an asset and **copied the whole `.env`, private key
+included, into `.next/server/static/media/`** (not into the public `static/`
+folder, and git-ignored, but it sits in the build output and would travel with a
+deployment or a build cache). The same folder then showed up in a search for
+secrets. A real route must take secrets from `process.env`, set in the hosting
+platform, and never from a file read by path. The build folder was deleted.
+
 ### Decisions for the team
 
 1. A user-held passkey as the root user, or plain OAuth as the root user.
