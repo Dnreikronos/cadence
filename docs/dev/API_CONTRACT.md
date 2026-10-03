@@ -406,6 +406,7 @@ return `{ "items": [...], "next_cursor": "<opaque> | null" }`.
 | Route | Who | Returns |
 |---|---|---|
 | `GET /me/balance` | recipient | `{ "available": "<base units>", "pending": "<base units>", "as_of_slot": 123 }` from the AES balance (ADR B3) |
+| `GET /company/balance` | company admin | `{ "available": "<base units>", "pending": "<base units>", "as_of_slot": 123 }`, the company's private balance, for the Deposit screen and the shell |
 | `GET /me/payments` | recipient | their payments |
 | `GET /company/payments` | company admin | the company's payments |
 | `GET /company/people/amounts` | company admin | the roster amounts (#64) |
@@ -505,7 +506,12 @@ These need an answer from the backend owner before the 🟡 routes are built.
 9. **Transparent fallback (#60).** Is a boolean `transparent` per payment enough, or
    does the UI also need a global "confidentiality unavailable" signal before the
    admin approves a run?
-10. **Reveal-risk tolerance.** Is it a service constant, or something the response
+10. **Company balance.** The contract had a balance read only for recipients
+    (`GET /me/balance`). The Deposit screen and the shell need the company's
+    private available and pending balance too, so `GET /company/balance` is added
+    above. Is that the right route, and does the company's public USDC balance stay a
+    direct chain read (RPC) rather than a service route?
+11. **Reveal-risk tolerance.** Is it a service constant, or something the response
     should echo so the warning can say how close is "near"?
 
 ## Revisions
