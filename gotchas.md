@@ -1,5 +1,9 @@
 # Gotchas
 
+- Before treating an issue's dependencies as missing, fetch and inspect the
+  remote default branch. An older feature checkout can omit already merged code.
+  Preserve local changes in that checkout and use an isolated worktree.
+
 - Before claiming provider credentials are missing, check the project's ignored
   `.env` files as well as the process environment, including the checkout used
   for the previous experiment. Inspect setting names/presence without printing
