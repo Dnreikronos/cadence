@@ -30,7 +30,7 @@ repo's paths instead of these.
 
 ## Contracts
 
-- [API contract for the web app](dev/API_CONTRACT.md) — #63. What the web app builds and mocks against: authentication, the prepare-sign-confirm pattern, errors that never carry an amount, and every route, marked implemented or proposed. Status: draft, open questions for the backend owner.
+- [API contract for the web app](dev/API_CONTRACT.md) — #63. What the web app builds and mocks against: authentication, the prepare-sign-confirm pattern, errors that never carry an amount, and every route, marked implemented or proposed, plus the design review findings to resolve before building. Status: draft, open questions for the backend owner.
 
 ## Spikes
 
