@@ -7,6 +7,8 @@ pub enum AppError {
     Unauthorized,
     #[error("wallet access denied")]
     Forbidden,
+    #[error("transfer request not found")]
+    TransferNotFound,
     #[error("{0}")]
     TransferUnavailable(&'static str),
     #[error("wrap rate limit exceeded")]
@@ -34,6 +36,7 @@ impl AppError {
         match self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::Forbidden => StatusCode::FORBIDDEN,
+            Self::TransferNotFound => StatusCode::NOT_FOUND,
             Self::TransferUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
@@ -58,6 +61,7 @@ impl IntoResponse for AppError {
         let code = match self {
             Self::Unauthorized => "authentication_required",
             Self::Forbidden => "wallet_access_denied",
+            Self::TransferNotFound => "transfer_not_found",
             Self::TransferUnavailable(code) => code,
             Self::BadRequest(code) | Self::Conflict(code) => code,
             Self::NotFound => "wrap_not_found",

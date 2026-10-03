@@ -2,9 +2,21 @@ use crate::{auth::wallet_link_message, database::Database, error::AppError};
 use solana_address::Address;
 use solana_signature::Signature;
 use std::str::FromStr;
+use tokio_postgres::Row;
 
 pub struct TransferStore {
     database: Database,
+}
+
+pub struct PreparedTransfer {
+    pub id: String,
+    pub company_wallet: String,
+    pub sender: String,
+    pub destination: String,
+    pub transaction: String,
+    pub last_valid_block_height: u64,
+    pub signature: Option<String>,
+    pub slot: Option<u64>,
 }
 
 fn unavailable() -> AppError {
@@ -66,4 +78,95 @@ impl TransferStore {
         }
         Ok(())
     }
+
+    pub async fn prepare(&self, user: &str, record: &PreparedTransfer) -> Result<(), AppError> {
+        let height = i64::try_from(record.last_valid_block_height).map_err(|_| unavailable())?;
+        self.database.connect().await?
+            .execute(
+                "INSERT INTO public.transfer_requests \
+                 (id, user_id, company_wallet, sender, destination, transaction, last_valid_block_height) \
+                 VALUES ($1, $2::text::uuid, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING",
+                &[&record.id, &user, &record.company_wallet, &record.sender,
+                  &record.destination, &record.transaction, &height],
+            )
+            .await
+            .map_err(|_| unavailable())?;
+        let stored = self.get(user, &record.id).await?;
+        if stored.transaction != record.transaction
+            || stored.company_wallet != record.company_wallet
+            || stored.sender != record.sender
+            || stored.destination != record.destination
+            || stored.last_valid_block_height != record.last_valid_block_height
+        {
+            return Err(unavailable());
+        }
+        Ok(())
+    }
+
+    pub async fn get(&self, user: &str, id: &str) -> Result<PreparedTransfer, AppError> {
+        let row = self
+            .database
+            .connect()
+            .await?
+            .query_opt(
+                "SELECT id, company_wallet, sender, destination, transaction, \
+                 last_valid_block_height, signature, slot FROM public.transfer_requests \
+                 WHERE id = $1 AND user_id = $2::text::uuid",
+                &[&id, &user],
+            )
+            .await
+            .map_err(|_| unavailable())?
+            .ok_or(AppError::TransferNotFound)?;
+        record(row)
+    }
+
+    pub async fn confirm(
+        &self,
+        user: &str,
+        id: &str,
+        signature: &str,
+        slot: u64,
+    ) -> Result<(), AppError> {
+        let slot_value = i64::try_from(slot).map_err(|_| AppError::RpcUnavailable)?;
+        let updated = self
+            .database
+            .connect()
+            .await?
+            .execute(
+                "UPDATE public.transfer_requests SET signature = $3, slot = $4 \
+                 WHERE id = $1 AND user_id = $2::text::uuid AND signature IS NULL",
+                &[&id, &user, &signature, &slot_value],
+            )
+            .await
+            .map_err(|_| unavailable())?;
+        if updated == 1 {
+            return Ok(());
+        }
+        let existing = self.get(user, id).await?;
+        if existing.signature.as_deref() == Some(signature) && existing.slot == Some(slot) {
+            Ok(())
+        } else {
+            Err(AppError::Conflict("transfer_already_confirmed"))
+        }
+    }
+}
+
+fn record(row: Row) -> Result<PreparedTransfer, AppError> {
+    let height: i64 = row
+        .try_get("last_valid_block_height")
+        .map_err(|_| unavailable())?;
+    let slot: Option<i64> = row.try_get("slot").map_err(|_| unavailable())?;
+    Ok(PreparedTransfer {
+        id: row.try_get("id").map_err(|_| unavailable())?,
+        company_wallet: row.try_get("company_wallet").map_err(|_| unavailable())?,
+        sender: row.try_get("sender").map_err(|_| unavailable())?,
+        destination: row.try_get("destination").map_err(|_| unavailable())?,
+        transaction: row.try_get("transaction").map_err(|_| unavailable())?,
+        last_valid_block_height: u64::try_from(height).map_err(|_| unavailable())?,
+        signature: row.try_get("signature").map_err(|_| unavailable())?,
+        slot: slot
+            .map(u64::try_from)
+            .transpose()
+            .map_err(|_| unavailable())?,
+    })
 }
