@@ -17,6 +17,7 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use solana_address::Address;
+use solana_signature::Signature;
 use solana_zk_sdk::encryption::auth_encryption::AeKey;
 use spl_token_2022_interface::{extension::StateWithExtensions, state::Account};
 use std::{str::FromStr, sync::Arc};
@@ -75,6 +76,7 @@ pub fn router(rpc: Arc<RpcClient>, service: Option<Arc<Service>>) -> Router {
     let limits = Arc::new(Limits::new());
     Router::new()
         .route("/transfer", post(prepare))
+        .route("/transfer/confirm", post(confirm))
         .layer(DefaultBodyLimit::max(8192))
         .layer(axum::middleware::from_fn_with_state(
             limits.clone(),
@@ -247,6 +249,83 @@ async fn prepare(
         mint: mint.to_string(),
         recent_blockhash: blockhash.to_string(),
         last_valid_block_height,
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConfirmRequest {
+    request_id: String,
+    signature: String,
+}
+#[derive(Serialize)]
+struct ConfirmResponse {
+    request_id: String,
+    signature: String,
+    slot: u64,
+    status: &'static str,
+}
+
+async fn confirm(
+    State(state): State<TransferState>,
+    headers: HeaderMap,
+    body: Result<Json<ConfirmRequest>, JsonRejection>,
+) -> Result<Json<ConfirmResponse>, AppError> {
+    let Json(request) = body.map_err(|_| AppError::BadRequest("invalid_request"))?;
+    if request.request_id.len() != 64
+        || !request
+            .request_id
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+    {
+        return Err(AppError::BadRequest("invalid_request_id"));
+    }
+    let signature = Signature::from_str(&request.signature)
+        .map_err(|_| AppError::BadRequest("invalid_signature"))?;
+    if signature == Signature::default() {
+        return Err(AppError::BadRequest("invalid_signature"));
+    }
+    let service = state
+        .service
+        .ok_or(AppError::TransferUnavailable("transfer_unavailable"))?;
+    let user = service.auth.user(&headers).await?;
+    let record = service.store.get(&user, &request.request_id).await?;
+    if record
+        .signature
+        .as_ref()
+        .is_some_and(|s| s != &request.signature)
+    {
+        return Err(AppError::Conflict("transfer_already_confirmed"));
+    }
+    let slot = if let Some(slot) = record.slot.filter(|_| record.signature.is_some()) {
+        slot
+    } else {
+        state.rpc.require_devnet().await.map_err(cluster_error)?;
+        let result = state.rpc.finalized_transaction(&request.signature).await?;
+        let slot = super::wrap::verify_confirmation(
+            &record.id,
+            &record.company_wallet,
+            &record.transaction,
+            &signature,
+            &result,
+        )
+        .map_err(|error| match error {
+            AppError::StorageUnavailable => {
+                AppError::TransferUnavailable("transfer_storage_unavailable")
+            }
+            other => other,
+        })?;
+        service
+            .store
+            .confirm(&user, &record.id, &request.signature, slot)
+            .await?;
+        slot
+    };
+    Ok(Json(ConfirmResponse {
+        request_id: record.id,
+        signature: request.signature,
+        slot,
+        status: "finalized",
     }))
 }
 
