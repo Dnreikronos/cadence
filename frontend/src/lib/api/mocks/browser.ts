@@ -28,5 +28,10 @@ export function startMockWorker() {
         },
       })
     })
+    // A failed start is dropped, so the next call can try again.
+    .catch((error: unknown) => {
+      started = undefined
+      throw error
+    })
   return started
 }

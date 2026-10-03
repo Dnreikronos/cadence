@@ -1,27 +1,32 @@
-import { cluster } from "@/lib/solana/cluster"
 import { createApiClient } from "./client"
-import { readApiConfig } from "./config"
+import { apiConfig } from "./mode"
 
-// Read at import so a bad mode fails the build rather than a payment.
-// Next inlines NEXT_PUBLIC_* only when referenced literally.
-export const apiConfig = readApiConfig({
-  mode: process.env.NEXT_PUBLIC_API_MODE,
-  baseUrl: process.env.NEXT_PUBLIC_PROOF_API_URL,
-  isMainnet: cluster.isMainnet,
-})
+export { apiConfig }
 
 let mocks: Promise<void> | undefined
 
-// The service worker has to be running before the first request leaves.
-async function ready() {
-  if (apiConfig.mode !== "mock") return
-  if (typeof window === "undefined") {
-    throw new Error(
-      "The mock API runs in the browser: call it from a client component",
-    )
+// The service worker has to be running before the first request leaves. The
+// literal check on the mode lets Next inline it, so a real-mode build drops the
+// import and the mock worker never reaches the client bundle.
+export async function whenApiReady() {
+  if (
+    process.env.NEXT_PUBLIC_API_MODE !== "real" &&
+    apiConfig.mode === "mock"
+  ) {
+    if (typeof window === "undefined") {
+      throw new Error(
+        "The mock API runs in the browser: call it from a client component",
+      )
+    }
+    // A failed start is dropped, so the next call can try again.
+    mocks ??= import("./mocks/browser")
+      .then((m) => m.startMockWorker())
+      .catch((error: unknown) => {
+        mocks = undefined
+        throw error
+      })
+    await mocks
   }
-  mocks ??= import("./mocks/browser").then((m) => m.startMockWorker())
-  await mocks
 }
 
 async function getToken() {
@@ -35,7 +40,7 @@ export const api = createApiClient({
   baseUrl: apiConfig.baseUrl,
   getToken,
   fetch: async (input, init) => {
-    await ready()
+    await whenApiReady()
     return fetch(input, init)
   },
 })

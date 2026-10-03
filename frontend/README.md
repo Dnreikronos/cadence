@@ -67,12 +67,14 @@ const receipt = await signAndConfirm(prepared, {
 Amounts are integer base-unit strings (`"1000000"` is 1 USDC). Errors are
 `ApiError` with a stable `code`; `messageFor(error)` gives the copy to show.
 
-`NEXT_PUBLIC_API_MODE` picks the service. `mock` (the default) answers from an
-in-browser [MSW](https://mswjs.io) handler for every route, including the
-failures that change a screen; `real` calls `NEXT_PUBLIC_PROOF_API_URL`. Mock
-mode is refused on mainnet. In the browser, `window.cadenceMock` flips
-scenarios (`slow`, `rate-limited`, `partial-failure`, ...) and `?mock=slow` in
-the page URL starts with one on. `/dev/api` runs the flows and the switches.
+`NEXT_PUBLIC_API_MODE` picks the service. `mock` answers from an in-browser
+[MSW](https://mswjs.io) handler for every route, including the failures that
+change a screen, and shows a MOCK DATA badge next to the DEVNET one; `real` calls
+`NEXT_PUBLIC_PROOF_API_URL`, which must be https unless it is localhost, since
+the token and the confidential keys travel in the requests. `next dev` defaults
+to `mock`. In every other environment (build, preview, production) the variable
+must be set, so a deploy that forgets it fails instead of running on fake data.
+Mock mode is refused on mainnet. `/dev/api` runs the flows and the switches.
 
 ## Route guard
 

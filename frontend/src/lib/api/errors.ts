@@ -16,12 +16,13 @@ export class ApiError extends Error {
     this.retryAfter = retryAfter
   }
 
-  // "Not yet" and "service busy": the same request may succeed later.
+  // "Not yet" and "service busy": the same request may succeed later. 502 to
+  // 504 are what a proxy answers while the service restarts.
   get isRetryable() {
     return (
       this.code === "transaction_not_finalized" ||
       this.status === 429 ||
-      this.status === 503 ||
+      (this.status >= 502 && this.status <= 504) ||
       this.code === "network_error"
     )
   }
@@ -95,12 +96,28 @@ const messages: Record<string, string> = {
   transfer_rate_limited: "Too many payments at once. Wait a moment.",
   wrap_rate_limited: "Too many deposits at once. Wait a moment.",
   internal_error: "Something went wrong on our side. Try again.",
+  insufficient_usdc: "There isn't enough USDC for that.",
+  wrap_already_confirmed: "This deposit was already confirmed.",
+  invalid_wallet: "That wallet address isn't valid.",
+  invalid_account: "That account isn't valid.",
+  invalid_balance_key: "Your balance key isn't valid. Try again.",
+  invalid_signature: "The signature wasn't accepted. Try again.",
+  invalid_transfer: "That payment isn't valid.",
+  invalid_confidential_setup:
+    "The setup for private payments isn't valid. Try again.",
+  wrap_requires_devnet: "Deposits only work on devnet for now.",
+  wrapped_mint_missing: "Private payments aren't available yet.",
+  usdc_source_missing: "There's no USDC account to deposit from.",
+  confidential_destination_unavailable:
+    "The recipient can't receive private payments yet.",
 }
 
 export function messageFor(error: unknown) {
   if (isApiError(error)) {
     return (
-      messages[error.code] ??
+      (Object.hasOwn(messages, error.code)
+        ? messages[error.code]
+        : undefined) ??
       (error.status >= 500
         ? "Cadence is unavailable right now. Try again shortly."
         : "Something went wrong. Try again.")

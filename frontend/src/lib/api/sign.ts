@@ -20,7 +20,8 @@ export class UnexpectedSignerError extends Error {
 }
 
 export class ConfirmTimeoutError extends Error {
-  constructor() {
+  // The transaction was submitted: the caller can still look it up.
+  constructor(readonly signature: string) {
     super("The network did not confirm in time")
     this.name = "ConfirmTimeoutError"
   }
@@ -32,12 +33,31 @@ type Options = {
   submit: (signed: Uint8Array) => Promise<string>
   confirm: (signature: string) => Promise<Receipt>
   onStep?: (step: SignStep) => void
-  sleep?: (ms: number) => Promise<void>
-  // How long to keep asking while the transaction is not finalized yet.
+  // Called as soon as the transaction is on the network, so the signature is
+  // never lost if confirming fails or the user leaves.
+  onSubmitted?: (signature: string) => void
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
+  now?: () => number
+  // Stops sleeping and asking, and throws the abort reason.
+  signal?: AbortSignal
+  // The most wall-clock time to keep asking while the transaction is not
+  // finalized yet, counted from the submit.
   timeoutMs?: number
 }
 
-const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+const wait = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason)
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(signal?.reason)
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
 
 // Prepare -> sign the exact bytes -> submit -> confirm, per the contract. The
 // bytes are never edited, and a request for anyone else's signature is refused
@@ -49,36 +69,49 @@ export async function signAndConfirm(
     submit,
     confirm,
     onStep,
+    onSubmitted,
     sleep = wait,
+    now = Date.now,
+    signal,
     timeoutMs = 60_000,
   }: Options,
 ): Promise<Receipt> {
-  if (prepared.required_signers.some((key) => key !== signer.address)) {
+  if (
+    prepared.required_signers.length === 0 ||
+    prepared.required_signers.some((key) => key !== signer.address)
+  ) {
     throw new UnexpectedSignerError()
   }
+  signal?.throwIfAborted()
 
   onStep?.("signing")
   const signed = await signer.signTransaction(
     bytesFromBase64(prepared.transaction),
   )
+  signal?.throwIfAborted()
 
   onStep?.("submitting")
   const signature = await submit(signed)
+  onSubmitted?.(signature)
+  signal?.throwIfAborted()
 
   onStep?.("confirming")
+  const deadline = now() + timeoutMs
   let delay = 2_000
-  let waited = 0
   for (;;) {
+    let pause = delay
     try {
       return await confirm(signature)
     } catch (error) {
-      const notYet =
-        error instanceof ApiError && error.code === "transaction_not_finalized"
-      if (!notYet) throw error
-      if (waited >= timeoutMs) throw new ConfirmTimeoutError()
-      await sleep(delay)
-      waited += delay
-      delay = Math.min(Math.round(delay * 1.5), 10_000)
+      // "Not finalized yet", a busy network and a dropped connection all pass
+      // with time. Anything else is final.
+      if (!(error instanceof ApiError && error.isRetryable)) throw error
+      if (error.retryAfter) pause = Math.max(pause, error.retryAfter * 1_000)
     }
+    const remaining = deadline - now()
+    if (remaining <= 0) throw new ConfirmTimeoutError(signature)
+    await sleep(Math.min(pause, remaining), signal)
+    signal?.throwIfAborted()
+    delay = Math.min(Math.round(delay * 1.5), 10_000)
   }
 }

@@ -7,22 +7,36 @@ import { z } from "zod"
 // Integer base units as a decimal string, six decimals (1 USDC = "1000000").
 // Never a number: a float cannot hold every amount exactly.
 const maxUnits = 2n ** 48n - 1n
+// One refine, regex first: BigInt must never see a string it cannot parse, or it
+// throws a SyntaxError that echoes the amount.
 export const unitsSchema = z
   .string()
-  .regex(/^[1-9]\d{0,14}$/, "Amounts are integer base units")
-  .refine((value) => BigInt(value) <= maxUnits, "Amount is past 2^48 - 1")
+  .refine(
+    (value) => /^[1-9][0-9]{0,14}$/.test(value) && BigInt(value) <= maxUnits,
+    "Amounts are integer base units from 1 to 2^48 - 1",
+  )
 
 // Reads can be zero.
-const unitsOrZero = z.string().regex(/^(0|[1-9]\d{0,14})$/)
+const unitsOrZero = z.string().regex(/^(0|[1-9][0-9]{0,14})$/)
 
-const id = z.guid()
-const key = z.string().min(32).max(44)
-const timestamp = z.iso.datetime()
+export const idSchema = z.guid()
+const id = idSchema
+// PostgREST and chrono both emit "+00:00" as well as "Z".
+const timestamp = z.iso.datetime({ offset: true })
+
+// What the service enforces on requests. Responses stay lenient, except that a
+// request id is always 64 lowercase hex characters.
+const base58 = /^[1-9A-HJ-NP-Za-km-z]+$/
+export const requestIdSchema = z.string().regex(/^[0-9a-f]{64}$/)
+const key = z.string().regex(base58).min(32).max(44)
+export const signatureSchema = z.string().regex(base58).min(43).max(88)
+// 16 bytes: 22 characters, a last one whose low four bits are zero, and "==".
+const aesKey = z.string().regex(/^[A-Za-z0-9+/]{21}[AQgw]==$/)
 
 // ---- Prepare and confirm ----------------------------------------------------
 
 export const preparedSchema = z.object({
-  request_id: z.string().length(64),
+  request_id: requestIdSchema,
   transaction: z.base64(),
   transaction_version: z.union([z.literal(0), z.literal(1)]),
   required_signers: z.array(z.string().min(1)).min(1),
@@ -32,26 +46,26 @@ export const preparedSchema = z.object({
 export type Prepared = z.infer<typeof preparedSchema>
 
 export const receiptSchema = z.object({
-  request_id: z.string().length(64),
+  request_id: requestIdSchema,
   signature: z.string().min(1),
   slot: z.number().int().nonnegative(),
   status: z.literal("finalized"),
 })
 export type Receipt = z.infer<typeof receiptSchema>
 
-export const confirmRequestSchema = z.object({
-  request_id: z.string().length(64),
-  signature: z.string().min(1),
+export const confirmRequestSchema = z.strictObject({
+  request_id: requestIdSchema,
+  signature: signatureSchema,
 })
 export type ConfirmRequest = z.infer<typeof confirmRequestSchema>
 
 // ---- Wrap and transfer ------------------------------------------------------
 
-export const wrapRequestSchema = z.object({
+export const wrapRequestSchema = z.strictObject({
   company_wallet: key,
   amount: unitsSchema,
   setup: z
-    .object({
+    .strictObject({
       pubkey_validity_proof: z.base64(),
       decryptable_zero_balance: z.base64(),
     })
@@ -66,14 +80,14 @@ export const wrapPreparedSchema = preparedSchema.extend({
 })
 export type WrapPrepared = z.infer<typeof wrapPreparedSchema>
 
-export const transferRequestSchema = z.object({
+export const transferRequestSchema = z.strictObject({
   company_wallet: key,
   sender: key,
   recipient: key,
   amount: unitsSchema,
-  aes_key: z.base64(),
+  aes_key: aesKey,
   // Only the first request for a wallet.
-  wallet_signature: z.string().min(1).optional(),
+  wallet_signature: signatureSchema.optional(),
 })
 export type TransferRequest = z.infer<typeof transferRequestSchema>
 
@@ -86,10 +100,10 @@ export type TransferPrepared = z.infer<typeof transferPreparedSchema>
 
 // ---- Payroll runs -----------------------------------------------------------
 
-export const runRequestSchema = z.object({
+export const runRequestSchema = z.strictObject({
   company_wallet: key,
   payments: z
-    .array(z.object({ person_id: id, amount: unitsSchema }))
+    .array(z.strictObject({ person_id: id, amount: unitsSchema }))
     .min(1)
     .max(200),
   idempotency_key: id,
@@ -135,11 +149,13 @@ export const runSchema = z.object({
 })
 export type Run = z.infer<typeof runSchema>
 
-export const paymentConfirmSchema = z.object({ signature: z.string().min(1) })
+export const paymentConfirmSchema = z.strictObject({
+  signature: signatureSchema,
+})
 
 // ---- Unwrap -----------------------------------------------------------------
 
-export const unwrapRequestSchema = z.object({
+export const unwrapRequestSchema = z.strictObject({
   wallet: key,
   amount: unitsSchema,
   acknowledge_reveal_risk: z.boolean(),
@@ -160,12 +176,12 @@ export type UnwrapPrepared = z.infer<typeof unwrapPreparedSchema>
 
 // ---- Accounts and keys ------------------------------------------------------
 
-export const walletRequestSchema = z.object({ wallet: key })
+export const walletRequestSchema = z.strictObject({ wallet: key })
 
-export const enrollRequestSchema = z.object({
+export const enrollRequestSchema = z.strictObject({
   wallet: key,
   // Signature of the canonical key-derivation message. Never a key.
-  signature: z.string().min(1),
+  signature: signatureSchema,
 })
 export const enrolledSchema = z.object({ status: z.literal("enrolled") })
 
@@ -203,7 +219,7 @@ export const personAmountSchema = z.object({
 })
 export type PersonAmount = z.infer<typeof personAmountSchema>
 
-export const setAmountRequestSchema = z.object({ amount: unitsSchema })
+export const setAmountRequestSchema = z.strictObject({ amount: unitsSchema })
 
 export const inviteSchema = z.object({
   status: z.literal("sent"),
@@ -212,7 +228,8 @@ export const inviteSchema = z.object({
 
 export const healthSchema = z.object({
   status: z.enum(["ok", "unavailable"]),
-  build_sha: z.string(),
+  // A 503 can come without it.
+  build_sha: z.string().optional(),
   rpc_reachable: z.boolean(),
 })
 export type Health = z.infer<typeof healthSchema>

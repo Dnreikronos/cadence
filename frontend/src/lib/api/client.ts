@@ -9,7 +9,11 @@ export type ApiClientOptions = {
   fetch?: typeof fetch
 }
 
-type CallOptions<T extends z.ZodType> = {
+// Per-call options. `signal` cancels the request (the fetch rejects with the
+// abort reason, which is not an ApiError).
+export type RequestOptions = { signal?: AbortSignal }
+
+type CallOptions<T extends z.ZodType> = RequestOptions & {
   method?: "GET" | "POST" | "PUT"
   // Evaluated inside the async call, so an invalid request rejects instead of throwing.
   body?: () => unknown
@@ -32,7 +36,13 @@ export function createApiClient({
     path: string,
     options: Omit<CallOptions<z.ZodType>, "response">,
   ) {
-    const { method = "GET", body: makeBody, query, auth = true } = options
+    const {
+      method = "GET",
+      body: makeBody,
+      query,
+      auth = true,
+      signal,
+    } = options
     const payload = makeBody?.()
     const headers: Record<string, string> = { accept: "application/json" }
     if (auth) {
@@ -55,19 +65,26 @@ export function createApiClient({
         body: payload === undefined ? undefined : JSON.stringify(payload),
         // Responses can hold decrypted amounts: never reuse them from a cache.
         cache: "no-store",
+        signal,
       })
-    } catch {
-      throw new ApiError(0, "network_error")
+    } catch (error) {
+      // fetch rejects with a TypeError when it cannot reach the server. Anything
+      // else (an abort, a mock that failed to start) is not a network problem.
+      if (error instanceof TypeError) throw new ApiError(0, "network_error")
+      throw error
     }
     return response
   }
+
+  const readJson = (response: Response) =>
+    response.json().catch(() => undefined) as Promise<unknown>
 
   async function call<T extends z.ZodType>(
     path: string,
     options: CallOptions<T>,
   ): Promise<z.output<T>> {
     const response = await send(path, options)
-    const body: unknown = await response.json().catch(() => undefined)
+    const body = await readJson(response)
     if (!response.ok) throw errorFromResponse(response, body)
     const parsed = options.response.safeParse(body)
     if (!parsed.success) {
@@ -83,29 +100,48 @@ export function createApiClient({
 
   const page = <T extends z.ZodType>(item: T) => s.pageSchema(item)
 
-  async function download(path: string) {
-    const response = await send(path, {})
+  async function download(path: string, options: RequestOptions) {
+    const response = await send(path, options)
     if (!response.ok) {
-      throw errorFromResponse(
-        response,
-        await response.json().catch(() => undefined),
-      )
+      throw errorFromResponse(response, await readJson(response))
+    }
+    // A proxy's HTML page with a 200 must not be saved as the export.
+    const type = response.headers.get("content-type") ?? ""
+    if (!/^text\/csv\b/i.test(type)) {
+      throw new ContractError(path, "expected a text/csv response")
     }
     return response.blob()
   }
 
+  // Ids go into the path, so only a guid may: ".." or "/" must never reach it.
+  const segment = (value: string) => s.idSchema.parse(value)
+
   return {
-    health: () => call("/health", { response: s.healthSchema, auth: false }),
+    // A 503 carries the health body (`unavailable`), so it is returned, not thrown.
+    health: async (options: RequestOptions = {}) => {
+      const response = await send("/health", { ...options, auth: false })
+      const body = await readJson(response)
+      if (response.ok || response.status === 503) {
+        const parsed = s.healthSchema.safeParse(body)
+        if (parsed.success) return parsed.data
+        if (response.ok) {
+          throw new ContractError("/health", z.prettifyError(parsed.error))
+        }
+      }
+      throw errorFromResponse(response, body)
+    },
 
     wrap: {
-      prepare: (request: s.WrapRequest) =>
+      prepare: (request: s.WrapRequest, options: RequestOptions = {}) =>
         call("/wrap", {
+          ...options,
           method: "POST",
           body: body(s.wrapRequestSchema, request),
           response: s.wrapPreparedSchema,
         }),
-      confirm: (request: s.ConfirmRequest) =>
+      confirm: (request: s.ConfirmRequest, options: RequestOptions = {}) =>
         call("/wrap/confirm", {
+          ...options,
           method: "POST",
           body: body(s.confirmRequestSchema, request),
           response: s.receiptSchema,
@@ -113,14 +149,16 @@ export function createApiClient({
     },
 
     transfer: {
-      prepare: (request: s.TransferRequest) =>
+      prepare: (request: s.TransferRequest, options: RequestOptions = {}) =>
         call("/transfer", {
+          ...options,
           method: "POST",
           body: body(s.transferRequestSchema, request),
           response: s.transferPreparedSchema,
         }),
-      confirm: (request: s.ConfirmRequest) =>
+      confirm: (request: s.ConfirmRequest, options: RequestOptions = {}) =>
         call("/transfer/confirm", {
+          ...options,
           method: "POST",
           body: body(s.confirmRequestSchema, request),
           response: s.receiptSchema,
@@ -128,39 +166,50 @@ export function createApiClient({
     },
 
     runs: {
-      create: (request: s.RunRequest) =>
+      create: (request: s.RunRequest, options: RequestOptions = {}) =>
         call("/runs", {
+          ...options,
           method: "POST",
           body: body(s.runRequestSchema, request),
           response: s.runCreatedSchema,
         }),
-      get: (runId: string) =>
-        call(`/runs/${encodeURIComponent(runId)}`, { response: s.runSchema }),
-      confirmPayment: (runId: string, paymentId: string, signature: string) =>
-        call(
-          `/runs/${encodeURIComponent(runId)}/payments/${encodeURIComponent(paymentId)}/confirm`,
-          {
-            method: "POST",
-            body: body(s.paymentConfirmSchema, { signature }),
-            response: s.receiptSchema,
-          },
-        ),
-      retryPayment: (runId: string, paymentId: string) =>
-        call(
-          `/runs/${encodeURIComponent(runId)}/payments/${encodeURIComponent(paymentId)}/retry`,
-          { method: "POST", response: s.runPaymentPreparedSchema },
-        ),
+      get: async (runId: string, options: RequestOptions = {}) =>
+        call(`/runs/${segment(runId)}`, { ...options, response: s.runSchema }),
+      confirmPayment: async (
+        runId: string,
+        paymentId: string,
+        signature: string,
+        options: RequestOptions = {},
+      ) =>
+        call(`/runs/${segment(runId)}/payments/${segment(paymentId)}/confirm`, {
+          ...options,
+          method: "POST",
+          body: body(s.paymentConfirmSchema, { signature }),
+          response: s.receiptSchema,
+        }),
+      retryPayment: async (
+        runId: string,
+        paymentId: string,
+        options: RequestOptions = {},
+      ) =>
+        call(`/runs/${segment(runId)}/payments/${segment(paymentId)}/retry`, {
+          ...options,
+          method: "POST",
+          response: s.runPaymentPreparedSchema,
+        }),
     },
 
     unwrap: {
-      prepare: (request: s.UnwrapRequest) =>
+      prepare: (request: s.UnwrapRequest, options: RequestOptions = {}) =>
         call("/unwrap", {
+          ...options,
           method: "POST",
           body: body(s.unwrapRequestSchema, request),
           response: s.unwrapPreparedSchema,
         }),
-      confirm: (request: s.ConfirmRequest) =>
+      confirm: (request: s.ConfirmRequest, options: RequestOptions = {}) =>
         call("/unwrap/confirm", {
+          ...options,
           method: "POST",
           body: body(s.confirmRequestSchema, request),
           response: s.receiptSchema,
@@ -168,26 +217,36 @@ export function createApiClient({
     },
 
     accounts: {
-      configure: (wallet: string) =>
+      configure: (wallet: string, options: RequestOptions = {}) =>
         call("/accounts/configure", {
+          ...options,
           method: "POST",
           body: body(s.walletRequestSchema, { wallet }),
           response: s.preparedSchema,
         }),
-      confirmConfigure: (request: s.ConfirmRequest) =>
+      confirmConfigure: (
+        request: s.ConfirmRequest,
+        options: RequestOptions = {},
+      ) =>
         call("/accounts/configure/confirm", {
+          ...options,
           method: "POST",
           body: body(s.confirmRequestSchema, request),
           response: s.receiptSchema,
         }),
-      applyPending: (wallet: string) =>
+      applyPending: (wallet: string, options: RequestOptions = {}) =>
         call("/accounts/apply-pending", {
+          ...options,
           method: "POST",
           body: body(s.walletRequestSchema, { wallet }),
           response: s.preparedSchema,
         }),
-      confirmApplyPending: (request: s.ConfirmRequest) =>
+      confirmApplyPending: (
+        request: s.ConfirmRequest,
+        options: RequestOptions = {},
+      ) =>
         call("/accounts/apply-pending/confirm", {
+          ...options,
           method: "POST",
           body: body(s.confirmRequestSchema, request),
           response: s.receiptSchema,
@@ -195,8 +254,13 @@ export function createApiClient({
     },
 
     keys: {
-      enroll: (wallet: string, signature: string) =>
+      enroll: (
+        wallet: string,
+        signature: string,
+        options: RequestOptions = {},
+      ) =>
         call("/keys/enroll", {
+          ...options,
           method: "POST",
           body: body(s.enrollRequestSchema, { wallet, signature }),
           response: s.enrolledSchema,
@@ -204,41 +268,58 @@ export function createApiClient({
     },
 
     me: {
-      balance: () => call("/me/balance", { response: s.balanceSchema }),
-      payments: (query: PageQuery = {}) =>
+      balance: (options: RequestOptions = {}) =>
+        call("/me/balance", { ...options, response: s.balanceSchema }),
+      payments: (query: PageQuery = {}, options: RequestOptions = {}) =>
         call("/me/payments", {
+          ...options,
           query,
           response: page(s.paymentItemSchema),
         }),
     },
 
     company: {
-      payments: (query: PageQuery = {}) =>
+      balance: (options: RequestOptions = {}) =>
+        call("/company/balance", { ...options, response: s.balanceSchema }),
+      payments: (query: PageQuery = {}, options: RequestOptions = {}) =>
         call("/company/payments", {
+          ...options,
           query,
           response: page(s.paymentItemSchema),
         }),
-      amounts: (query: PageQuery = {}) =>
+      amounts: (query: PageQuery = {}, options: RequestOptions = {}) =>
         call("/company/people/amounts", {
+          ...options,
           query,
           response: page(s.personAmountSchema),
         }),
-      setAmount: (personId: string, amount: string) =>
-        call(`/company/people/${encodeURIComponent(personId)}/amount`, {
+      setAmount: async (
+        personId: string,
+        amount: string,
+        options: RequestOptions = {},
+      ) =>
+        call(`/company/people/${segment(personId)}/amount`, {
+          ...options,
           method: "PUT",
           body: body(s.setAmountRequestSchema, { amount }),
           response: s.personAmountSchema,
         }),
-      invite: (personId: string) =>
-        call(`/company/people/${encodeURIComponent(personId)}/invite`, {
+      invite: async (personId: string, options: RequestOptions = {}) =>
+        call(`/company/people/${segment(personId)}/invite`, {
+          ...options,
           method: "POST",
           response: s.inviteSchema,
         }),
     },
 
     audit: {
-      payments: (companyId: string, query: PageQuery = {}) =>
-        call(`/audit/${encodeURIComponent(companyId)}/payments`, {
+      payments: async (
+        companyId: string,
+        query: PageQuery = {},
+        options: RequestOptions = {},
+      ) =>
+        call(`/audit/${segment(companyId)}/payments`, {
+          ...options,
           query,
           response: page(s.paymentItemSchema),
         }),
@@ -246,10 +327,11 @@ export function createApiClient({
 
     // CSV needs the bearer header, so it is fetched and saved as a Blob.
     exports: {
-      company: () => download("/company/export.csv"),
-      me: () => download("/me/export.csv"),
-      audit: (companyId: string) =>
-        download(`/audit/${encodeURIComponent(companyId)}/export.csv`),
+      company: (options: RequestOptions = {}) =>
+        download("/company/export.csv", options),
+      me: (options: RequestOptions = {}) => download("/me/export.csv", options),
+      audit: async (companyId: string, options: RequestOptions = {}) =>
+        download(`/audit/${segment(companyId)}/export.csv`, options),
     },
   }
 }

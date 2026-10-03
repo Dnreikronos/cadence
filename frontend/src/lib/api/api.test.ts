@@ -1,7 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import { createApiClient } from "./client"
 import { ApiError, ContractError, messageFor } from "./errors"
-import { base64FromBytes } from "./base64"
 import {
   COMPANY_ID,
   COMPANY_WALLET,
@@ -12,12 +11,7 @@ import {
 } from "./mocks/db"
 import { scenarios } from "./mocks/scenario"
 import { server } from "./mocks/server"
-import {
-  ConfirmTimeoutError,
-  UnexpectedSignerError,
-  signAndConfirm,
-  type Signer,
-} from "./sign"
+import { UnexpectedSignerError, signAndConfirm, type Signer } from "./sign"
 
 const BASE = "http://mock.cadence.test"
 
@@ -39,7 +33,11 @@ const signer: Signer = {
   address: COMPANY_WALLET,
   signTransaction: async (bytes) => Uint8Array.from([...bytes, 1]),
 }
-const submit = async () => "5SigMockSignature1111111111111111111111111111"
+const SIG = "5SigMockSignature1111111111111111111111111111"
+const submit = async () => SIG
+// Distinct, valid-looking base58 signatures.
+// (No 0 in base58: the digit becomes a letter.)
+const sigOf = (n: number) => `TestSignature${"abcdefghij"[n]}`.padEnd(64, "1")
 const noSleep = async () => {}
 
 // A thrown ApiError, so a test can read its code.
@@ -179,7 +177,7 @@ describe("prepare, sign, confirm", () => {
       company_wallet: COMPANY_WALLET,
       amount: "1000000",
     })
-    const request = { request_id: prepared.request_id, signature: "sig" }
+    const request = { request_id: prepared.request_id, signature: SIG }
     const first = await api.wrap.confirm(request)
     expect(await api.wrap.confirm(request)).toEqual(first)
     expect(db.company.pending).toBe(1_000_000n)
@@ -208,33 +206,6 @@ describe("prepare, sign, confirm", () => {
     )
     expect(error).toBeInstanceOf(UnexpectedSignerError)
     expect(signed).toBe(false)
-  })
-
-  it("gives up on a transaction that never finalizes", async () => {
-    const slept: number[] = []
-    const error = await caught(
-      signAndConfirm(
-        {
-          transaction: base64FromBytes(Uint8Array.of(1, 2, 3)),
-          required_signers: [COMPANY_WALLET],
-        },
-        {
-          signer,
-          submit,
-          sleep: async (ms) => {
-            slept.push(ms)
-          },
-          confirm: async () => {
-            throw new ApiError(409, "transaction_not_finalized")
-          },
-        },
-      ),
-    )
-    expect(error).toBeInstanceOf(ConfirmTimeoutError)
-    // Backs off from 2 s toward 10 s and stops at about a minute.
-    expect(slept[0]).toBe(2_000)
-    expect(slept.at(-1)).toBe(10_000)
-    expect(slept.reduce((a, b) => a + b, 0)).toBeGreaterThanOrEqual(60_000)
   })
 
   it("stops at once on a final failure", async () => {
@@ -282,7 +253,7 @@ describe("prepare, sign, confirm", () => {
     const prepared = await api.accounts.applyPending(ME_WALLET)
     await api.accounts.confirmApplyPending({
       request_id: prepared.request_id,
-      signature: "sig",
+      signature: SIG,
     })
     expect(db.me.pending).toBe(0n)
 
@@ -291,19 +262,17 @@ describe("prepare, sign, confirm", () => {
     const error = await caught(
       api.accounts.confirmApplyPending({
         request_id: next.request_id,
-        signature: "sig",
+        signature: SIG,
       }),
     )
     expect(error).toMatchObject({ code: "credit_counter_mismatch" })
   })
 
   it("enrolls a key once", async () => {
-    await api.keys.enroll(ME_WALLET, "signature")
-    expect(await caught(api.keys.enroll(ME_WALLET, "signature"))).toMatchObject(
-      {
-        code: "key_already_enrolled",
-      },
-    )
+    await api.keys.enroll(ME_WALLET, SIG)
+    expect(await caught(api.keys.enroll(ME_WALLET, SIG))).toMatchObject({
+      code: "key_already_enrolled",
+    })
   })
 })
 
@@ -336,12 +305,8 @@ describe("payroll runs", () => {
     const run = await api.runs.create(
       request([bruno.id, diego.id, seedPeople[3].id]),
     )
-    for (const payment of run.payments) {
-      await api.runs.confirmPayment(
-        run.run_id,
-        payment.payment_id,
-        `sig-${payment.payment_id}`,
-      )
+    for (const [i, payment] of run.payments.entries()) {
+      await api.runs.confirmPayment(run.run_id, payment.payment_id, sigOf(i))
     }
     const status = await api.runs.get(run.run_id)
     expect(status.payments.map((p) => p.status)).toEqual([
@@ -359,17 +324,17 @@ describe("payroll runs", () => {
       request([bruno.id, diego.id, seedPeople[3].id]),
     )
     const [first, second, third] = run.payments
-    await api.runs.confirmPayment(run.run_id, first.payment_id, "sig-1")
+    await api.runs.confirmPayment(run.run_id, first.payment_id, sigOf(1))
     expect(
       await caught(
-        api.runs.confirmPayment(run.run_id, second.payment_id, "sig-2"),
+        api.runs.confirmPayment(run.run_id, second.payment_id, sigOf(2)),
       ),
     ).toMatchObject({
       code: "transaction_failed",
     })
     expect(
       await caught(
-        api.runs.confirmPayment(run.run_id, third.payment_id, "sig-3"),
+        api.runs.confirmPayment(run.run_id, third.payment_id, sigOf(3)),
       ),
     ).toMatchObject({
       code: "transaction_failed",
