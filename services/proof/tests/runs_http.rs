@@ -276,8 +276,14 @@ async fn three_recipient_run_recovers_partial_failure_without_repaying_successes
     );
     h.backend.finalized_height.store(501, Ordering::SeqCst);
     let (status, unresolved) = request(&app, &retry, "test-user", Some(retry_body.clone())).await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(unresolved["error"], "transaction_history_unavailable");
+    assert_eq!(status, StatusCode::OK, "{unresolved}");
+    assert_eq!(
+        unresolved["errors"],
+        json!([{"position":2,"error":"transaction_history_unavailable"}])
+    );
+    assert_eq!(unresolved["payments"][1]["status"], "prepared");
+    assert_eq!(unresolved["payments"][1]["attempt"], 1);
+    assert!(unresolved["payments"][2].get("transaction").is_none());
     let (_, unchanged) = request(&app, &get, "test-user", None).await;
     assert_eq!(unchanged["payments"][2]["status"], "prepared");
     assert_eq!(unchanged["payments"][2]["attempt"], 0);
@@ -285,7 +291,20 @@ async fn three_recipient_run_recovers_partial_failure_without_repaying_successes
         unchanged["payments"][2]["request_id"],
         run["payments"][2]["request_id"]
     );
-    assert_eq!(h.audit_count().await, 1);
+    assert_eq!(h.audit_count().await, 2);
+    let recovered = sign(&h, &unresolved["payments"][1]);
+    h.backend.transactions.lock().unwrap().insert(
+        recovered.signatures[0].to_string(),
+        chain(&recovered, false),
+    );
+    let (_, paid) = request(
+        &app,
+        &confirm,
+        "test-user",
+        Some(json!({"payments":[{"position":1,"request_id":unresolved["payments"][1]["request_id"],"signature":recovered.signatures[0].to_string()}]})),
+    ).await;
+    assert_eq!(paid["payments"][1]["status"], "finalized");
+    apply_sender(&h, &recovered);
     h.backend
         .transactions
         .lock()
@@ -295,11 +314,16 @@ async fn three_recipient_run_recovers_partial_failure_without_repaying_successes
     assert_eq!(status, StatusCode::OK, "{reprepared}");
     assert_eq!(reprepared["payments"][0]["status"], "finalized");
     assert!(reprepared["payments"][0].get("transaction").is_none());
-    assert_eq!(h.audit_count().await, 2);
+    assert_eq!(reprepared["payments"][1]["status"], "finalized");
+    assert!(reprepared["payments"][1].get("transaction").is_none());
+    assert_eq!(h.audit_count().await, 3);
     let mut retry_confirm = vec![];
     let mut last = None;
     for i in 1..3 {
         let p = &reprepared["payments"][i];
+        if p["status"] == "finalized" {
+            continue;
+        }
         assert_eq!(p["attempt"], 1);
         let tx = sign(&h, p);
         h.backend
@@ -360,8 +384,19 @@ async fn three_recipient_run_recovers_partial_failure_without_repaying_successes
         Some(retry.clone()),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(ambiguous["error"], "transaction_history_unavailable");
+    assert_eq!(status, StatusCode::OK, "{ambiguous}");
+    assert_eq!(
+        ambiguous["errors"],
+        json!([
+            {"position":0,"error":"transaction_history_unavailable"},
+            {"position":2,"error":"transaction_history_unavailable"},
+        ])
+    );
+    assert!(ambiguous["payments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|p| p.get("transaction").is_none()));
     let (_, unchanged) = request(&h.app(), &format!("/runs/{id}"), "test-user", None).await;
     assert_eq!(unchanged["payments"][0]["status"], "prepared");
     assert_eq!(unchanged["payments"][0]["attempt"], 0);
@@ -402,4 +437,8 @@ async fn three_recipient_run_recovers_partial_failure_without_repaying_successes
         .unwrap()
         .iter()
         .all(|c| c["method"] != "sendTransaction"));
+    retry::expired_payments_do_not_block_other_positions(&h, &body).await;
 }
+
+#[path = "support/runs_retry.rs"]
+mod retry;
