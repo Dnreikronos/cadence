@@ -3,6 +3,9 @@ import type { CurrentViewer } from "@/lib/auth/viewer"
 
 export const DEMO_COOKIE = "cadence-demo-role"
 
+// The company the mock service holds (`COMPANY_ID` in the mock db); a test keeps them equal.
+export const DEMO_COMPANY_ID = "c0000000-0000-4000-8000-000000000001"
+
 export const demoRoles: readonly Role[] = ["admin", "recipient", "auditor"]
 
 const emails: Record<Role, string> = {
@@ -19,6 +22,6 @@ export function parseDemoRole(value: unknown): Role | null {
 export function demoViewer(role: Role): CurrentViewer {
   return {
     email: emails[role],
-    membership: { role, company: { name: "Solaris" } },
+    membership: { role, company: { id: DEMO_COMPANY_ID, name: "Solaris" } },
   }
 }

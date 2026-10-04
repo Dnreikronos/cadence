@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest"
 import type { Role } from "@/lib/auth/guard"
 import { demoAllowed, type DemoEnv } from "./allowed"
-import { DEMO_COOKIE, demoRoles, demoViewer, parseDemoRole } from "./viewer"
+import { COMPANY_ID } from "@/lib/api/mocks/db"
+import {
+  DEMO_COMPANY_ID,
+  DEMO_COOKIE,
+  demoRoles,
+  demoViewer,
+  parseDemoRole,
+} from "./viewer"
 
 describe("demoAllowed", () => {
   const demo: DemoEnv = {
@@ -58,7 +65,7 @@ describe("demoViewer", () => {
   ])("makes the %s viewer", (role, email) => {
     expect(demoViewer(role)).toEqual({
       email,
-      membership: { role, company: { name: "Solaris" } },
+      membership: { role, company: { id: DEMO_COMPANY_ID, name: "Solaris" } },
     })
   })
 
@@ -67,5 +74,11 @@ describe("demoViewer", () => {
     for (const role of demoRoles) {
       expect(demoViewer(role).membership.role).toBe(role)
     }
+  })
+})
+
+describe("the demo company", () => {
+  it("is the company the mock service holds, so /audit asks for one it has", () => {
+    expect(DEMO_COMPANY_ID).toBe(COMPANY_ID)
   })
 })
