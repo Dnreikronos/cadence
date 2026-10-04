@@ -45,6 +45,7 @@ vi.mock("next/headers", () => ({
 }))
 vi.mock("next/navigation", () => ({ redirect }))
 
+import { DEMO_COMPANY_ID } from "@/lib/demo/viewer"
 import { currentViewer, requireMember } from "./viewer"
 
 beforeEach(() => {
@@ -68,7 +69,7 @@ describe("currentViewer in the demo configuration", () => {
     cookieValue.current = role
     expect(await currentViewer()).toEqual({
       email,
-      membership: { role, company: { name: "Solaris" } },
+      membership: { role, company: { id: DEMO_COMPANY_ID, name: "Solaris" } },
     })
   })
 
