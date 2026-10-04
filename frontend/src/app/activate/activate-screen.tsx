@@ -1,21 +1,37 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
+import { useQueryClient } from "@tanstack/react-query"
 import { Check, CircleAlert, Loader2, X } from "lucide-react"
+import { useViewerScope } from "@/components/app/viewer-scope"
 import { buttonVariants } from "@/components/ui/button"
 import { ErrorState } from "@/components/ui/error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
-import { activationMessage, isWalletUnavailable } from "@/lib/activation/errors"
+import {
+  activationMessage,
+  canRetryStatus,
+  isTerminal,
+  isWalletUnavailable,
+  statusMessage,
+} from "@/lib/activation/errors"
+import {
+  isMockMode,
+  resetMockActivation,
+  wantsFreshDemo,
+} from "@/lib/activation/fresh"
 import {
   activationSteps,
+  doneFromStatus,
+  isActivated,
   type ActivationState,
   type ActivationStep,
 } from "@/lib/activation/machine"
 import type { AccountStatus } from "@/lib/api/schemas"
 import { useActivation } from "@/lib/queries/activation"
+import { queryKeys } from "@/lib/queries/keys"
 import { useAccountStatus } from "@/lib/queries/status"
 import { cn } from "@/lib/utils"
 
@@ -42,14 +58,46 @@ const steps: Record<
 }
 
 export function ActivateScreen() {
-  const status = useAccountStatus()
+  const isReady = useFreshDemo()
+  return isReady ? <WithStatus /> : <ActivateSkeleton />
+}
+
+// The demo's "New recipient" opens /activate?fresh=1: forget the demo recipient's
+// setup once, drop the parameter, and only then read the status, so no screen briefly
+// sees the old one.
+function useFreshDemo() {
+  const router = useRouter()
+  const queryClient = useQueryClient()
+  const wants = wantsFreshDemo(useSearchParams(), isMockMode())
+  const [isReady, setIsReady] = useState(!wants)
+  const started = useRef(false)
+
+  useEffect(() => {
+    if (!wants || started.current) return
+    started.current = true
+    resetMockActivation()
+      .then(() => queryClient.resetQueries({ queryKey: queryKeys.status.all }))
+      .catch(() => {})
+      .finally(() => {
+        setIsReady(true)
+        router.replace("/activate")
+      })
+  }, [wants, queryClient, router])
+
+  return isReady
+}
+
+function WithStatus() {
+  const status = useAccountStatus(useViewerScope())
   if (status.data) return <Flow status={status.data} />
   if (status.isError) {
     return (
       <ErrorState
         title="Couldn't check your setup"
-        description="We couldn't tell which steps are done. Nothing was changed."
-        onRetry={() => status.refetch()}
+        description={`${statusMessage(status.error)} Nothing was changed.`}
+        onRetry={
+          canRetryStatus(status.error) ? () => status.refetch() : undefined
+        }
       />
     )
   }
@@ -71,16 +119,17 @@ function ActivateSkeleton() {
 
 // Mounted once the status is known, so the flow starts from what is already done.
 function Flow({ status }: { status: AccountStatus }) {
-  const router = useRouter()
-  const { state, start, wallet } = useActivation(status)
+  const { state, start, wallet } = useActivation(status, useViewerScope())
   const { phase } = state
+  // Whether this visit finished the setup, or found it finished.
+  const [alreadySetUp] = useState(() => isActivated(doneFromStatus(status)))
+  const link = useRef<HTMLAnchorElement>(null)
 
+  // No timer takes the person anywhere (WCAG 2.2.1): the success state stays, with
+  // focus on the way forward.
   useEffect(() => {
-    if (phase !== "done") return
-    // Long enough to see the last step tick over; the link below is the fallback.
-    const timer = setTimeout(() => router.replace("/me"), 900)
-    return () => clearTimeout(timer)
-  }, [phase, router])
+    if (phase === "done" && !alreadySetUp) link.current?.focus()
+  }, [phase, alreadySetUp])
 
   const isRunning = phase === "running"
   const walletBlocked = wallet.status === "unavailable" && !wallet.loading
@@ -94,7 +143,11 @@ function Flow({ status }: { status: AccountStatus }) {
         className="rounded-xl border border-line bg-surface p-5"
       >
         <h2 id="progress-heading" className="text-lead font-medium text-ink">
-          {phase === "done" ? "You're all set" : "Your setup"}
+          {phase === "done"
+            ? alreadySetUp
+              ? "You're already set up"
+              : "You're all set"
+            : "Your setup"}
         </h2>
         <p className="mt-1 text-ui/normal text-ink-muted">
           {phase === "done"
@@ -102,7 +155,8 @@ function Flow({ status }: { status: AccountStatus }) {
             : "Three steps, one time. Your wallet does the signing, so there is nothing to approve."}
         </p>
 
-        <ol className="mt-5 space-y-4">
+        {/* role: list-style: none removes the list semantics in some browsers. */}
+        <ol role="list" className="mt-5 space-y-4">
           {activationSteps.map((step, index) => (
             <StepRow
               key={step}
@@ -117,19 +171,28 @@ function Flow({ status }: { status: AccountStatus }) {
         <p role="status" aria-live="polite" className="sr-only">
           {state.current
             ? `${steps[state.current].active}.`
-            : phase === "done"
+            : phase === "done" && !alreadySetUp
               ? "Setup finished."
               : ""}
         </p>
 
         <div className="mt-6">
           {phase === "done" ? (
-            <Link href="/me" className={buttonVariants({ size: "lg" })}>
+            <Link
+              ref={link}
+              href="/me"
+              className={buttonVariants({ size: "lg" })}
+            >
               Go to your balance
             </Link>
           ) : walletBlocked ||
             (failure && isWalletUnavailable(failure.error)) ? (
             <WalletUnavailable />
+          ) : failure && isTerminal(failure.error) ? (
+            <ErrorState
+              title={`${steps[failure.step].title} didn't finish`}
+              description={activationMessage(failure.error)}
+            />
           ) : (
             <>
               {failure && (
@@ -191,7 +254,7 @@ function StepRow({
   const isActive = state.current === step
   const { title, description } = steps[step]
   return (
-    <li className="flex gap-3">
+    <li aria-current={isActive ? "step" : undefined} className="flex gap-3">
       <span
         aria-hidden
         className={cn(
@@ -265,13 +328,18 @@ function WhoSeesWhat() {
       aria-labelledby="who-sees-heading"
       className="rounded-xl border border-line bg-surface p-5"
     >
-      <h2
-        id="who-sees-heading"
-        className="flex items-center gap-1.5 text-lead font-medium text-ink"
-      >
-        Who sees what
-        <WhoCanSee viewerRole="recipient" hasAuditor={false} />
-      </h2>
+      <div className="flex items-center gap-1.5">
+        <h2 id="who-sees-heading" className="text-lead font-medium text-ink">
+          Who sees what
+        </h2>
+        <WhoCanSee
+          viewerRole="recipient"
+          hasAuditor={false}
+          label="Who can see your payments"
+          description="You, the company that pays you, any auditor it appoints and Cadence can read the amounts of your payments. The public cannot: on-chain they are ciphertext."
+          note="Cadence aims to log every read of an amount."
+        />
+      </div>
       <dl className="mt-4 space-y-3 text-ui/normal">
         <Reader name="You">
           see your balance and every payment sent to you.
@@ -281,9 +349,10 @@ function WhoSeesWhat() {
           appoints.
         </Reader>
         <Reader name="Cadence">
-          can read amounts too. Setting up gives Cadence the key it needs to
-          read your amounts and prove your payments are valid. It stores that
-          key encrypted, and every read is logged.
+          can read amounts too. Setting up sends a signature from your wallet to
+          Cadence, which uses it to derive the keys it holds for you. With them
+          it can read the amounts of your payments and prove they are valid.
+          Cadence aims to log every read.
         </Reader>
         <Reader name="The public">
           sees that you have an account and that payments happen. Payments are
@@ -291,6 +360,9 @@ function WhoSeesWhat() {
           are public.
         </Reader>
       </dl>
+      <p className="mt-4 text-caption/normal text-ink-muted">
+        Account recovery isn&apos;t available yet.
+      </p>
     </section>
   )
 }

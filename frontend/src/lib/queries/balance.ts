@@ -9,9 +9,11 @@ import { shellBalanceOf } from "./shell-balance"
 
 // The private balance in the shell: the company's for an admin, the viewer's own
 // for a recipient, cached per viewer. An auditor holds none, so nothing is asked of the service.
+// `enabled` holds the read back until the balance can exist (a recipient not yet activated).
 export function useShellBalance(
   role: Role,
   viewer: ViewerScope,
+  enabled = true,
 ): ShellBalance | undefined {
   const query = useQuery({
     queryKey:
@@ -22,7 +24,7 @@ export function useShellBalance(
       role === "admin"
         ? api.company.balance({ signal })
         : api.me.balance({ signal }),
-    enabled: role !== "auditor",
+    enabled: role !== "auditor" && enabled,
   })
   return role === "auditor" ? undefined : shellBalanceOf(query)
 }

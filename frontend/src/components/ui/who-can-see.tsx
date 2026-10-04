@@ -40,15 +40,22 @@ export function WhoCanSee({
   viewerRole,
   hasAuditor,
   className,
+  label = "Who can see this amount",
+  description,
+  note = "Cadence reads amounts only to prove transfers, and every read is logged.",
 }: {
   viewerRole: Role
   hasAuditor: boolean
   className?: string
+  // For a page that shows no amount of its own: its own label and texts.
+  label?: string
+  description?: string
+  note?: string
 }) {
   return (
     <Popover>
       <PopoverTrigger
-        aria-label="Who can see this amount"
+        aria-label={label}
         className={cn(
           "inline-grid size-6 shrink-0 place-items-center rounded-md text-ink-muted transition-colors duration-150 outline-none hover:bg-canvas hover:text-ink focus-visible:ring-2 focus-visible:ring-ink/30 data-popup-open:bg-canvas data-popup-open:text-ink",
           className,
@@ -60,13 +67,10 @@ export function WhoCanSee({
         <PopoverHeader>
           <PopoverTitle>Who can see this</PopoverTitle>
           <PopoverDescription>
-            {whoCanSee(viewerRole, hasAuditor)}
+            {description ?? whoCanSee(viewerRole, hasAuditor)}
           </PopoverDescription>
         </PopoverHeader>
-        <p className="text-caption/normal text-ink-muted">
-          Cadence reads amounts only to prove transfers, and every read is
-          logged.
-        </p>
+        <p className="text-caption/normal text-ink-muted">{note}</p>
       </PopoverContent>
     </Popover>
   )
