@@ -1,34 +1,22 @@
 import { expect, test as base } from "@playwright/test"
+import { knownNoise } from "./known-noise"
 
 type Watch = {
-  // Failed requests a test provokes on purpose (a forced mock scenario answers 409, 503
-  // and so on) make Chrome log "Failed to load resource ... status of 409". Name the
-  // status codes the test expects; any other console error, and any uncaught page
-  // error, fails the test.
-  allowStatus: (...statuses: number[]) => void
+  // A failed request a test provokes on purpose (a forced mock scenario answers 409, 503
+  // and so on) makes Chrome log "Failed to load resource ... status of 409". Name the
+  // status and the URL it is expected for; any other console error, the same status on
+  // another URL, and any uncaught page error fail the test.
+  allowStatus: (status: number, url: RegExp) => void
 }
 
 const resourceError =
   /Failed to load resource: the server responded with a status of (\d{3})/
 
-// Console errors that are known and not this suite's to fix, each with the reason and what
-// removes it. Keep this list short: an entry here is a bug somebody else owns.
-const knownNoise: { status: number; url: RegExp; why: string }[] = [
-  {
-    // The recipient's sidebar links to /me/history, which the screen task (H) adds.
-    // Next prefetches the link, and the missing route logs a 404. Delete this entry
-    // when /me/history is on main.
-    status: 404,
-    url: /\/me\/history(\?|$)/,
-    why: "/me/history does not exist yet (task H)",
-  },
-]
-
 // `test` for every spec: the same as Playwright's, plus a watch over the browser console.
 export const test = base.extend<{ watch: Watch }>({
   watch: [
     async ({ context }, use) => {
-      const allowed = new Set<number>()
+      const allowed: { status: number; url: RegExp }[] = []
       const problems: string[] = []
 
       context.on("weberror", (error) => {
@@ -38,16 +26,15 @@ export const test = base.extend<{ watch: Watch }>({
         if (message.type() !== "error") return
         const text = message.text()
         const status = Number(resourceError.exec(text)?.[1])
-        if (allowed.has(status)) return
         const { url } = message.location()
-        if (knownNoise.some((n) => n.status === status && n.url.test(url))) {
-          return
-        }
+        const matches = (n: { status: number; url: RegExp }) =>
+          n.status === status && n.url.test(url)
+        if (allowed.some(matches) || knownNoise.some(matches)) return
         problems.push(`console.error: ${text} (${url})`)
       })
 
       await use({
-        allowStatus: (...statuses) => statuses.forEach((s) => allowed.add(s)),
+        allowStatus: (status, url) => allowed.push({ status, url }),
       })
 
       expect(problems, "unexpected browser errors").toEqual([])
