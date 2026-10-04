@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { guard, safeNext, type Role } from "./guard"
+import { cleanSearch, guard, safeNext, type Role } from "./guard"
 
 describe("guard", () => {
   it("sends a signed-out visit to /company to sign-in, remembering where it was going", () => {
@@ -44,6 +44,23 @@ describe("guard", () => {
       kind: "redirect",
       to: "/me",
     })
+  })
+})
+
+describe("cleanSearch", () => {
+  it.each([
+    ["", ""],
+    ["?", ""],
+    ["?tab=invites", "?tab=invites"],
+    ["?_rsc=abc", ""],
+    ["?tab=a%20b&_rsc=abc&q=1", "?tab=a%20b&q=1"],
+    ["?__nextDataReq=1&x=2&__next_router=3", "?x=2"],
+    ["?a=1&&b=2", "?a=1&b=2"],
+    // Only the key is matched: a value that mentions it stays.
+    ["?note=_rsc", "?note=_rsc"],
+    ["?rsc=1&next_x=2", "?rsc=1&next_x=2"],
+  ])("turns %j into %j", (search, expected) => {
+    expect(cleanSearch(search)).toBe(expected)
   })
 })
 

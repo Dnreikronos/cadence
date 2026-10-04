@@ -96,8 +96,15 @@ function sendFailure(error: AuthError): SignInError | null {
   // would tell anyone which emails have accounts: the code step shows regardless, and a
   // missing company is only told after a valid code.
   if (error.code === "otp_disabled") return null
+  // Supabase applies the per-address email frequency limit only to addresses that have an
+  // account, so a second request for a known email would answer 429 where an unknown one
+  // answers `otp_disabled`. Both must look the same: the code step, whose hint already tells
+  // the person to check their inbox and spam folder. Only the per-IP limit says "too many".
+  if (error.code === "over_email_send_rate_limit") return null
   console.error("signInWithOtp failed", error.message)
-  return error.status === 429 ? "too_many_attempts" : "send_failed"
+  return error.code === "over_request_rate_limit"
+    ? "too_many_attempts"
+    : "send_failed"
 }
 
 async function verifyCode(
@@ -126,15 +133,31 @@ async function verifyCode(
 
 // `invite` (a hidden field of the "already a member" page) sends the viewer back to that
 // invite once signed out, to use it with another account.
+// Signing out here must not end the viewer's sessions elsewhere: this device only.
 export async function signOut(form?: FormData) {
+  return endSession("local", form)
+}
+
+// The user menu's "Sign out of all devices".
+export async function signOutEverywhere() {
+  return endSession("global")
+}
+
+async function endSession(scope: "local" | "global", form?: FormData) {
   // The demo viewer has no Supabase session: its cookie is all there is to end.
   const store = await cookies()
   store.delete(DEMO_COOKIE)
   if (!isSupabaseConfigured())
     redirect((await isDemoEnabled()) ? "/sign-in" : "/")
   const supabase = await createClient()
-  // This device only: signing out here must not end the viewer's sessions elsewhere.
-  await supabase.auth.signOut({ scope: "local" })
+  const { error } = await supabase.auth.signOut({ scope })
+  if (error) {
+    // Supabase could not end the session, so this browser must still forget it.
+    console.error("signOut failed", error.message)
+    for (const { name } of store.getAll()) {
+      if (name.startsWith("sb-")) store.delete(name)
+    }
+  }
   const invite = form && readIntent(form).invite
   redirect(
     invite

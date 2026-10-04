@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import { readIntent } from "@/lib/auth/complete-sign-in"
 import { safeNext } from "@/lib/auth/guard"
+import { signedInView } from "@/lib/auth/signed-in-view"
 import { signInErrorMessage } from "@/lib/auth/sign-in-errors"
 import { currentViewer, type CurrentViewer } from "@/lib/auth/viewer"
 import { isDemoEnabled } from "@/lib/demo/mode"
@@ -34,9 +35,12 @@ export async function AuthPage({
   if (viewer) {
     // A member who opened an invite is told why it cannot be used rather than dropped. The demo
     // viewer has no invites: it keeps going straight to its area.
-    const opensInvite =
-      intent.invite || params.get("error") === "invite_already_member"
-    if (!demoEnabled && opensInvite) {
+    const view = signedInView({
+      invite: intent.invite,
+      error: params.get("error"),
+      demo: demoEnabled,
+    })
+    if (view === "already_member") {
       return (
         <>
           <ClearQueryCache />

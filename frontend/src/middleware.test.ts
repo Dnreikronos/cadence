@@ -172,7 +172,7 @@ describe("a Supabase session", () => {
     config.supabaseConfigured = true
     getUser.mockResolvedValue({ data: { user: { id: "user-1" } } })
     vi.mocked(membershipOf).mockResolvedValue(
-      role && { role, company: { name: "Solaris" } },
+      role && { role, company: { id: "company-1", name: "Solaris" } },
     )
   }
 
@@ -215,6 +215,48 @@ describe("a Supabase session", () => {
     signedIn(null)
     expect(outcome(await visit("/"))).toBe("/sign-in?error=no_company")
     expect(signOut).toHaveBeenCalledOnce()
+  })
+
+  it("does not redirect to the no-company page again once it is there", async () => {
+    signedIn(null)
+    expect(outcome(await visit("/sign-in?error=no_company"))).toBe("next")
+    expect(signOut).not.toHaveBeenCalled()
+  })
+
+  it("still redirects, once, when the logout fails", async () => {
+    signedIn(null)
+    signOut.mockResolvedValue({ error: { message: "gotrue is down" } })
+    vi.spyOn(console, "error").mockImplementation(() => {})
+    expect(outcome(await visit("/company"))).toBe("/sign-in?error=no_company")
+    expect(console.error).toHaveBeenCalledWith(
+      "signOut failed",
+      "gotrue is down",
+    )
+    // The page it leads to does not try again, so a failing logout cannot loop.
+    expect(outcome(await visit("/sign-in?error=no_company"))).toBe("next")
+    expect(signOut).toHaveBeenCalledOnce()
+  })
+
+  it("only skips for sign-in with that exact error", async () => {
+    signedIn(null)
+    expect(outcome(await visit("/sign-in?error=link_expired"))).toBe(
+      "/sign-in?error=no_company",
+    )
+    expect(outcome(await visit("/sign-up?error=no_company"))).toBe(
+      "/sign-in?error=no_company",
+    )
+  })
+
+  it("leaves Next's own _rsc and __next params out of `next`", async () => {
+    config.supabaseConfigured = true
+    expect(
+      outcome(
+        await visit("/company/people?tab=invites&_rsc=abc12&__nextDataReq=1"),
+      ),
+    ).toBe("/sign-in?next=%2Fcompany%2Fpeople%3Ftab%3Dinvites")
+    expect(outcome(await visit("/company?_rsc=abc12"))).toBe(
+      "/sign-in?next=%2Fcompany",
+    )
   })
 
   it("carries the session cookies and no-store headers onto redirects", async () => {

@@ -7,7 +7,8 @@ const config = vi.hoisted(() => ({
 }))
 const store = vi.hoisted(() => ({ set: vi.fn(), delete: vi.fn() }))
 const requestHeaders = vi.hoisted(() => ({ current: new Headers() }))
-const supabaseSignOut = vi.hoisted(() => vi.fn())
+// Like Supabase's, it answers { error }: signOut now reads it.
+const supabaseSignOut = vi.hoisted(() => vi.fn(async () => ({ error: null })))
 const redirect = vi.hoisted(() =>
   vi.fn((to: string) => {
     throw new Error(`redirect:${to}`)

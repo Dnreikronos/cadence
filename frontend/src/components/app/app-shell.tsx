@@ -9,7 +9,7 @@ import { ChevronDown, Lock, LogOut, Menu, X } from "lucide-react"
 import type { Role } from "@/lib/auth/guard"
 import { cn } from "@/lib/utils"
 import { AmountDisplay, type AmountState } from "@/components/ui/amount-display"
-import { signOut } from "@/lib/auth/actions"
+import { signOut, signOutEverywhere } from "@/lib/auth/actions"
 import { buttonVariants } from "@/components/ui/button"
 import {
   Popover,
@@ -162,20 +162,36 @@ function UserMenu({ email }: { email: string }) {
         <p className="-mt-1.5 truncate font-medium text-ink">{email}</p>
         {/* Clears the Supabase session; the Turnkey session joins it with the wallet (#77). */}
         {/* The cache is the viewer's data: the next sign-in must not see it. */}
-        <form
-          action={() => {
-            queryClient.clear()
-            return signOut()
-          }}
-          className="border-t border-line pt-2"
-        >
-          <button
-            type="submit"
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-ink-muted hover:bg-canvas hover:text-ink"
+        <div className="border-t border-line pt-2">
+          <form
+            action={() => {
+              queryClient.clear()
+              return signOut()
+            }}
           >
-            <LogOut className="size-4" strokeWidth={1.75} /> Sign out
-          </button>
-        </form>
+            <button
+              type="submit"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-ink-muted hover:bg-canvas hover:text-ink"
+            >
+              <LogOut className="size-4" strokeWidth={1.75} /> Sign out
+            </button>
+          </form>
+          {/* Ends this account's sessions on every device, for a lost laptop or a shared computer. */}
+          <form
+            action={() => {
+              queryClient.clear()
+              return signOutEverywhere()
+            }}
+          >
+            <button
+              type="submit"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-ink-muted hover:bg-canvas hover:text-ink"
+            >
+              <LogOut className="size-4" strokeWidth={1.75} /> Sign out of all
+              devices
+            </button>
+          </form>
+        </div>
       </PopoverContent>
     </Popover>
   )

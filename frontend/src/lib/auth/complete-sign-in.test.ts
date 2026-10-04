@@ -17,10 +17,13 @@ const signOut = vi.fn()
 const rpc = vi.fn()
 const supabase = { auth: { getUser, signOut }, rpc } as unknown as ServerClient
 
-const admin: Membership = { role: "admin", company: { name: "Solaris" } }
+const admin: Membership = {
+  role: "admin",
+  company: { id: "company-1", name: "Solaris" },
+}
 const recipient: Membership = {
   role: "recipient",
-  company: { name: "Solaris" },
+  company: { id: "company-1", name: "Solaris" },
 }
 const intent = (change: Partial<SignInIntent> = {}): SignInIntent => ({
   invite: null,

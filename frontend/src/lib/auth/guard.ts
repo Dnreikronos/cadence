@@ -13,6 +13,20 @@ export function homeFor(role: Role): string {
   return homes[role]
 }
 
+// Next adds `_rsc` (and `__next*` in places) to its own navigations: they mean nothing to
+// the person and must not come back after sign-in. The rest of the query string goes into
+// `next`, in the address bar and in logs, so guarded routes must never carry a secret in it.
+export function cleanSearch(search: string) {
+  const kept = search
+    .replace(/^\?/, "")
+    .split("&")
+    .filter((pair) => {
+      const key = pair.split("=")[0]
+      return pair !== "" && key !== "_rsc" && !key.startsWith("__next")
+    })
+  return kept.length ? `?${kept.join("&")}` : ""
+}
+
 export function requiredRole(pathname: string): Role | null {
   for (const [role, prefix] of Object.entries(homes) as [Role, string][]) {
     if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return role

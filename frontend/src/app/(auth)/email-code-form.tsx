@@ -2,11 +2,10 @@
 
 import { Building2 } from "lucide-react"
 import Link from "next/link"
-import { useActionState } from "react"
+import { useActionState, useEffect, useRef } from "react"
 import { signIn, type SignInState } from "@/lib/auth/actions"
 import type { SignInIntent } from "@/lib/auth/complete-sign-in"
 import { buttonVariants } from "@/components/ui/button"
-import { EmptyState } from "@/components/ui/empty-state"
 import { fieldClass } from "@/components/ui/field"
 
 const field = `h-10 ${fieldClass}`
@@ -42,12 +41,53 @@ export function EmailCodeForm({
         ? "Accept your invite"
         : "Sign in to Cadence"
 
-  if (state.step === "no_company") {
-    return (
-      <NoCompany email={state.email} action={action} isPending={isPending} />
-    )
-  }
+  // Always mounted, so a change of step is announced even when the focused input goes away.
+  const announcement =
+    state.step === "code"
+      ? "Enter the 6-digit code."
+      : state.step === "no_company"
+        ? "No company on this email."
+        : ""
 
+  return (
+    <>
+      <div role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </div>
+      {state.step === "no_company" ? (
+        <NoCompany email={state.email} action={action} isPending={isPending} />
+      ) : (
+        <Card
+          state={state}
+          action={action}
+          isPending={isPending}
+          mode={mode}
+          intent={intent}
+          title={title}
+          retryHref={retryHref}
+        />
+      )}
+    </>
+  )
+}
+
+function Card({
+  state,
+  action,
+  isPending,
+  mode,
+  intent,
+  title,
+  retryHref,
+}: {
+  state: Exclude<SignInState, { step: "no_company" }>
+  action: (form: FormData) => void
+  isPending: boolean
+  mode: "sign-in" | "sign-up"
+  intent: SignInIntent
+  title: string
+  retryHref: string | null
+}) {
   return (
     <div className="rounded-2xl border border-line bg-surface p-6 shadow-card">
       <h1 className="text-[20px] font-semibold tracking-[-0.02em] text-ink">
@@ -122,15 +162,22 @@ export function EmailCodeForm({
       ) : (
         <form action={action} className="mt-5 space-y-3">
           <p className="text-ui/normal text-ink-muted">
-            We sent a code to{" "}
+            {/* Sign-in sends nothing to an address with no account, and must not say it did. */}
+            {mode === "sign-in" && !state.intent.invite
+              ? "If "
+              : "We sent a code to "}
             <span className="font-medium break-all text-ink">
               {state.email}
             </span>
-            . Enter it below, or open the link in the email.
+            {mode === "sign-in" && !state.intent.invite
+              ? " can sign in, we sent a code."
+              : "."}{" "}
+            Enter it below, or open the link in the email.
           </p>
           <p className="text-ui/normal text-ink-muted">
-            Nothing after a minute? Check the address. If you have no account
-            yet, create a company or open your invite link.
+            Nothing after a minute? Check the address and your spam folder.
+            {mode === "sign-in" &&
+              " If you have no account yet, create a company."}
           </p>
           <label className="block space-y-1.5">
             <span className="text-label text-ink-muted">Code</span>
@@ -199,37 +246,50 @@ function NoCompany({
   action: (form: FormData) => void
   isPending: boolean
 }) {
+  const heading = useRef<HTMLHeadingElement>(null)
+  // The code input that had focus is gone: land on the heading that says what happened.
+  useEffect(() => heading.current?.focus(), [])
   return (
-    <div className="rounded-2xl border border-line bg-surface shadow-card">
-      <h1 className="sr-only">Sign in to Cadence</h1>
-      <EmptyState
-        icon={Building2}
-        title="No company on this email"
-        description={`${email ?? "This email"} is not part of a company on Cadence, and you are signed out. Companies are created on the sign-up page; recipients and auditors join with the invite their company emailed them.`}
-        className="min-w-0 border-0 wrap-break-word"
-        action={
-          <form action={action} className="flex flex-col gap-2">
-            <Link
-              href="/sign-up"
-              className={buttonVariants({ className: "w-full" })}
-            >
-              Create a company
-            </Link>
-            <button
-              type="submit"
-              name="step"
-              value="change"
-              disabled={isPending}
-              className={buttonVariants({
-                variant: "secondary",
-                className: "w-full",
-              })}
-            >
-              Sign in with another email
-            </button>
-          </form>
-        }
-      />
+    <div className="flex flex-col items-center rounded-2xl border border-line bg-surface px-6 py-12 text-center shadow-card">
+      <span
+        aria-hidden
+        className="grid size-9 place-items-center rounded-lg border border-line bg-surface text-ink-muted"
+      >
+        <Building2 className="size-4" strokeWidth={1.75} />
+      </span>
+      <h1
+        ref={heading}
+        tabIndex={-1}
+        className="mt-4 text-ui font-medium text-ink outline-none"
+      >
+        No company on this email
+      </h1>
+      <p className="mt-1 max-w-[320px] min-w-0 text-ui/normal wrap-break-word text-ink-muted">
+        <span className="break-all">{email ?? "This email"}</span> is not part
+        of a company on Cadence, and you are signed out. Companies are created
+        on the sign-up page; recipients and auditors join with the invite their
+        company emailed them.
+      </p>
+      <form action={action} className="mt-5 flex flex-col gap-2">
+        <Link
+          href="/sign-up"
+          className={buttonVariants({ className: "w-full" })}
+        >
+          Create a company
+        </Link>
+        <button
+          type="submit"
+          name="step"
+          value="change"
+          disabled={isPending}
+          className={buttonVariants({
+            variant: "secondary",
+            className: "w-full",
+          })}
+        >
+          Sign in with another email
+        </button>
+      </form>
     </div>
   )
 }

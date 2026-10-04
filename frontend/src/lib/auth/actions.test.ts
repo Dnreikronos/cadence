@@ -4,7 +4,10 @@ import type { SignInIntent } from "./complete-sign-in"
 
 const config = vi.hoisted(() => ({ supabaseConfigured: true, demo: false }))
 const requestHeaders = vi.hoisted(() => ({ current: new Headers() }))
-const store = vi.hoisted(() => ({ delete: vi.fn() }))
+const store = vi.hoisted(() => ({
+  delete: vi.fn(),
+  getAll: vi.fn((): { name: string }[] => []),
+}))
 const membershipOf = vi.hoisted(() => vi.fn())
 const auth = vi.hoisted(() => ({
   signInWithOtp: vi.fn(),
@@ -33,7 +36,7 @@ vi.mock("next/headers", () => ({
 }))
 vi.mock("next/navigation", () => ({ redirect }))
 
-import { signIn, signOut } from "./actions"
+import { signIn, signOut, signOutEverywhere } from "./actions"
 
 const form = (fields: Record<string, string>) => {
   const data = new FormData()
@@ -52,6 +55,7 @@ beforeEach(() => {
   Object.assign(config, { supabaseConfigured: true, demo: false })
   requestHeaders.current = new Headers({ origin: "http://localhost:3000" })
   store.delete.mockClear()
+  store.getAll.mockReset().mockReturnValue([])
   auth.signInWithOtp.mockReset().mockResolvedValue({ error: null })
   auth.verifyOtp.mockReset().mockResolvedValue({ error: null })
   auth.getUser.mockReset().mockResolvedValue({ data: { user: { id: "u1" } } })
@@ -148,9 +152,11 @@ describe("signIn: asking for a code", () => {
   })
 
   it.each([
-    [429, "over_email_send_rate_limit", /too many attempts/i],
+    [429, "over_request_rate_limit", /too many attempts/i],
     [500, "unexpected_failure", /could not send/i],
-  ])("explains a Supabase failure (%s)", async (status, code, message) => {
+    // A 429 that is not the per-IP limit is no reason to say "too many".
+    [429, "some_other_limit", /could not send/i],
+  ])("explains a Supabase failure (%s %s)", async (status, code, message) => {
     auth.signInWithOtp.mockResolvedValue({
       error: { status, code, message: "x" },
     })
@@ -161,21 +167,73 @@ describe("signIn: asking for a code", () => {
 })
 
 describe("signIn: an email with no account", () => {
-  const unknown = { status: 422, code: "otp_disabled", message: "no signups" }
-
-  it("shows the code step, like an email that has an account", async () => {
-    const known = await signIn(email, form({ email: "ana@solaris.test" }))
-    auth.signInWithOtp.mockResolvedValue({ error: unknown })
-    expect(await signIn(email, form({ email: "ana@solaris.test" }))).toEqual(
-      known,
+  const noSignups = { status: 422, code: "otp_disabled", message: "no signups" }
+  const tooSoon = {
+    status: 429,
+    code: "over_email_send_rate_limit",
+    message: "for security purposes, wait",
+  }
+  // What GoTrue does with shouldCreateUser: false: an address with an account is mailed
+  // (and rate-limited per address, answering 429 on a quick repeat); one without answers
+  // `otp_disabled` before it ever applies that limit.
+  const gotrue = (known: string) => {
+    let sent = 0
+    auth.signInWithOtp.mockImplementation(
+      async ({ email: to }: { email: string }) => {
+        if (to !== known) return { error: noSignups }
+        return { error: sent++ ? tooSoon : null }
+      },
     )
+  }
+  const ask = (to: string) => signIn(email, form({ email: to }))
+  // The address is the one thing that legitimately differs.
+  const sameScreen = (state: SignInState, address: string) => ({
+    ...state,
+    email: address,
   })
 
-  it("does not say that no company exists, nor log it as a failure", async () => {
-    auth.signInWithOtp.mockResolvedValue({ error: unknown })
-    const state = await signIn(email, form({ email: "nobody@solaris.test" }))
-    expect(state.step).toBe("code")
-    expect(state).not.toHaveProperty("error")
+  it("shows the code step for a first request, known or not", async () => {
+    gotrue("ana@solaris.test")
+    const known = await ask("ana@solaris.test")
+    const unknown = await ask("nobody@solaris.test")
+    expect(known.step).toBe("code")
+    expect(unknown).toEqual(sameScreen(known, "nobody@solaris.test"))
+  })
+
+  it("answers a quick repeat the same way for a known and an unknown email", async () => {
+    gotrue("ana@solaris.test")
+    await ask("ana@solaris.test")
+    await ask("nobody@solaris.test")
+    // The second request for the known address is the one GoTrue refuses with a 429.
+    const knownAgain = await ask("ana@solaris.test")
+    const unknownAgain = await ask("nobody@solaris.test")
+    expect(auth.signInWithOtp).toHaveBeenCalledTimes(4)
+    expect(knownAgain.step).toBe("code")
+    expect(unknownAgain).toEqual(sameScreen(knownAgain, "nobody@solaris.test"))
+  })
+
+  it("does the same from the code step's 'Send a new code'", async () => {
+    gotrue("ana@solaris.test")
+    const resend = (to: string) =>
+      signIn(
+        { step: "code", email: to, intent: noIntent },
+        form({ step: "send", email: to }),
+      )
+    await resend("ana@solaris.test")
+    const knownAgain = await resend("ana@solaris.test")
+    const unknownAgain = await resend("nobody@solaris.test")
+    expect(unknownAgain).toEqual(sameScreen(knownAgain, "nobody@solaris.test"))
+    expect(knownAgain).not.toHaveProperty("error")
+  })
+
+  it("says nothing about a company or a limit, and logs neither as a failure", async () => {
+    gotrue("ana@solaris.test")
+    await ask("ana@solaris.test")
+    for (const to of ["ana@solaris.test", "nobody@solaris.test"]) {
+      const state = await ask(to)
+      expect(state.step).toBe("code")
+      expect(state).not.toHaveProperty("error")
+    }
     expect(console.error).not.toHaveBeenCalled()
   })
 
@@ -320,6 +378,38 @@ describe("signOut", () => {
     expect(store.delete).toHaveBeenCalledWith("cadence-demo-role")
   })
 
+  it("leaves the browser's cookies alone when Supabase ended the session", async () => {
+    await expect(signOut()).rejects.toThrow()
+    expect(store.delete).toHaveBeenCalledExactlyOnceWith("cadence-demo-role")
+  })
+
+  it("still makes the browser forget the session when Supabase fails", async () => {
+    auth.signOut.mockResolvedValue({ error: { message: "gotrue is down" } })
+    store.getAll.mockReturnValue([
+      { name: "sb-127-auth-token.0" },
+      { name: "sb-127-auth-token.1" },
+      { name: "theme" },
+      { name: "cadence-demo-role" },
+    ])
+    await expect(signOut()).rejects.toThrow(/^redirect:\/$/)
+    const deleted = store.delete.mock.calls.map(([name]) => name)
+    expect(deleted).toContain("sb-127-auth-token.0")
+    expect(deleted).toContain("sb-127-auth-token.1")
+    expect(deleted).toContain("cadence-demo-role")
+    expect(deleted).not.toContain("theme")
+    expect(console.error).toHaveBeenCalledWith(
+      "signOut failed",
+      "gotrue is down",
+    )
+  })
+
+  it("still goes back to the invite when Supabase fails", async () => {
+    auth.signOut.mockResolvedValue({ error: { message: "down" } })
+    await expect(signOut(form({ invite: "tok" }))).rejects.toThrow(
+      "redirect:/sign-in?invite=tok",
+    )
+  })
+
   it("goes back to the invite when the form carries one", async () => {
     await expect(signOut(form({ invite: "tok 1" }))).rejects.toThrow(
       "redirect:/sign-in?invite=tok+1",
@@ -336,6 +426,28 @@ describe("signOut", () => {
   it("leaves Supabase alone where it is not configured", async () => {
     config.supabaseConfigured = false
     await expect(signOut()).rejects.toThrow(/^redirect:\/$/)
+    expect(auth.signOut).not.toHaveBeenCalled()
+  })
+})
+
+describe("signOutEverywhere", () => {
+  it("ends the account's sessions on every device", async () => {
+    await expect(signOutEverywhere()).rejects.toThrow(/^redirect:\/$/)
+    expect(auth.signOut).toHaveBeenCalledExactlyOnceWith({ scope: "global" })
+    expect(store.delete).toHaveBeenCalledWith("cadence-demo-role")
+  })
+
+  it("still makes the browser forget the session when Supabase fails", async () => {
+    auth.signOut.mockResolvedValue({ error: { message: "gotrue is down" } })
+    store.getAll.mockReturnValue([{ name: "sb-127-auth-token" }])
+    await expect(signOutEverywhere()).rejects.toThrow(/^redirect:\/$/)
+    expect(store.delete).toHaveBeenCalledWith("sb-127-auth-token")
+    expect(store.delete).toHaveBeenCalledWith("cadence-demo-role")
+  })
+
+  it("leaves Supabase alone where it is not configured, like signOut", async () => {
+    config.supabaseConfigured = false
+    await expect(signOutEverywhere()).rejects.toThrow(/^redirect:\/$/)
     expect(auth.signOut).not.toHaveBeenCalled()
   })
 })

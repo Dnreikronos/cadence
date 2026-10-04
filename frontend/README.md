@@ -177,6 +177,28 @@ dropped: they land on a page saying they already belong to a company, with a
 sign-out that returns to the invite. A failed membership lookup shows the form
 with a retry message, never a 500.
 
+Supabase rate-limits a repeat request per address only for addresses that have
+an account (a 429 `over_email_send_rate_limit`, where an unknown address still
+answers `otp_disabled`), so that 429 is shown as the same code step too: only the
+per-IP `over_request_rate_limit` says "too many attempts".
+
+Known and accepted limits of this design:
+
+- **Login CSRF through someone else's emailed link.** The confirm page cannot say
+  whose account the link signs into (the token is not read until the POST), so a
+  person who is handed an attacker's own valid link and presses Continue is signed
+  into the attacker's account. The origin check stops other sites posting for them,
+  not this.
+- **Enumeration timing.** An unknown address answers a little faster than one that
+  is mailed. Supabase's own rate limits are the control; nothing here tries to equalise it.
+
+The Sign out menu item ends this device's session only; "Sign out of all devices"
+(`signOutEverywhere`) ends them all. Both clear the `sb-*` cookies even if Supabase
+cannot be reached. Every response carries `frame-ancestors 'none'` and
+`X-Frame-Options: DENY` (`src/lib/security-headers.ts`); the confirm page and the
+verify route are `no-store`. Guarded routes must never carry a secret in their
+query string: it goes into `?next=` (minus Next's own `_rsc` and `__next*`).
+
 The invite token and company name ride through sign-in as form fields and
 inside the emailed link, so they survive opening the email on another device.
 The link is built from `{{ .RedirectTo }}`. Every deployed origin must therefore
