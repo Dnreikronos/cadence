@@ -29,6 +29,7 @@ pub mod solana {
     pub mod reveal_risk;
     pub mod token_client;
     pub mod token_wrap;
+    pub mod unwrap;
     pub mod v0;
     pub mod v1;
     pub mod wrap;
