@@ -53,3 +53,26 @@ export function receiptTitle(
   const day = new Date(paidAt).toLocaleDateString("en-CA", { timeZone })
   return `Cadence receipt ${day} ${counterpartyName}`.trim()
 }
+
+// One line under the title: what kind of payment this is, without claiming
+// that something was sent when it was not.
+export function receiptSummary(payment: {
+  status: "pending" | "confirmed" | "failed"
+  transparent: boolean
+}): string {
+  if (payment.status === "pending") return "Waiting for the network to confirm."
+  if (payment.status === "failed") return "This payment did not go through."
+  return payment.transparent
+    ? "Ordinary transfer, public on-chain."
+    : "Encrypted transfer."
+}
+
+// Printed on a receipt from any build that is not real money, so a paper copy
+// cannot pass for a real one. Null on mainnet with the real service.
+export function testDataNotice(cluster: ClusterName, mock: boolean) {
+  const parts = [
+    ...(mock ? ["Mock data"] : []),
+    ...(cluster === "mainnet" ? [] : ["Devnet: test funds"]),
+  ]
+  return parts.length ? parts.join(" · ") : null
+}

@@ -11,6 +11,23 @@ export function isFiltering(filters: PaymentFilters) {
   return filters.status !== "all" || filters.search.trim() !== ""
 }
 
+// The loaded pages as one list. A refetch of several pages can return a payment
+// twice when new ones arrive between pages; the first one wins.
+export function flattenPayments(
+  pages: readonly { items: readonly PaymentItem[] }[],
+): PaymentItem[] {
+  const seen = new Set<string>()
+  const list: PaymentItem[] = []
+  for (const page of pages) {
+    for (const payment of page.items) {
+      if (seen.has(payment.payment_id)) continue
+      seen.add(payment.payment_id)
+      list.push(payment)
+    }
+  }
+  return list
+}
+
 // Client-side, over the pages loaded so far: the service has no filter parameters.
 export function filterPayments(
   payments: readonly PaymentItem[],

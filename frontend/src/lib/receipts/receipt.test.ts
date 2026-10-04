@@ -4,7 +4,9 @@ import {
   explorerTxUrl,
   formatPaidAt,
   formatPaidDay,
+  receiptSummary,
   receiptTitle,
+  testDataNotice,
 } from "./receipt"
 
 const signature = "5SigMockSignature1111111111111111111111111111"
@@ -20,6 +22,14 @@ describe("explorerTxUrl", () => {
     expect(explorerTxUrl(signature, "mainnet")).toBe(
       `https://explorer.solana.com/tx/${signature}`,
     )
+  })
+
+  it("links a signature of 32 to 128 characters only", () => {
+    expect(explorerTxUrl("A".repeat(32), "mainnet")).not.toBeNull()
+    expect(explorerTxUrl("A".repeat(88), "mainnet")).not.toBeNull()
+    expect(explorerTxUrl("A".repeat(128), "mainnet")).not.toBeNull()
+    expect(explorerTxUrl("A".repeat(31), "mainnet")).toBeNull()
+    expect(explorerTxUrl("A".repeat(129), "mainnet")).toBeNull()
   })
 
   it("has no link for a payment that is not on the network yet", () => {
@@ -67,6 +77,40 @@ describe("dates", () => {
   it("titles the saved PDF with the day and the counterparty", () => {
     expect(receiptTitle("Bruno Costa", iso, "UTC")).toBe(
       "Cadence receipt 2026-09-01 Bruno Costa",
+    )
+  })
+})
+
+describe("receiptSummary", () => {
+  it("describes a confirmed payment by how its amount travelled", () => {
+    expect(receiptSummary({ status: "confirmed", transparent: false })).toBe(
+      "Encrypted transfer.",
+    )
+    expect(receiptSummary({ status: "confirmed", transparent: true })).toBe(
+      "Ordinary transfer, public on-chain.",
+    )
+  })
+
+  it("never says a pending or failed payment was sent", () => {
+    for (const transparent of [false, true]) {
+      const pending = receiptSummary({ status: "pending", transparent })
+      const failed = receiptSummary({ status: "failed", transparent })
+      expect(pending).toBe("Waiting for the network to confirm.")
+      expect(failed).toBe("This payment did not go through.")
+    }
+  })
+})
+
+describe("testDataNotice", () => {
+  it("is empty only on mainnet with the real service", () => {
+    expect(testDataNotice("mainnet", false)).toBeNull()
+  })
+
+  it("names devnet, mock data, or both", () => {
+    expect(testDataNotice("devnet", false)).toBe("Devnet: test funds")
+    expect(testDataNotice("mainnet", true)).toBe("Mock data")
+    expect(testDataNotice("devnet", true)).toBe(
+      "Mock data · Devnet: test funds",
     )
   })
 })

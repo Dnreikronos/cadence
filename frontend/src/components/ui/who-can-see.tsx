@@ -13,18 +13,28 @@ import {
 } from "./popover"
 
 // Cadence runs the proof service and holds viewing keys (ADR B17), so it is always named.
-export function whoCanSee(viewerRole: Role, hasAuditor: boolean) {
+// `hasAuditor` undefined means not known yet: the longer sentence is the safe one,
+// never "no auditor".
+export function whoCanSee(viewerRole: Role, hasAuditor: boolean | undefined) {
   const readers = {
     admin: [
       "Your company",
       "the recipient",
-      ...(hasAuditor ? ["your auditor"] : []),
+      ...(hasAuditor === undefined
+        ? ["anyone your company has designated"]
+        : hasAuditor
+          ? ["your auditor"]
+          : []),
       "Cadence",
     ],
     recipient: [
       "You",
       "the company that paid you",
-      ...(hasAuditor ? ["its auditor"] : []),
+      ...(hasAuditor === undefined
+        ? ["anyone the company has designated"]
+        : hasAuditor
+          ? ["its auditor"]
+          : []),
       "Cadence",
     ],
     auditor: ["You", "the company", "the recipient", "Cadence"],
@@ -39,10 +49,14 @@ function list(items: string[]) {
 export function WhoCanSee({
   viewerRole,
   hasAuditor,
+  note,
   className,
 }: {
   viewerRole: Role
-  hasAuditor: boolean
+  // Undefined while it is not known whether an auditor exists.
+  hasAuditor: boolean | undefined
+  // An extra sentence, for a place where some amounts are an exception.
+  note?: string
   className?: string
 }) {
   return (
@@ -67,6 +81,7 @@ export function WhoCanSee({
           Cadence reads amounts only to prove transfers, and every read is
           logged.
         </p>
+        {note && <p className="text-caption/normal text-ink-muted">{note}</p>}
       </PopoverContent>
     </Popover>
   )

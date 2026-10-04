@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 import type { PaymentItem } from "@/lib/api/schemas"
-import { filterPayments, isFiltering, noFilters } from "./payments"
+import {
+  filterPayments,
+  flattenPayments,
+  isFiltering,
+  noFilters,
+} from "./payments"
 
 const payment = (
   name: string,
@@ -69,5 +74,28 @@ describe("isFiltering", () => {
     expect(isFiltering({ status: "all", search: "   " })).toBe(false)
     expect(isFiltering({ status: "failed", search: "" })).toBe(true)
     expect(isFiltering({ status: "all", search: "a" })).toBe(true)
+  })
+})
+
+describe("flattenPayments", () => {
+  it("joins the pages in order", () => {
+    expect(
+      flattenPayments([{ items: [all[0], all[1]] }, { items: [all[2]] }]),
+    ).toEqual([all[0], all[1], all[2]])
+    expect(flattenPayments([])).toEqual([])
+  })
+
+  it("keeps a payment that two pages both returned once, in its first place", () => {
+    const again = { ...all[1], status: "confirmed" as const }
+    const list = flattenPayments([
+      { items: [all[0], all[1]] },
+      { items: [again, all[2]] },
+    ])
+    expect(list.map((p) => p.payment_id)).toEqual([
+      all[0].payment_id,
+      all[1].payment_id,
+      all[2].payment_id,
+    ])
+    expect(list[1]).toBe(all[1])
   })
 })
