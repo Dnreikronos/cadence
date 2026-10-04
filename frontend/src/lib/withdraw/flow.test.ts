@@ -11,6 +11,7 @@ import {
   SentWithdrawalError,
   failureOf,
   heldBy,
+  heldDetail,
   initialWithdraw,
   mergeHeld,
   runWithdraw,
@@ -537,6 +538,57 @@ describe("withdrawReducer", () => {
       expect(withdrawReducer(done, event)).toBe(done)
     }
     expect(withdrawReducer(done, { type: "reset" })).toEqual(initialWithdraw)
+  })
+})
+
+describe("heldDetail", () => {
+  const held = { amount: "100", signature: "sig" }
+  const failedFor = (amount: string, sent: boolean): WithdrawState => ({
+    stage: "failed",
+    amount,
+    acknowledged: false,
+    failure: {
+      message: "x",
+      retryable: !sent,
+      refreshBalance: false,
+      sent,
+      signature: null,
+    },
+    held: [held],
+  })
+
+  it("shows it in full at rest, and while asking to agree", () => {
+    expect(heldDetail({ ...initialWithdraw, held: [held] }, held)).toBe("full")
+    expect(
+      heldDetail(
+        {
+          stage: "needs-acknowledgement",
+          amount: "200",
+          acknowledged: false,
+          held: [held],
+        },
+        held,
+      ),
+    ).toBe("full")
+  })
+
+  it("shrinks it to a line while another amount is being sent", () => {
+    expect(
+      heldDetail(
+        withdrawReducer(
+          { ...initialWithdraw, held: [held] },
+          { type: "submit", amount: "200" },
+        ),
+        held,
+      ),
+    ).toBe("summary")
+  })
+
+  it("shrinks it when another amount failed for good, but not when it is the one that failed", () => {
+    expect(heldDetail(failedFor("200", false), held)).toBe("summary")
+    expect(heldDetail(failedFor("100", true), held)).toBe("full")
+    // Another amount may also have gone out: the earlier one is not the news.
+    expect(heldDetail(failedFor("200", true), held)).toBe("summary")
   })
 })
 

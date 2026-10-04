@@ -238,6 +238,23 @@ export function mergeHeld(
     : merged
 }
 
+// How much of a held withdrawal to show. While a new attempt runs, or after it failed
+// for good, that attempt is what the person must read: the earlier ones shrink to a line
+// so they do not sit beside it as a second alert. The one that is the attempt just
+// failed (it may have gone out) and every one at rest (the form) show in full.
+export function heldDetail(
+  state: WithdrawState,
+  held: Held,
+): "full" | "summary" {
+  if (state.stage === "working") return "summary"
+  if (state.stage === "failed") {
+    return state.failure.sent && state.amount === held.amount
+      ? "full"
+      : "summary"
+  }
+  return "full"
+}
+
 // What a failed withdrawal leaves behind: its amount and signature if it may have gone out.
 export function heldBy(
   error: unknown,

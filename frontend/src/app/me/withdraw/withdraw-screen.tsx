@@ -7,11 +7,11 @@ import { AmountDisplay } from "@/components/ui/amount-display"
 import { ButtonCopy } from "@/components/ui/button-copy"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { ErrorState } from "@/components/ui/error-state"
 import { fieldClass } from "@/components/ui/field"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
-import { isApiError, messageFor } from "@/lib/api"
 import type { ViewerScope } from "@/lib/queries/keys"
 import { useMyBalance } from "@/lib/queries/balance"
 import {
@@ -19,10 +19,11 @@ import {
   useWithdraw,
   useWithdrawInFlight,
 } from "@/lib/queries/withdraw"
-import { formatBaseUnits, unitsToUsd } from "@/lib/money"
+import { formatBaseUnits, formatUnits, unitsToUsd } from "@/lib/money"
 import { useWallet } from "@/lib/wallet/context"
 import {
   failureOf,
+  heldDetail,
   initialWithdraw,
   phaseLabels,
   phases,
@@ -41,6 +42,8 @@ import { RevealRiskBadge } from "./reveal-risk-badge"
 export function WithdrawScreen({ viewer }: { viewer: ViewerScope }) {
   const wallet = useWallet()
   const balance = useMyBalance(viewer)
+  const inFlight = useWithdrawInFlight()
+  const sent = useSentWithdrawal()
 
   if (wallet.loading || balance.isPending) {
     return (
@@ -54,16 +57,22 @@ export function WithdrawScreen({ viewer }: { viewer: ViewerScope }) {
 
   return (
     <div className="max-w-3xl space-y-4">
-      {balance.isError ? (
-        <ErrorState
-          title="Couldn't load your balance"
-          description={messageFor(balance.error)}
-          onRetry={
-            isApiError(balance.error) && !balance.error.isRetryable
-              ? undefined
-              : () => balance.refetch()
-          }
-        />
+      {balance.data === undefined ? (
+        // Whatever the balance does, a withdrawal that is running or may have gone
+        // through stays on screen: it is the one thing that must not disappear.
+        <>
+          <ApiErrorState
+            error={balance.error}
+            title="Couldn't load your balance"
+            onRetry={() => balance.refetch()}
+          />
+          {inFlight && <InFlightNotice />}
+          <div className="space-y-3">
+            {sent.map((held) => (
+              <HeldNotice key={held.amount} held={held} />
+            ))}
+          </div>
+        </>
       ) : wallet.status === "unavailable" ? (
         <EmptyState
           icon={Eye}
@@ -71,10 +80,20 @@ export function WithdrawScreen({ viewer }: { viewer: ViewerScope }) {
           description="Your wallet can't sign in this environment, so there is nothing to withdraw with."
         />
       ) : (
-        <WithdrawCard
-          available={BigInt(balance.data.available)}
-          pending={BigInt(balance.data.pending)}
-        />
+        <>
+          {balance.isError && (
+            <ApiErrorState
+              error={balance.error}
+              title="Couldn't refresh your balance"
+              description="The balance below may be out of date."
+              onRetry={() => balance.refetch()}
+            />
+          )}
+          <WithdrawCard
+            available={BigInt(balance.data.available)}
+            pending={BigInt(balance.data.pending)}
+          />
+        </>
       )}
       <CashOutPanel />
     </div>
@@ -196,20 +215,12 @@ function WithdrawCard({
 
   if (inFlight && state.stage === "form") {
     return (
-      <section
-        role="status"
-        className="rounded-xl border border-line bg-surface p-5"
-      >
-        <h2 className="flex items-center gap-2 text-lead font-medium text-ink">
-          <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-          A withdrawal is already in progress
-        </h2>
-        <p className="mt-2 text-ui/normal text-ink-muted">
-          It was started before you left this page and is still running. You can
-          withdraw again once it finishes. Your balance and history show the
-          result.
-        </p>
-      </section>
+      <>
+        <InFlightNotice />
+        {state.held.map((held) => (
+          <HeldNotice key={held.amount} held={held} />
+        ))}
+      </>
     )
   }
 
@@ -376,6 +387,7 @@ function WithdrawCard({
             <HeldNotice
               key={held.amount}
               held={held}
+              summary={heldDetail(state, held) === "summary"}
               isAlert={
                 state.stage === "failed" &&
                 state.failure.sent &&
@@ -402,6 +414,25 @@ function WithdrawCard({
           on-chain to anyone. Payments you receive stay encrypted on-chain, but
           Cadence and the company that paid you can read their amounts.
         </span>
+      </p>
+    </section>
+  )
+}
+
+function InFlightNotice() {
+  return (
+    <section
+      role="status"
+      className="rounded-xl border border-line bg-surface p-5"
+    >
+      <h2 className="flex items-center gap-2 text-lead font-medium text-ink">
+        <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />A
+        withdrawal is already in progress
+      </h2>
+      <p className="mt-2 text-ui/normal text-ink-muted">
+        It was started before you left this page and is still running. You can
+        withdraw again once it finishes. Your balance and history show the
+        result.
       </p>
     </section>
   )
@@ -476,7 +507,28 @@ function Acknowledge({
 
 // A withdrawal that may already have gone through. It stays until the page reloads, and
 // the reducer will not send the same amount again meanwhile.
-function HeldNotice({ held, isAlert }: { held: Held; isAlert: boolean }) {
+function HeldNotice({
+  held,
+  isAlert = false,
+  summary = false,
+}: {
+  held: Held
+  isAlert?: boolean
+  // One line, while a newer attempt is the thing to read.
+  summary?: boolean
+}) {
+  if (summary) {
+    return (
+      <p className="mt-4 flex gap-2 text-ui/normal text-warning-fg">
+        <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+        <span>
+          Earlier: a withdrawal of {formatUnits(held.amount)} may have gone
+          through. Check your balance and history before withdrawing that amount
+          again.
+        </span>
+      </p>
+    )
+  }
   return (
     <div
       role={isAlert ? "alert" : undefined}
