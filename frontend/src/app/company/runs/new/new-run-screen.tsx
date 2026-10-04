@@ -15,11 +15,13 @@ import { unitsToUsd } from "@/lib/money"
 import {
   useCompanyBalance,
   useCreateRun,
-  useInviteRecipient,
   usePayrollPeople,
   useRecentlyPaid,
 } from "@/lib/queries/payroll"
+import { useAuditors } from "@/lib/queries/auditors"
 import type { ViewerScope } from "@/lib/queries/keys"
+import { useSendInvite } from "@/lib/queries/people"
+import { hasActiveAuditor } from "@/lib/people/view"
 import { runMessage } from "@/lib/runs/messages"
 import { nameLookup } from "@/lib/runs/people"
 import {
@@ -64,7 +66,8 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
   const balance = useCompanyBalance(viewer)
   const recent = useRecentlyPaid()
   const create = useCreateRun()
-  const invite = useInviteRecipient()
+  const invite = useSendInvite()
+  const auditors = useAuditors()
   const signer = useRunSigner()
   // A run being created, signed or confirmed cannot be left without losing track of it.
   useLeaveGuard(
@@ -240,6 +243,12 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
 
   return (
     <div className="max-w-3xl space-y-4">
+      {people.truncated && (
+        <p role="status" className="text-ui/normal text-warning-fg">
+          More people exist than could be read, so someone may be missing from
+          this run.
+        </p>
+      )}
       {roster.payable.length > 0 ? (
         <PayableList
           payable={roster.payable}
@@ -281,6 +290,7 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
           missing={missing}
           tooMany={tooMany}
           wallet={wallet}
+          hasAuditor={hasActiveAuditor(auditors.data)}
           recent={recent}
           blocked={blocked}
           onReview={openReview}
@@ -308,6 +318,7 @@ function Summary({
   missing,
   tooMany,
   wallet,
+  hasAuditor,
   recent,
   blocked,
   onReview,
@@ -318,6 +329,7 @@ function Summary({
   missing: string | null
   tooMany: boolean
   wallet: ReturnType<typeof useRunSigner>["wallet"]
+  hasAuditor: boolean | undefined
   recent: ReturnType<typeof useRecentlyPaid>
   blocked: boolean
   onReview: () => void
@@ -332,7 +344,7 @@ function Summary({
           <dt className="text-label text-ink-muted uppercase">This run</dt>
           <dd className="mt-1 flex items-center gap-1.5">
             <AmountDisplay amount={unitsToUsd(total)} className="text-amount" />
-            <WhoCanSee viewerRole="admin" hasAuditor={false} />
+            <WhoCanSee viewerRole="admin" hasAuditor={hasAuditor} />
           </dd>
           <dd className="text-caption text-ink-muted">
             {peopleCount(count)} selected

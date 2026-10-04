@@ -13,6 +13,8 @@ import { TransparentBadge } from "@/components/ui/transparent-badge"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import type { PaymentItem } from "@/lib/api/schemas"
 import { unitsToUsd } from "@/lib/money"
+import { hasActiveAuditor } from "@/lib/people/view"
+import { useAuditors } from "@/lib/queries/auditors"
 import { useRecentPayments } from "@/lib/queries/payroll"
 import { runMessage } from "@/lib/runs/messages"
 import { initialsOf } from "@/lib/runs/people"
@@ -21,6 +23,9 @@ const recentCount = 10
 
 export function PaymentsHome() {
   const payments = useRecentPayments(recentCount)
+  const auditors = useAuditors()
+  // Unknown reads as the longer sentence, never as "no auditor".
+  const hasAuditor = hasActiveAuditor(auditors.data)
 
   const newRun = (
     <Link href="/company/runs/new" className={buttonVariants()}>
@@ -49,7 +54,7 @@ export function PaymentsHome() {
             className="flex items-center gap-1.5 text-lead font-medium text-ink"
           >
             Recent payments
-            <WhoCanSee viewerRole="admin" hasAuditor={false} />
+            <WhoCanSee viewerRole="admin" hasAuditor={hasAuditor} />
           </h2>
           <Link
             href="/company/receipts"

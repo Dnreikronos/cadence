@@ -14,7 +14,7 @@ Everything else in Cadence is ordinary work — a dashboard, a Postgres schema, 
 
 ## What we did
 
-`spikes/confidential-transfer/` — a throwaway binary. **None of that code is meant to survive.** It exists to produce the numbers below; the two modules worth reading before the service is written are called out under *What we learned*.
+`spikes/confidential-transfer/` — a throwaway binary. **None of that code is meant to survive.** It exists to produce the numbers below; the two modules worth reading before the service is written are called out under _What we learned_.
 
 Five steps, every one of them sent as a transaction v1 against devnet:
 
@@ -22,7 +22,7 @@ Five steps, every one of them sent as a transaction v1 against devnet:
 2. Two auxiliary token accounts sized for `ConfidentialTransferAccount`, each configured with its pubkey validity proof in the same transaction. Auxiliary rather than associated: an ATA is sized from the mint's extensions alone and has no room for the account extension.
 3. `MintToChecked` + `Deposit` in one transaction, then `ApplyPendingBalance` in a second, with the account re-read in between to get the credit counter. Two transactions by choice, not by necessity — see the counter finding below.
 4. One `Transfer` with its equality, ciphertext validity and range proofs inline at instruction offsets 1, 2 and 3. Four instructions, one transaction.
-5. `getTransaction` with `encoding: jsonParsed` and `maxSupportedTransactionVersion: 1`, against a *different* RPC provider from the one that sent it. R2 is only demonstrated by an endpoint with no part in the send.
+5. `getTransaction` with `encoding: jsonParsed` and `maxSupportedTransactionVersion: 1`, against a _different_ RPC provider from the one that sent it. R2 is only demonstrated by an endpoint with no part in the send.
 
 ElGamal and AES keys are derived per account from a wallet signature over the account address (`derive_confidential_keys`), so nothing has to be stored to recover them.
 
@@ -37,40 +37,40 @@ The test builds the real transfer with real proofs over a synthetic balance and 
 
 Environment, since none of these numbers are portable across versions:
 
-| | |
-|---|---|
-| Cluster | devnet, `solana-core` 4.3.0, feature set 3383571666 |
-| Toolchain | `rustc` 1.98.1 |
-| Sending RPC | `api.devnet.solana.com` |
-| Verifying RPC | `solana-devnet.api.onfinality.io/public` |
-| Crates | `spl-token-2022-interface` 3.1.2, `spl-token-confidential-transfer-proof-generation` 0.6.1, `-proof-extraction` 0.6.1, `solana-zk-sdk` 7.0.1, `solana-message` 5.1.0, `solana-transaction` 5.1.0 |
+|               |                                                                                                                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Cluster       | devnet, `solana-core` 4.3.0, feature set 3383571666                                                                                                                                              |
+| Toolchain     | `rustc` 1.98.1                                                                                                                                                                                   |
+| Sending RPC   | `api.devnet.solana.com`                                                                                                                                                                          |
+| Verifying RPC | `solana-devnet.api.onfinality.io/public`                                                                                                                                                         |
+| Crates        | `spl-token-2022-interface` 3.1.2, `spl-token-confidential-transfer-proof-generation` 0.6.1, `-proof-extraction` 0.6.1, `solana-zk-sdk` 7.0.1, `solana-message` 5.1.0, `solana-transaction` 5.1.0 |
 
 ## What we measured
 
-| What | Result | How |
-|---|---|---|
-| Transaction version | 1 | as reported by the verifying RPC |
-| Wire size | **2,395 bytes** | `wincode::serialize` of the signed transaction |
-| Against the v1 cap | 4,096 | SIMD-0296 |
-| Against the legacy cap | 1,232 | it would not have fit; v1 is load-bearing, not a convenience |
-| Instructions in the transaction | 4 | transfer, equality, ciphertext validity, range |
-| Amount as a third party gets it | 2 × 64 bytes of ElGamal ciphertext | `transfer_amount_auditor_ciphertext_lo` and `_hi`, read out of the raw instruction |
-| Plaintext amount anywhere in the instruction | none | no `amount` field parsed, and no little-endian 4,200,000 in the 169 raw bytes |
-| Amount visible to the recipient | 4,200,000 units | ElGamal decrypt of their pending balance |
-| Successful transfers | n = 1 | |
+| What                                         | Result                             | How                                                                                |
+| -------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------- |
+| Transaction version                          | 1                                  | as reported by the verifying RPC                                                   |
+| Wire size                                    | **2,395 bytes**                    | `wincode::serialize` of the signed transaction                                     |
+| Against the v1 cap                           | 4,096                              | SIMD-0296                                                                          |
+| Against the legacy cap                       | 1,232                              | it would not have fit; v1 is load-bearing, not a convenience                       |
+| Instructions in the transaction              | 4                                  | transfer, equality, ciphertext validity, range                                     |
+| Amount as a third party gets it              | 2 × 64 bytes of ElGamal ciphertext | `transfer_amount_auditor_ciphertext_lo` and `_hi`, read out of the raw instruction |
+| Plaintext amount anywhere in the instruction | none                               | no `amount` field parsed, and no little-endian 4,200,000 in the 169 raw bytes      |
+| Amount visible to the recipient              | 4,200,000 units                    | ElGamal decrypt of their pending balance                                           |
+| Successful transfers                         | n = 1                              |                                                                                    |
 
 The 2,395 figure is the same number in `cargo test` and on chain, to the byte. It is **smaller** than the 2,897 the ADR quotes for the Foundation's reference transaction, mostly because v1 carries the compute budget in the message config rather than in two `ComputeBudget` instructions.
 
 The run:
 
-| | |
-|---|---|
-| Transfer | [`5hhrC9Ec…A99WxT`](https://explorer.solana.com/tx/5hhrC9EcF77nAmRCLf3CnqFMxvAr9MpzAgoDtvGMRzUr4LsauiD2kXM2DVvDZmgWzJshSiY2vitkp7DeUbA99WxT?cluster=devnet) |
-| Slot | 504918144 |
-| Mint | `DNwfK2HrZBYZyQQXtTxdRqYaKjSixWUrBbb9CVLrSa4u` |
-| Source | `DjzzcxJfjcZvsY8AXuJTrRy7QS43Yj1Nbf3PYpLU4UXC` |
-| Destination | `DYi3gDbtQkrS63cGGbkdDNvWAFkPY1FHjXvUZcNQ3J5C` |
-| Amount | 4,200,000 units of a 6-decimal token |
+|             |                                                                                                                                                             |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Transfer    | [`5hhrC9Ec…A99WxT`](https://explorer.solana.com/tx/5hhrC9EcF77nAmRCLf3CnqFMxvAr9MpzAgoDtvGMRzUr4LsauiD2kXM2DVvDZmgWzJshSiY2vitkp7DeUbA99WxT?cluster=devnet) |
+| Slot        | 504918144                                                                                                                                                   |
+| Mint        | `DNwfK2HrZBYZyQQXtTxdRqYaKjSixWUrBbb9CVLrSa4u`                                                                                                              |
+| Source      | `DjzzcxJfjcZvsY8AXuJTrRy7QS43Yj1Nbf3PYpLU4UXC`                                                                                                              |
+| Destination | `DYi3gDbtQkrS63cGGbkdDNvWAFkPY1FHjXvUZcNQ3J5C`                                                                                                              |
+| Amount      | 4,200,000 units of a 6-decimal token                                                                                                                        |
 
 Fetched back from OnFinality, the transfer parses to this and nothing more:
 
@@ -93,7 +93,7 @@ Addresses, yes. Where an ordinary SPL transfer carries `"amount": "4200000"`, th
 
 That absence is not the same as the amount being ciphertext, so the spike also pulls the instruction back unparsed from the same RPC. The 169 bytes are exactly `TransferInstructionData` — two discriminants, the sender's 36-byte AES balance, then `transfer_amount_auditor_ciphertext_lo` and `_hi` at 64 bytes each, then the three proof offsets. Those two are the transfer amount, encrypted. The little-endian `4200000` a transparent transfer would carry is not anywhere in the 169 bytes, and the run checks for it.
 
-One wrinkle, since the mint has no auditor. The second half of each of those ciphertexts is the decrypt handle under the auditor key, and with no auditor that key is the default, so the handle comes back as 32 zero bytes. The first half is still a Pedersen commitment to the amount and still hides it. Nobody can read the amount from these, which is what R2 needs — but do not read them as evidence that an auditor *could*. That is R4 and it is untested here.
+One wrinkle, since the mint has no auditor. The second half of each of those ciphertexts is the decrypt handle under the auditor key, and with no auditor that key is the default, so the handle comes back as 32 zero bytes. The first half is still a Pedersen commitment to the amount and still hides it. Nobody can read the amount from these, which is what R2 needs — but do not read them as evidence that an auditor _could_. That is R4 and it is untested here.
 
 The recipient's own key decrypts their pending balance to 4,200,000 in the same run.
 
@@ -101,13 +101,13 @@ The recipient's own key decrypts their pending balance to 4,200,000 in the same 
 
 **`spl-token-client` cannot build this transaction, and it cannot be kept around for the other steps either.** Release 0.19.1, the current one, assembles the right four instructions in `confidential_transfer_transfer` and then hands them to a legacy `Transaction` through `solana-message` 3.x — a 1,232-byte container for a 2,395-byte payload. Nor is a split possible where the client does setup and we hand-build only the transfer: v1 needs `solana-message` 5.x, which requires `solana-hash` `4.7.0`; the only `solana-rpc-client` release that agrees with `spl-token-client` 0.19 on the `Transaction` type is 4.0.0, which pins `solana-hash` to `~4.2.0`. Both sit in Cargo's 4.x compatibility range, so one build cannot contain both. The spike therefore depends on the client not at all.
 
-What survives of B18 is the part that mattered. Proofs still come from `spl-token-confidential-transfer-proof-generation` — the same crate `spl-token-client` itself calls — and instructions from `spl-token-2022-interface`. Nothing cryptographic is hand-rolled. What *is* ours, and what the proof service will have to own until upstream ships a v1-aware client, is two small modules: `src/v1.rs`, about eighty lines of message compilation and signing, and `src/balances.rs`, the bookkeeping around reading and re-encrypting a confidential balance.
+What survives of B18 is the part that mattered. Proofs still come from `spl-token-confidential-transfer-proof-generation` — the same crate `spl-token-client` itself calls — and instructions from `spl-token-2022-interface`. Nothing cryptographic is hand-rolled. What _is_ ours, and what the proof service will have to own until upstream ships a v1-aware client, is two small modules: `src/v1.rs`, about eighty lines of message compilation and signing, and `src/balances.rs`, the bookkeeping around reading and re-encrypting a confidential balance.
 
 **A v1 message defaults every budget field it does not carry to zero**, where a legacy transaction got 200k CU per instruction and a 64 MiB account-data allowance for free. This cost real time in the spike: the account-data one fails simulation with `MaxLoadedAccountsDataSizeExceeded`, which reads like the transaction is too large and is nothing of the kind — the declared allowance was zero and the Token-2022 program account alone exceeds it. Whatever wraps transaction assembly in the service should set both centrally, because a call site that forgets fails in a way that points at the wrong problem.
 
 **`ApplyPendingBalance` does not validate the credit counter it is given.** The instruction takes an expected counter, which reads like a guard and is not one. The program folds in whatever pending balance exists when it runs, stores the AES balance it was handed, and writes the expected and actual counters into two separate fields. Comparing them is the caller's job, after the fact. A credit landing in flight therefore produces a transaction that succeeds while leaving the AES balance out of step with the ElGamal one, and the damage only surfaces later as a proof that will not verify. `balances.rs` exposes the comparison and the flow stops on it, but a service doing this at payroll volume needs a real resync path, not a stop.
 
-A side effect worth knowing: since nothing is validated, deposit and apply *can* go in one transaction. You know the counter will be current plus one and you know the resulting balance, so neither has to be read back. This spike keeps them apart because it is easier to follow, not because it has to.
+A side effect worth knowing: since nothing is validated, deposit and apply _can_ go in one transaction. You know the counter will be current plus one and you know the resulting balance, so neither has to be read back. This spike keeps them apart because it is easier to follow, not because it has to.
 
 **Two `solana-instruction` majors have to coexist.** Token-2022 emits 3.5.1, `solana-message` 5.x consumes 4.0.0. The structs are field-identical and a nine-line copy bridges them. Harmless, and it resolves itself when Token-2022 moves up.
 
@@ -119,7 +119,7 @@ A side effect worth knowing: since nothing is validated, deposit and apply *can*
 
 **Go.** R2 and R3 both hold, on chain, from an unrelated observer's view. The amount comes back as two ElGamal ciphertexts with no plaintext beside them, which is the criterion, and the transfer is one v1 transaction well inside the cap. B2's single atomic transfer is real and B7's `maxSupportedTransactionVersion: 1` is not optional — it is what makes the reading half work.
 
-Conditional on one thing: **B18 has to be superseded.** It names a client that cannot build the transaction it was chosen for. The replacement is not a different library, it is an accepted cost — the proof service owns transaction assembly and balance bookkeeping itself, using library proofs, until upstream catches up. That is a decision for João, not a finding of this spike; see *Next*.
+Conditional on one thing: **B18 has to be superseded.** It names a client that cannot build the transaction it was chosen for. The replacement is not a different library, it is an accepted cost — the proof service owns transaction assembly and balance bookkeeping itself, using library proofs, until upstream catches up. That is a decision for João, not a finding of this spike; see _Next_.
 
 ## What this does NOT tell us
 

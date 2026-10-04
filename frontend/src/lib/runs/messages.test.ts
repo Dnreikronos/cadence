@@ -10,7 +10,6 @@ import {
 import {
   describeFailure,
   failureCodeMessage,
-  inviteMessage,
   runMessage,
   sentWithSignatureMessage,
   sentWithoutSignatureMessage,
@@ -54,17 +53,6 @@ describe("runMessage", () => {
   it("never echoes the code or a raw message", () => {
     const shown = runMessage(new ApiError(500, "secret_internal_code"))
     expect(shown).not.toContain("secret_internal_code")
-  })
-})
-
-describe("inviteMessage", () => {
-  it("explains the 409s an invite can get", () => {
-    expect(inviteMessage(new ApiError(409, "person_already_active"))).toMatch(
-      /already has an account/,
-    )
-    expect(inviteMessage(new ApiError(409, "person_removed"))).toMatch(
-      /was removed/,
-    )
   })
 })
 

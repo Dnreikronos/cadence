@@ -7,7 +7,8 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { ErrorState } from "@/components/ui/error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { isApiError } from "@/lib/api/errors"
-import { usePayrollPeople, useRun } from "@/lib/queries/payroll"
+import { usePeople } from "@/lib/queries/people"
+import { useRun } from "@/lib/queries/payroll"
 import { runMessage } from "@/lib/runs/messages"
 import { nameLookup } from "@/lib/runs/people"
 import { holdsUnconfirmed } from "@/lib/runs/progress"
@@ -17,7 +18,7 @@ import { RunProgress } from "../run-progress"
 
 export function RunScreen({ runId }: { runId: string }) {
   const run = useRun(runId)
-  const people = usePayrollPeople()
+  const people = usePeople()
   const signer = useRunSigner()
   useLeaveGuard(signer.busy || holdsUnconfirmed(signer.local))
 
@@ -71,7 +72,7 @@ export function RunScreen({ runId }: { runId: string }) {
       <RunProgress
         runId={runId}
         signer={signer}
-        nameOf={nameLookup(people.data, !people.isPending)}
+        nameOf={nameLookup(people.data?.people, !people.isPending)}
       />
       <div className="flex flex-wrap gap-2">
         <Link

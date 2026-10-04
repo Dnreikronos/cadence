@@ -1,11 +1,9 @@
 "use client"
 
+import { useMemo } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
 import { api } from "@/lib/api"
 import type { RunRequest } from "@/lib/api/schemas"
-import { listPeople } from "@/lib/people/mock"
-import { inviteMessage } from "@/lib/runs/messages"
 import { collectPages } from "@/lib/runs/pages"
 import {
   recentWindowMs,
@@ -15,51 +13,49 @@ import {
 } from "@/lib/runs/plan"
 import { isApiError } from "@/lib/api/errors"
 import { queryKeys, type ViewerScope } from "./keys"
+import { usePeople, usePersonAmounts } from "./people"
 
-// The people a payroll run can pay, with the amount the proof service holds for each.
-//
-// TEMPORARY. Task A (#81) replaces `lib/people/mock` with a `PeopleRepository`, whose
-// mock ids are the proof service's own. Until it is on main this adapter reads the
-// legacy mock and maps its ids onto those of the mock service. When A merges, this
-// function becomes `repository.list()` and the id table below goes away; nothing else
-// in the run screens changes.
-const proofServiceIds: Record<string, string> = {
-  p1: "a0000000-0000-4000-8000-000000000001",
-  p2: "a0000000-0000-4000-8000-000000000002",
-  p3: "a0000000-0000-4000-8000-000000000003",
-  p4: "a0000000-0000-4000-8000-000000000004",
+// What the payroll screens read about people: the people table (name, email, kind,
+// whether they have an account) from main's repository, joined by person id with the
+// amounts the proof service holds. One answer, in the shape of a query.
+export type PayrollPeople = {
+  data: PayrollPerson[] | undefined
+  isPending: boolean
+  isError: boolean
+  error: unknown
+  isFetching: boolean
+  // More people, or more amounts, exist than were read: the run may be missing someone.
+  truncated: boolean
+  refetch: () => void
 }
 
-async function readPayrollPeople(
-  signal: AbortSignal,
-): Promise<PayrollPerson[]> {
-  const [people, amounts] = await Promise.all([
-    listPeople(),
-    collectPages((cursor) =>
-      api.company.amounts({ limit: 100, cursor }, { signal }),
-    ),
-  ])
-  return withAmounts(
-    people.map((person) => ({
-      id: proofServiceIds[person.id] ?? person.id,
-      name: person.name,
-      email: person.email,
-      kind: person.kind,
-      activation: person.activation,
-    })),
-    new Map(amounts.map((row) => [row.person_id, row.amount])),
+// An amount from a failed refresh is not used: paying a figure that may be out of date
+// is worse than not paying yet, so a failure of either read is an error here.
+export function usePayrollPeople(): PayrollPeople {
+  const people = usePeople()
+  const amounts = usePersonAmounts()
+  const failed = people.isError || amounts.isError
+  const list = people.data
+  const read = amounts.data
+  const data = useMemo(
+    () =>
+      !failed && list && read
+        ? withAmounts(list.people, new Map(Object.entries(read.byPerson)))
+        : undefined,
+    [failed, list, read],
   )
-}
-
-// A key of its own under the people prefix: the people screen caches a different shape
-// under `people.list()`, and a people mutation still reaches this one through `people.all`.
-const payrollPeopleKey = [...queryKeys.people.all, "payroll"] as const
-
-export function usePayrollPeople() {
-  return useQuery({
-    queryKey: payrollPeopleKey,
-    queryFn: ({ signal }) => readPayrollPeople(signal),
-  })
+  return {
+    data,
+    isPending: !data && !failed,
+    isError: !data && failed,
+    error: people.error ?? amounts.error,
+    isFetching: people.isFetching || amounts.isFetching,
+    truncated: Boolean(list?.truncated || read?.truncated),
+    refetch: () => {
+      void people.refetch()
+      void amounts.refetch()
+    },
+  }
 }
 
 // The same key as the sidebar, so the two share one cached balance.
@@ -133,19 +129,5 @@ export function useCreateRun() {
         void queryClient.invalidateQueries({ queryKey: queryKeys.people.all })
       }
     },
-  })
-}
-
-// Sends or resends the invite email. The toast lives here, not in the component, so
-// it still shows if the row that asked for it is gone by the time the call returns.
-export function useInviteRecipient() {
-  return useMutation({
-    mutationFn: (person: Pick<PayrollPerson, "id" | "name">) =>
-      api.company.invite(person.id),
-    onSuccess: (_, person) => toast.success(`Invite sent to ${person.name}`),
-    onError: (error, person) =>
-      toast.error(`Couldn't invite ${person.name}`, {
-        description: inviteMessage(error),
-      }),
   })
 }

@@ -51,6 +51,9 @@ export function WhoCanSee({
   hasAuditor,
   note,
   className,
+  label = "Who can see this amount",
+  description,
+  cadenceLine = "Cadence reads amounts to prove transfers and to answer reads and exports by the company, the recipient and the auditor. Every read is logged.",
 }: {
   viewerRole: Role
   // Undefined while it is not known whether an auditor exists.
@@ -58,11 +61,16 @@ export function WhoCanSee({
   // An extra sentence, for a place where some amounts are an exception.
   note?: string
   className?: string
+  // For a page that shows no amount of its own: its own label and texts.
+  label?: string
+  description?: string
+  // Replaces the sentence about what Cadence reads.
+  cadenceLine?: string
 }) {
   return (
     <Popover>
       <PopoverTrigger
-        aria-label="Who can see this amount"
+        aria-label={label}
         className={cn(
           "inline-grid size-6 shrink-0 place-items-center rounded-md text-ink-muted transition-colors duration-150 outline-none hover:bg-canvas hover:text-ink focus-visible:ring-2 focus-visible:ring-ink/30 data-popup-open:bg-canvas data-popup-open:text-ink",
           className,
@@ -74,14 +82,10 @@ export function WhoCanSee({
         <PopoverHeader>
           <PopoverTitle>Who can see this</PopoverTitle>
           <PopoverDescription>
-            {whoCanSee(viewerRole, hasAuditor)}
+            {description ?? whoCanSee(viewerRole, hasAuditor)}
           </PopoverDescription>
         </PopoverHeader>
-        <p className="text-caption/normal text-ink-muted">
-          Cadence reads amounts to prove transfers and to answer reads and
-          exports by the company, the recipient and the auditor. Every read is
-          logged.
-        </p>
+        <p className="text-caption/normal text-ink-muted">{cadenceLine}</p>
         {note && <p className="text-caption/normal text-ink-muted">{note}</p>}
       </PopoverContent>
     </Popover>

@@ -102,6 +102,12 @@ that configuration, with the explicit `mock` mode as the opt-in, so a typo in a
 Supabase variable also turns it on: check the env before sharing a deploy. Sign-out
 clears the cookie. A reload resets the mock data.
 
+The company people list follows the API mode, not whether Supabase is configured
+(`src/lib/people/repository.ts`): in mock mode the people are an in-memory list with
+the mock service's ids, even with Supabase configured, because the amounts and invites
+go to the mock service, which only knows those ids; in real mode they are the Supabase
+`people` rows, and real mode without Supabase shows "Sign-in is not configured".
+
 ## Wallet
 
 Screens sign through `useWallet()` (`src/lib/wallet`): `{ status, address, signer,
@@ -121,6 +127,19 @@ in `src/lib/queries/client.ts` (30 s stale time, one retry except for a 4xx
 `src/lib/queries/keys.ts`. The sidebar balance is `useShellBalance(role, viewer)`,
 cached per viewer and cleared on sign-out and when a sign-in page mounts. A mutation that
 moves money must call `invalidateBalances(queryClient)` so the sidebar updates.
+
+## Activation
+
+`/activate` (recipient) is one progress screen: create the wallet, sign the
+key-derivation message and `api.keys.enroll` it (`key_already_enrolled` counts as
+done), then `api.accounts.configure` and sign it. The steps are the three flags of
+`api.me.status()`, so it resumes where it stopped, and "Try again" re-reads the status
+and runs only what is not done. `/me` shows its content only once the status is
+complete and sends the rest to `/activate`. The key-derivation signature is
+secret: it lives in one local variable for the enroll call, never in state, a
+mutation, a log, a URL or an error. Wallet creation in real mode waits for #78;
+the screen says so. Code: `src/lib/activation/` (state machine, steps) and
+`src/lib/queries/activation.ts`.
 
 ## Route guard
 

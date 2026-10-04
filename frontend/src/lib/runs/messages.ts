@@ -16,8 +16,6 @@ const overrides: Record<string, string> = {
   payment_not_found: "That payment is no longer part of this run.",
   payment_not_retryable:
     "That payment can't be retried right now. Check its status first.",
-  person_already_active: "That person already has an account.",
-  person_removed: "That person was removed, so they can't be invited.",
   recipient_not_activated:
     "Someone on this run hasn't set up their account yet. Refresh the list and try again.",
   // Each payment's proof is built before the one ahead of it lands, so later payments
@@ -102,8 +100,4 @@ export function describeFailure(error: unknown): Failure {
     }
   }
   return { message: runMessage(error), sent: false }
-}
-
-export function inviteMessage(error: unknown) {
-  return runMessage(error)
 }
