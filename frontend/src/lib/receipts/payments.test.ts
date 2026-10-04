@@ -1,0 +1,73 @@
+import { describe, expect, it } from "vitest"
+import type { PaymentItem } from "@/lib/api/schemas"
+import { filterPayments, isFiltering, noFilters } from "./payments"
+
+const payment = (
+  name: string,
+  status: PaymentItem["status"],
+  n: number,
+): PaymentItem => ({
+  payment_id: `b0000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
+  run_id: null,
+  counterparty: {
+    id: `a0000000-0000-4000-8000-${String(n).padStart(12, "0")}`,
+    name,
+  },
+  amount: "1000000",
+  status,
+  transparent: false,
+  paid_at: "2026-09-01T12:00:00Z",
+  signature: null,
+})
+
+const all = [
+  payment("Bruno Costa", "confirmed", 1),
+  payment("Mariana Souza", "failed", 2),
+  payment("Northwind Audit", "pending", 3),
+  payment("bruno ÁVILA", "failed", 4),
+]
+const ids = (list: PaymentItem[]) => list.map((p) => p.counterparty.name)
+
+describe("filterPayments", () => {
+  it("returns every payment, in order, when nothing is filtered", () => {
+    expect(filterPayments(all, noFilters)).toEqual(all)
+  })
+
+  it("filters by status", () => {
+    expect(ids(filterPayments(all, { status: "failed", search: "" }))).toEqual([
+      "Mariana Souza",
+      "bruno ÁVILA",
+    ])
+  })
+
+  it("searches the name without regard to case or surrounding space", () => {
+    expect(
+      ids(filterPayments(all, { status: "all", search: "  BRUNO " })),
+    ).toEqual(["Bruno Costa", "bruno ÁVILA"])
+    expect(
+      ids(filterPayments(all, { status: "all", search: "ávila" })),
+    ).toEqual(["bruno ÁVILA"])
+  })
+
+  it("applies both filters together", () => {
+    expect(
+      ids(filterPayments(all, { status: "failed", search: "bruno" })),
+    ).toEqual(["bruno ÁVILA"])
+    expect(filterPayments(all, { status: "pending", search: "bruno" })).toEqual(
+      [],
+    )
+  })
+
+  it("treats what the person types as text, not a pattern", () => {
+    expect(filterPayments(all, { status: "all", search: ".*" })).toEqual([])
+  })
+})
+
+describe("isFiltering", () => {
+  it("is false only when both filters are at rest", () => {
+    expect(isFiltering(noFilters)).toBe(false)
+    expect(isFiltering({ status: "all", search: "   " })).toBe(false)
+    expect(isFiltering({ status: "failed", search: "" })).toBe(true)
+    expect(isFiltering({ status: "all", search: "a" })).toBe(true)
+  })
+})
