@@ -1,9 +1,6 @@
 import { Landmark } from "lucide-react"
 
-// Names are examples of exchanges that serve Brazil, not endorsements, and Cadence
-// quotes no rate or fee for any of them (PRD): that leg is the person's own.
-const exchanges = ["Mercado Bitcoin", "Foxbit", "Bitso", "Binance"]
-
+// Cadence names no exchange or service and quotes no rate or fee (PRD): this leg is the person's own.
 export function CashOutPanel() {
   return (
     <section
@@ -18,26 +15,13 @@ export function CashOutPanel() {
         Cash out to reais
       </h2>
       <p className="mt-2 text-ui/normal text-ink-muted">
-        Once the USDC is in your wallet, you can sell it for reais at an
-        exchange that serves Brazil and pays out by Pix.
-      </p>
-      <ul className="mt-3 flex flex-wrap gap-2" aria-label="Example exchanges">
-        {exchanges.map((name) => (
-          <li
-            key={name}
-            className="rounded-full border border-line bg-surface-subtle px-3 py-1 text-caption text-ink"
-          >
-            {name}
-          </li>
-        ))}
-      </ul>
-      <p className="mt-3 text-caption/normal text-ink-muted">
-        These are examples, not recommendations. Check that the exchange you
-        pick accepts USDC on Solana.
+        Once the USDC is in your wallet, you can cash it out through an exchange
+        or service you already use that supports Brazil and pays out by Pix.
       </p>
       <p className="mt-3 rounded-lg border border-line bg-surface-subtle p-3 text-ui/normal text-ink">
-        This step is yours. You sell on your own account at that exchange, at
-        its rate. Cadence does not quote a rate or take part in the sale.
+        This step is yours. You do it on your own account, at that
+        service&apos;s rate. Cadence does not hold reais, convert currency or
+        start a Pix payment, and it quotes no rate or fee.
       </p>
     </section>
   )
