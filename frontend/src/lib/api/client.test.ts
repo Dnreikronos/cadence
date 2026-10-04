@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { ZodError } from "zod"
 import { createApiClient } from "./client"
 import { ApiError, ContractError } from "./errors"
+import { knownAuditorStatus } from "./schemas"
 
 const BASE = "https://api.cadence.test"
 const WALLET = "4egAZELoLKWqJwHwAwaZwS2su9rewh7is3ukCagHnSQ5"
@@ -145,6 +146,7 @@ describe("ids in paths", () => {
       () => api.company.invite(value),
       () => api.audit.payments(value),
       () => api.exports.audit(value),
+      () => api.company.auditors.revoke(value),
     ]
     for (const call of calls) {
       await expect(call()).rejects.toBeInstanceOf(ZodError)
@@ -207,6 +209,194 @@ describe("company balance", () => {
       json({ available: 1.5, pending: "0", as_of_slot: 1 }),
     )
     expect(await caught(api.company.balance())).toBeInstanceOf(ContractError)
+  })
+})
+
+describe("auditors, access log and account status", () => {
+  const auditor = {
+    id: GUID,
+    email: "ana@audit.example",
+    status: "invited",
+    invited_at: "2026-10-02T09:00:00Z",
+  }
+
+  it("lists auditors with the page query", async () => {
+    const body = { items: [auditor], next_cursor: "1" }
+    const { api, calls } = setup(() => json(body))
+    expect(await api.company.auditors.list({ limit: 5, cursor: "10" })).toEqual(
+      body,
+    )
+    expect(calls[0].url.pathname).toBe("/company/auditors")
+    expect(calls[0].url.search).toBe("?limit=5&cursor=10")
+    expect(calls[0].init?.method).toBe("GET")
+    expect(calls[0].init?.signal).toBeUndefined()
+  })
+
+  it("posts the address and nothing else, and returns the new item", async () => {
+    const { api, calls } = setup(() => json(auditor, 201))
+    expect(await api.company.auditors.invite("ana@audit.example")).toEqual(
+      auditor,
+    )
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url.pathname).toBe("/company/auditors")
+    expect(calls[0].init?.method).toBe("POST")
+    expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+      email: "ana@audit.example",
+    })
+  })
+
+  it("sends nothing for an address the invites table would refuse", async () => {
+    const { api, fetch } = setup(() => json(auditor))
+    for (const email of [
+      "",
+      "plain",
+      "a@",
+      "a b@c.d",
+      `${"a".repeat(316)}@b.co`,
+    ]) {
+      expect(await caught(api.company.auditors.invite(email))).toBeInstanceOf(
+        ZodError,
+      )
+    }
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it("revokes with a POST, since the service's CORS refuses DELETE, and reads { status: revoked }", async () => {
+    const { api, calls } = setup(() => json({ status: "revoked" }))
+    expect(await api.company.auditors.revoke(GUID)).toEqual({
+      status: "revoked",
+    })
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url.pathname).toBe(`/company/auditors/${GUID}/revoke`)
+    expect(calls[0].init?.method).toBe("POST")
+    expect(calls[0].init?.body).toBeUndefined()
+  })
+
+  it("throws the service's code for a duplicate or an unknown auditor", async () => {
+    for (const [status, code] of [
+      [409, "auditor_already_invited"],
+      [409, "auditor_already_active"],
+      [404, "auditor_not_found"],
+      [403, "forbidden_role"],
+    ] as const) {
+      const { api } = setup(() => json({ error: code }, status))
+      expect(
+        await caught(api.company.auditors.revoke(GUID)),
+        code,
+      ).toMatchObject({ status, code })
+      expect(await caught(api.company.auditors.invite("a@b.co"))).toMatchObject(
+        { status, code },
+      )
+    }
+  })
+
+  it("does not take an empty 204 for a revoke", async () => {
+    const { api } = setup(() => new Response(null, { status: 204 }))
+    expect(await caught(api.company.auditors.revoke(GUID))).toBeInstanceOf(
+      ContractError,
+    )
+  })
+
+  it("reads an auditor status it does not know, and shows it as a pending invite", async () => {
+    const { api } = setup(() =>
+      json({ items: [{ ...auditor, status: "suspended" }], next_cursor: null }),
+    )
+    const [item] = (await api.company.auditors.list()).items
+    expect(item.status).toBe("suspended")
+    expect(knownAuditorStatus(item.status)).toBe("invited")
+    for (const known of ["invited", "active", "invite-expired"]) {
+      expect(knownAuditorStatus(known)).toBe(known)
+    }
+  })
+
+  it("fails loudly on an auditor status that is not a string", async () => {
+    for (const status of [null, 5, "", undefined]) {
+      const { api } = setup(() =>
+        json({ items: [{ ...auditor, status }], next_cursor: null }),
+      )
+      expect(await caught(api.company.auditors.list())).toBeInstanceOf(
+        ContractError,
+      )
+    }
+  })
+
+  it("reads the access log from its own path and checks every row", async () => {
+    const row = {
+      id: GUID,
+      at: "2026-10-03T18:00:00Z",
+      actor: { kind: "service", label: "Payroll run" },
+      action: "read_balance",
+      scope: "Company balance",
+    }
+    const { api, calls } = setup(() =>
+      json({ items: [row], next_cursor: null }),
+    )
+    expect((await api.audit.accessLog({ limit: 2 })).items).toEqual([row])
+    expect(calls[0].url.pathname).toBe("/audit/access-log")
+    expect(calls[0].url.search).toBe("?limit=2")
+
+    // A value added later still parses, as the contract is additive.
+    const later = [
+      { ...row, action: "read_everything" },
+      { ...row, actor: { kind: "robot", label: "x" } },
+    ]
+    const { api: tolerant } = setup(() =>
+      json({ items: later, next_cursor: null }),
+    )
+    expect((await tolerant.audit.accessLog()).items).toEqual(later)
+
+    for (const bad of [
+      { ...row, action: 5 },
+      { ...row, action: "" },
+      { ...row, actor: { kind: null, label: "x" } },
+      { ...row, at: "yesterday" },
+      { ...row, scope: undefined },
+    ]) {
+      const { api } = setup(() => json({ items: [bad], next_cursor: null }))
+      expect(await caught(api.audit.accessLog())).toBeInstanceOf(ContractError)
+    }
+  })
+
+  it("reads the account status as four booleans", async () => {
+    const body = {
+      wallet_linked: true,
+      key_enrolled: false,
+      account_configured: false,
+      pending_credits: true,
+    }
+    const { api, calls } = setup(() => json(body))
+    expect(await api.me.status()).toEqual(body)
+    expect(calls[0].url.pathname).toBe("/me/status")
+    expect(calls[0].init?.method).toBe("GET")
+
+    for (const bad of [
+      { ...body, key_enrolled: "false" },
+      { ...body, pending_credits: undefined },
+      { ...body, wallet_linked: 1 },
+    ]) {
+      const { api } = setup(() => json(bad))
+      expect(await caught(api.me.status())).toBeInstanceOf(ContractError)
+    }
+  })
+
+  it("passes the signal on every new call", async () => {
+    const controller = new AbortController()
+    const { api, calls } = setup(() => json({ status: "revoked" }))
+    await api.company.auditors.revoke(GUID, { signal: controller.signal })
+    expect(calls[0].init?.signal).toBe(controller.signal)
+    const reads = [
+      (signal: AbortSignal) => api.company.auditors.list({}, { signal }),
+      (signal: AbortSignal) => api.audit.accessLog({}, { signal }),
+      (signal: AbortSignal) => api.me.status({ signal }),
+      (signal: AbortSignal) =>
+        api.company.auditors.invite("a@b.co", { signal }),
+    ]
+    for (const read of reads) {
+      calls.length = 0
+      await caught(read(controller.signal))
+      expect(calls).toHaveLength(1)
+      expect(calls[0].init?.signal).toBe(controller.signal)
+    }
   })
 })
 

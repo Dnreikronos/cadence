@@ -226,6 +226,79 @@ export const inviteSchema = z.object({
   expires_at: timestamp,
 })
 
+// ---- Auditors, access log and account status (proposed, no amounts) ---------
+
+// The rule of the invites table (`20261001000000_tenancy.sql`).
+export const emailSchema = z
+  .string()
+  .max(320)
+  .regex(/^[^@\s]+@[^@\s]+$/)
+
+// The known values, which stay in the type for autocompletion, and any other
+// string, so a value added later is not a ContractError (additive-only).
+type Open<T extends string> = T | (string & Record<never, never>)
+function open<const T extends readonly [string, ...string[]]>(values: T) {
+  return z.union([
+    z.enum(values),
+    z.string().min(1) as z.ZodType<Open<T[number]>>,
+  ])
+}
+
+export const auditorStatuses = ["invited", "active", "invite-expired"] as const
+export type AuditorStatus = (typeof auditorStatuses)[number]
+
+// An unknown status is shown as a pending invite: it never claims access.
+export function knownAuditorStatus(status: string): AuditorStatus {
+  return (auditorStatuses as readonly string[]).includes(status)
+    ? (status as AuditorStatus)
+    : "invited"
+}
+
+export const auditorSchema = z.object({
+  id,
+  email: z.string().min(1),
+  status: open(auditorStatuses),
+  invited_at: timestamp,
+})
+export type Auditor = z.infer<typeof auditorSchema>
+
+export const inviteAuditorRequestSchema = z.strictObject({ email: emailSchema })
+
+export const auditorRevokedSchema = z.object({ status: z.literal("revoked") })
+
+export const accessActorKinds = [
+  "service",
+  "company",
+  "recipient",
+  "auditor",
+] as const
+export const accessActions = [
+  "read_payments",
+  "read_balance",
+  "export_csv",
+] as const
+
+export const accessLogItemSchema = z.object({
+  id,
+  at: timestamp,
+  actor: z.object({
+    kind: open(accessActorKinds),
+    label: z.string(),
+  }),
+  action: open(accessActions),
+  // What was read, in words. Never an amount or a payment id.
+  scope: z.string(),
+})
+export type AccessLogItem = z.infer<typeof accessLogItemSchema>
+
+export const accountStatusSchema = z.object({
+  wallet_linked: z.boolean(),
+  key_enrolled: z.boolean(),
+  account_configured: z.boolean(),
+  pending_credits: z.boolean(),
+})
+export type AccountStatus = z.infer<typeof accountStatusSchema>
+
 export const healthSchema = z.object({
   status: z.enum(["ok", "unavailable"]),
   // A 503 can come without it.

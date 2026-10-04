@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest"
 import { ZodError } from "zod"
 import {
+  accessLogItemSchema,
+  accountStatusSchema,
+  auditorSchema,
   confirmRequestSchema,
+  emailSchema,
   healthSchema,
+  inviteAuditorRequestSchema,
   preparedSchema,
   receiptSchema,
   runRequestSchema,
@@ -218,5 +223,138 @@ describe("response formats", () => {
     expect(
       healthSchema.parse({ status: "unavailable", rpc_reachable: false }),
     ).toEqual({ status: "unavailable", rpc_reachable: false })
+  })
+})
+
+describe("emailSchema", () => {
+  it.each([
+    "a@b",
+    "ana.ribeiro@northwind-audit.example",
+    "a+tag@b.co",
+    `${"a".repeat(315)}@b.co`,
+  ])("accepts %j", (value) => {
+    expect(emailSchema.parse(value)).toBe(value)
+  })
+
+  it.each([
+    "",
+    "plain",
+    "@b.co",
+    "a@",
+    "a@@b.co",
+    "a@b@c",
+    "a b@c.d",
+    "a@b c",
+    " a@b.co",
+    "a@b.co ",
+    "a@b.co\n",
+    "a\t@b.co",
+    `${"a".repeat(316)}@b.co`,
+  ])("refuses %j", (value) => {
+    expect(emailSchema.safeParse(value).success).toBe(false)
+  })
+
+  it.each([1, null, undefined, {}])("refuses the non-string %s", (value) => {
+    expect(emailSchema.safeParse(value).success).toBe(false)
+  })
+
+  it("is the one rule of the invite request, which is strict", () => {
+    expect(inviteAuditorRequestSchema.parse({ email: "a@b.co" })).toEqual({
+      email: "a@b.co",
+    })
+    for (const body of [
+      {},
+      { email: "nope" },
+      { email: "a@b.co", role: "admin" },
+    ]) {
+      expect(inviteAuditorRequestSchema.safeParse(body).success).toBe(false)
+    }
+  })
+})
+
+describe("auditors, access log and account status", () => {
+  const auditor = {
+    id: GUID,
+    email: "ana@audit.example",
+    status: "invite-expired",
+    invited_at: "2026-10-02T09:00:00+00:00",
+  }
+  const row = {
+    id: GUID,
+    at: "2026-10-03T18:00:00Z",
+    actor: { kind: "auditor", label: "Ana Ribeiro" },
+    action: "export_csv",
+    scope: "Company payments",
+  }
+
+  it("reads the three auditor statuses and any other string, not a non-string", () => {
+    for (const status of ["invited", "active", "invite-expired", "suspended"]) {
+      expect(auditorSchema.parse({ ...auditor, status }).status).toBe(status)
+    }
+    for (const status of ["", null, 3, undefined, {}]) {
+      expect(auditorSchema.safeParse({ ...auditor, status }).success).toBe(
+        false,
+      )
+    }
+    expect(
+      auditorSchema.safeParse({ ...auditor, invited_at: "yesterday" }).success,
+    ).toBe(false)
+    expect(auditorSchema.safeParse({ ...auditor, id: "x" }).success).toBe(false)
+  })
+
+  it("reads every access-log actor and action, any other string, and refuses the rest", () => {
+    for (const kind of ["service", "company", "recipient", "auditor"]) {
+      expect(
+        accessLogItemSchema.safeParse({ ...row, actor: { kind, label: "x" } })
+          .success,
+      ).toBe(true)
+    }
+    for (const action of ["read_payments", "read_balance", "export_csv"]) {
+      expect(accessLogItemSchema.safeParse({ ...row, action }).success).toBe(
+        true,
+      )
+    }
+    // Added later: still readable, and kept as the service sent it.
+    const later = accessLogItemSchema.parse({
+      ...row,
+      actor: { kind: "admin", label: "x" },
+      action: "write_payments",
+    })
+    expect(later.actor.kind).toBe("admin")
+    expect(later.action).toBe("write_payments")
+    for (const bad of [
+      { actor: { kind: "", label: "x" } },
+      { actor: { kind: 1, label: "x" } },
+      { actor: { kind: "auditor" } },
+      { action: "" },
+      { action: null },
+      { scope: 5 },
+      { at: "2026-10-03" },
+    ]) {
+      expect(accessLogItemSchema.safeParse({ ...row, ...bad }).success).toBe(
+        false,
+      )
+    }
+  })
+
+  it("needs all four booleans of the account status", () => {
+    const status = {
+      wallet_linked: true,
+      key_enrolled: true,
+      account_configured: false,
+      pending_credits: false,
+    }
+    expect(accountStatusSchema.parse({ ...status, added_later: 1 })).toEqual(
+      status,
+    )
+    for (const key of Object.keys(status)) {
+      const rest: Record<string, boolean> = { ...status }
+      delete rest[key]
+      expect(accountStatusSchema.safeParse(rest).success, key).toBe(false)
+      expect(
+        accountStatusSchema.safeParse({ ...status, [key]: "true" }).success,
+        key,
+      ).toBe(false)
+    }
   })
 })

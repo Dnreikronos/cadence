@@ -10,6 +10,7 @@ import {
 import { createApiClient } from "./client"
 import { MOCK_ORIGIN } from "./config"
 import * as s from "./schemas"
+import { expectNoAmount } from "./no-amount"
 import { signAndConfirm, type Signer } from "./sign"
 import {
   COMPANY_ID,
@@ -535,6 +536,148 @@ describe("CSV", () => {
   })
 })
 
+describe("auditors over HTTP", () => {
+  const invite = (body: unknown) => post("/company/auditors", body)
+
+  it("answers a bad invite body with invalid_request and adds nothing", async () => {
+    const bodies = [
+      {},
+      { email: "plain" },
+      { email: "a@b.co", extra: true },
+      { email: 5 },
+      { email: `${"a".repeat(316)}@b.co` },
+      { email: "a b@c.d" },
+      [],
+      "a@b.co",
+    ]
+    for (const body of bodies) {
+      const response = await invite(body)
+      expect(response.status, JSON.stringify(body)).toBe(400)
+      expect(await code(response)).toBe("invalid_request")
+    }
+    const notJson = await fetch(MOCK_ORIGIN + "/company/auditors", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer t",
+        "content-type": "application/json",
+      },
+      body: "{nope",
+    })
+    expect(notJson.status).toBe(400)
+    expect(await code(notJson)).toBe("invalid_request")
+    expect(db.auditors).toHaveLength(3)
+  })
+
+  it("answers a created invite with 201 and exactly the item's fields", async () => {
+    const response = await invite({ email: "carla@audit.example" })
+    expect(response.status).toBe(201)
+    const item = await response.json()
+    expect(Object.keys(item).sort()).toEqual([
+      "email",
+      "id",
+      "invited_at",
+      "status",
+    ])
+    expect(item).toMatchObject({
+      email: "carla@audit.example",
+      status: "invited",
+    })
+  })
+
+  it("answers the two conflicts with their own codes and a 409", async () => {
+    const invited = await invite({
+      email: "paulo.lima@northwind-audit.example",
+    })
+    expect(invited.status).toBe(409)
+    expect(await invited.json()).toEqual({ error: "auditor_already_invited" })
+    const active = await invite({
+      email: "ana.ribeiro@northwind-audit.example",
+    })
+    expect(active.status).toBe(409)
+    expect(await active.json()).toEqual({ error: "auditor_already_active" })
+  })
+
+  it("revokes with a 200 body of exactly { status: revoked }, and a repeat is a 404 with only a code", async () => {
+    const path = "/company/auditors/d0000000-0000-4000-8000-000000000001/revoke"
+    const first = await post(path)
+    expect(first.status).toBe(200)
+    expect(await first.json()).toEqual({ status: "revoked" })
+    const again = await post(path)
+    expect(again.status).toBe(404)
+    expect(await again.json()).toEqual({ error: "auditor_not_found" })
+    // A value that is not even an id is just as unknown.
+    const odd = await post("/company/auditors/not-an-id/revoke")
+    expect(odd.status).toBe(404)
+    expect(await code(odd)).toBe("auditor_not_found")
+    expect(db.auditors.map((a) => a.id)).toEqual([
+      "d0000000-0000-4000-8000-000000000002",
+      "d0000000-0000-4000-8000-000000000003",
+    ])
+  })
+
+  it("needs a bearer token, and answers a missing one before it changes anything", async () => {
+    const path = "/company/auditors/d0000000-0000-4000-8000-000000000001/revoke"
+    for (const [method, route, body] of [
+      ["GET", "/company/auditors", undefined],
+      ["POST", "/company/auditors", { email: "carla@audit.example" }],
+      ["POST", path, undefined],
+      ["GET", "/audit/access-log", undefined],
+      ["GET", "/me/status", undefined],
+    ] as const) {
+      const response = await send(method, route, body, false)
+      expect(response.status, `${method} ${route}`).toBe(401)
+      expect(await response.json()).toEqual({
+        error: "authentication_required",
+      })
+    }
+    expect(db.auditors).toHaveLength(3)
+  })
+
+  it("keeps amounts out of every new response", async () => {
+    const responses = [
+      await send("GET", "/company/auditors"),
+      await invite({ email: "carla@audit.example" }),
+      await invite({ email: "carla@audit.example" }),
+      await send("GET", "/audit/access-log?limit=100"),
+      await send("GET", "/me/status"),
+      await post(
+        "/company/auditors/d0000000-0000-4000-8000-000000000002/revoke",
+      ),
+    ]
+    for (const response of responses) {
+      expectNoAmount(await response.json())
+    }
+  })
+
+  it("answers a rate limit on these routes with the generic rate_limited, not a payments code", async () => {
+    scenarios.set("rate-limited")
+    const path = "/company/auditors/d0000000-0000-4000-8000-000000000001/revoke"
+    for (const [method, route, body] of [
+      ["GET", "/company/auditors", undefined],
+      ["POST", "/company/auditors", { email: "carla@audit.example" }],
+      ["POST", path, undefined],
+      ["GET", "/audit/access-log", undefined],
+      ["GET", "/me/status", undefined],
+    ] as const) {
+      const response = await send(method, route, body)
+      expect(response.status, `${method} ${route}`).toBe(429)
+      expect(response.headers.get("retry-after")).toBe("60")
+      expect(await response.json()).toEqual({ error: "rate_limited" })
+    }
+    expect(db.auditors).toHaveLength(3)
+  })
+
+  it("does not serve the old DELETE path any more", async () => {
+    const response = await send(
+      "DELETE",
+      "/company/auditors/d0000000-0000-4000-8000-000000000001",
+    ).catch(() => undefined)
+    // Unhandled: either refused outright or answered with something that is not a revoke.
+    if (response) expect(response.status).not.toBe(200)
+    expect(db.auditors).toHaveLength(3)
+  })
+})
+
 describe("paging", () => {
   it.each([
     "cursor=-1",
@@ -552,6 +695,8 @@ describe("paging", () => {
       "/company/payments",
       "/me/payments",
       "/company/people/amounts",
+      "/company/auditors",
+      "/audit/access-log",
     ]) {
       const response = await send("GET", `${path}?${query}`)
       expect(response.status).toBe(400)
