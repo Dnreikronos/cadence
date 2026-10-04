@@ -13,6 +13,7 @@ import { WhoCanSee } from "@/components/ui/who-can-see"
 import { isApiError, messageFor } from "@/lib/api"
 import { removalCopy } from "@/lib/auditors/copy"
 import {
+  canRetry,
   useAuditors,
   useInviteAuditor,
   useRevokeAuditor,
@@ -30,7 +31,8 @@ export function AuditorsScreen() {
   const [inviting, setInviting] = useState(false)
   const auditors = useAuditors()
 
-  const hasAuditor = auditors.data?.some((a) => a.status === "active") ?? false
+  const hasAuditor =
+    auditors.data?.rows.some((a) => a.status === "active") ?? false
 
   const inviteButton = (
     <button
@@ -84,17 +86,18 @@ function AuditorsBody({
 }) {
   if (auditors.isPending) return <AuditorsSkeleton />
   if (auditors.isError) {
-    const retryable = !isApiError(auditors.error) || auditors.error.isRetryable
     return (
       <ErrorState
         title="Couldn't load your auditors"
         description={messageFor(auditors.error)}
-        onRetry={retryable ? () => auditors.refetch() : undefined}
+        onRetry={
+          canRetry(auditors.error) ? () => auditors.refetch() : undefined
+        }
       />
     )
   }
 
-  const list = auditors.data
+  const { rows: list, truncated } = auditors.data
   if (list.length === 0) {
     return (
       <EmptyState
@@ -115,17 +118,33 @@ function AuditorsBody({
         {inviteButton}
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-line bg-surface">
-        <div
-          className={`hidden border-b border-line bg-surface-subtle px-4 py-2 text-label text-ink-muted uppercase md:grid ${rowColumns}`}
-        >
-          <span>Email</span>
-          <span>Status</span>
-          <span>Invited</span>
-          <span className="sr-only">Actions</span>
+      {truncated && (
+        <p role="status" className="text-ui text-ink-muted">
+          Showing the first {list.length} auditors. The rest are not listed
+          here.
+        </p>
+      )}
+
+      <div
+        role="table"
+        aria-label="Auditors"
+        className="overflow-hidden rounded-xl border border-line bg-surface"
+      >
+        <div role="rowgroup" className="hidden md:block">
+          <div
+            role="row"
+            className={`border-b border-line bg-surface-subtle px-4 py-2 text-label text-ink-muted uppercase md:grid ${rowColumns}`}
+          >
+            <span role="columnheader">Email</span>
+            <span role="columnheader">Status</span>
+            <span role="columnheader">Invited</span>
+            <span role="columnheader" className="sr-only">
+              Actions
+            </span>
+          </div>
         </div>
 
-        <ul>
+        <div role="rowgroup">
           {list.map((auditor) => (
             <AuditorListRow
               key={auditor.id}
@@ -133,7 +152,7 @@ function AuditorsBody({
               onRemove={() => onRemove(auditor)}
             />
           ))}
-        </ul>
+        </div>
       </div>
     </section>
   )
@@ -150,27 +169,30 @@ function AuditorListRow({
   const copy = removalCopy(auditor.status)
 
   return (
-    <li
+    <div
+      role="row"
       className={`flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-3 last:border-0 md:grid ${rowColumns}`}
     >
-      <span className="min-w-0 basis-full text-ui break-all text-ink md:basis-auto">
+      <span
+        role="cell"
+        className="min-w-0 basis-full text-ui break-all text-ink md:basis-auto"
+      >
         {auditor.email}
       </span>
-      <span>
+      <span role="cell">
         <ActivationPill activation={auditor.status} />
       </span>
-      <span className="text-ui text-ink-muted">
-        <span className="md:hidden">Invited </span>
+      <span role="cell" className="text-ui text-ink-muted">
+        <span className="md:sr-only">Invited </span>
         <time dateTime={auditor.invited_at}>
           {formatDate(auditor.invited_at)}
         </time>
       </span>
-      <span className="ml-auto flex items-center justify-end gap-1">
+      <span role="cell" className="ml-auto flex items-center justify-end gap-1">
         {auditor.status === "invite-expired" && (
           <button
             type="button"
             disabled={invite.isPending}
-            aria-label={`Invite again: ${auditor.email}`}
             onClick={() =>
               invite.mutate(auditor.email, {
                 onError: (error) => toast.error(messageFor(error)),
@@ -180,6 +202,7 @@ function AuditorListRow({
           >
             <RotateCw className="size-3.5" aria-hidden />
             {invite.isPending ? "Inviting…" : "Invite again"}
+            <span className="sr-only"> {auditor.email}</span>
           </button>
         )}
         <IconButton
@@ -189,7 +212,7 @@ function AuditorListRow({
           <Trash2 className="size-3.5" />
         </IconButton>
       </span>
-    </li>
+    </div>
   )
 }
 
@@ -244,7 +267,7 @@ function RemoveModal({
     onOpenChange(next)
   }
 
-  const retryable = isApiError(revoke.error) && revoke.error.isRetryable
+  const retryable = revoke.isError && canRetry(revoke.error)
 
   return (
     <Modal
@@ -276,7 +299,15 @@ function RemoveModal({
           type="button"
           disabled={revoke.isPending}
           onClick={() =>
-            revoke.mutate(auditor, { onSuccess: () => change(false) })
+            revoke.mutate(auditor, {
+              onSuccess: () => change(false),
+              // Already gone: nothing is left to confirm, and the hook says so.
+              onError: (error) => {
+                if (isApiError(error) && error.code === "auditor_not_found") {
+                  change(false)
+                }
+              },
+            })
           }
           className={buttonVariants({
             className: "bg-danger-fg text-white hover:bg-danger-fg/90",

@@ -4,9 +4,9 @@ import { useState } from "react"
 import { Modal } from "@/components/ui/modal"
 import { buttonVariants } from "@/components/ui/button"
 import { fieldClass } from "@/components/ui/field"
-import { isApiError, messageFor } from "@/lib/api"
+import { messageFor } from "@/lib/api"
 import { auditorSchema } from "@/lib/auditors/schema"
-import { useInviteAuditor } from "@/lib/queries/auditors"
+import { canRetry, useInviteAuditor } from "@/lib/queries/auditors"
 import { cn } from "@/lib/utils"
 
 export function InviteAuditorModal({
@@ -34,6 +34,7 @@ export function InviteAuditorModal({
 
   function submit(event: React.FormEvent) {
     event.preventDefault()
+    if (invite.isPending) return
     const parsed = auditorSchema.safeParse({ email })
     if (!parsed.success) {
       setValidation(parsed.error.issues[0].message)
@@ -44,7 +45,7 @@ export function InviteAuditorModal({
 
   const error =
     validation ?? (invite.isError ? messageFor(invite.error) : undefined)
-  const retryable = isApiError(invite.error) && invite.error.isRetryable
+  const retryable = invite.isError && canRetry(invite.error)
 
   return (
     <Modal
@@ -106,7 +107,7 @@ export function InviteAuditorModal({
           >
             {invite.isPending
               ? "Sending…"
-              : retryable && invite.isError
+              : retryable
                 ? "Try again"
                 : "Send invite"}
           </button>
