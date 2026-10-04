@@ -64,7 +64,8 @@ export function WhoCanSee({
           </PopoverDescription>
         </PopoverHeader>
         <p className="text-caption/normal text-ink-muted">
-          Cadence reads amounts only to prove transfers, and every read is
+          Cadence reads amounts to prove transfers and to answer reads and
+          exports by the company, the recipient and the auditor. Every read is
           logged.
         </p>
       </PopoverContent>
