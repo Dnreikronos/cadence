@@ -15,16 +15,20 @@ export function NotFoundView({
   className?: string
 }) {
   return (
-    <EmptyState
-      className={className}
-      icon={SearchX}
-      title="Page not found"
-      description="This page doesn't exist, or it isn't available to your account."
-      action={
-        <Link href={href} className={buttonVariants()}>
-          {label}
-        </Link>
-      }
-    />
+    <>
+      {/* The page has no heading of its own: the card's title is a paragraph. */}
+      <h1 className="sr-only">Page not found</h1>
+      <EmptyState
+        className={className}
+        icon={SearchX}
+        title="Page not found"
+        description="This page doesn't exist, or it isn't available to your account."
+        action={
+          <Link href={href} className={buttonVariants()}>
+            {label}
+          </Link>
+        }
+      />
+    </>
   )
 }
