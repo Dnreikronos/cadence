@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest"
 import { inviteFailure, signInErrorMessage } from "./sign-in-errors"
 
 describe("inviteFailure", () => {
-  it("lets a viewer who is already a member carry on to their area", () => {
-    expect(inviteFailure("invite_already_member")).toBeNull()
+  it("keeps a viewer who is already a member apart: that is its own message", () => {
+    expect(inviteFailure("invite_already_member")).toBe("invite_already_member")
+    expect(signInErrorMessage("invite_already_member")).toMatch(
+      /already belong to a company/i,
+    )
   })
 
   it("keeps the code of a known failure", () => {
@@ -33,6 +36,10 @@ describe("signInErrorMessage", () => {
 
   it("explains a session that belongs to no company", () => {
     expect(signInErrorMessage("no_company")).toMatch(/no company/i)
+  })
+
+  it("asks for a retry when the account lookup failed", () => {
+    expect(signInErrorMessage("lookup_failed")).toMatch(/try again/i)
   })
 
   it("explains an expired sign-in link", () => {

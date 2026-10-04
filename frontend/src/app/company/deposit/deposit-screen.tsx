@@ -1,15 +1,16 @@
 "use client"
 
+import { Wallet } from "lucide-react"
+import { EmptyState } from "@/components/ui/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ErrorState } from "@/components/ui/error-state"
-import { useDepositInfo } from "@/lib/deposit/queries"
+import { useWallet } from "@/lib/wallet/context"
 import { MakePrivateSection } from "./make-private-section"
 import { ReceiveSection } from "./receive-section"
 
 export function DepositScreen() {
-  const deposit = useDepositInfo()
+  const wallet = useWallet()
 
-  if (deposit.isPending) {
+  if (wallet.loading) {
     return (
       <div aria-busy className="max-w-3xl space-y-4">
         <span className="sr-only">Loading your wallet</span>
@@ -18,20 +19,21 @@ export function DepositScreen() {
       </div>
     )
   }
-  if (deposit.isError) {
+  if (wallet.status === "unavailable") {
     return (
-      <ErrorState
-        title="Couldn't load your wallet"
-        description="Check your connection and try again."
-        onRetry={() => deposit.refetch()}
+      <EmptyState
+        icon={Wallet}
+        title="Your company wallet isn't available yet"
+        description="Deposits need a wallet that can sign. It isn't set up in this environment yet."
+        className="max-w-3xl"
       />
     )
   }
 
   return (
     <div className="max-w-3xl space-y-4">
-      <ReceiveSection walletAddress={deposit.data.walletAddress} />
-      <MakePrivateSection info={deposit.data} />
+      <ReceiveSection walletAddress={wallet.address} />
+      <MakePrivateSection wallet={wallet.address} />
     </div>
   )
 }

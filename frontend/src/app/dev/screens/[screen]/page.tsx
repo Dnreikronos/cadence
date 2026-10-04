@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/app/page-header"
 import { DepositScreen } from "@/app/company/deposit/deposit-screen"
 import { PeopleScreen } from "@/app/company/people/people-screen"
 import { AuditorsScreen } from "@/app/company/auditors/auditors-screen"
+import { WalletProvider } from "@/lib/wallet/context"
 
 // Renders a company screen without a session, against the mock stores. The real
 // routes sit behind the role guard, which needs a local Supabase and an admin.
@@ -42,16 +43,22 @@ export default async function ScreenPreview({
   const { title, description, Screen } = screens[screen as keyof typeof screens]
 
   return (
-    <AppShell
-      role="admin"
-      company={{ name: "Solaris" }}
-      email="ana@solaris.test"
-      balance={{ amount: 84000, state: "revealed" }}
-    >
-      <div className="space-y-6">
-        <PageHeader eyebrow="Company" title={title} description={description} />
-        <Screen />
-      </div>
-    </AppShell>
+    <WalletProvider role="admin">
+      <AppShell
+        role="admin"
+        company={{ name: "Solaris" }}
+        email="ana@solaris.test"
+        balance={{ amount: 84000, state: "revealed" }}
+      >
+        <div className="space-y-6">
+          <PageHeader
+            eyebrow="Company"
+            title={title}
+            description={description}
+          />
+          <Screen />
+        </div>
+      </AppShell>
+    </WalletProvider>
   )
 }

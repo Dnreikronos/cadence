@@ -102,6 +102,12 @@ that configuration, with the explicit `mock` mode as the opt-in, so a typo in a
 Supabase variable also turns it on: check the env before sharing a deploy. Sign-out
 clears the cookie. A reload resets the mock data.
 
+The company people list follows the API mode, not whether Supabase is configured
+(`src/lib/people/repository.ts`): in mock mode the people are an in-memory list with
+the mock service's ids, even with Supabase configured, because the amounts and invites
+go to the mock service, which only knows those ids; in real mode they are the Supabase
+`people` rows, and real mode without Supabase shows "Sign-in is not configured".
+
 ## Wallet
 
 Screens sign through `useWallet()` (`src/lib/wallet`): `{ status, address, signer,
@@ -122,6 +128,19 @@ in `src/lib/queries/client.ts` (30 s stale time, one retry except for a 4xx
 cached per viewer and cleared on sign-out and when a sign-in page mounts. A mutation that
 moves money must call `invalidateBalances(queryClient)` so the sidebar updates.
 
+## Activation
+
+`/activate` (recipient) is one progress screen: create the wallet, sign the
+key-derivation message and `api.keys.enroll` it (`key_already_enrolled` counts as
+done), then `api.accounts.configure` and sign it. The steps are the three flags of
+`api.me.status()`, so it resumes where it stopped, and "Try again" re-reads the status
+and runs only what is not done. `/me` shows its content only once the status is
+complete and sends the rest to `/activate`. The key-derivation signature is
+secret: it lives in one local variable for the enroll call, never in state, a
+mutation, a log, a URL or an error. Wallet creation in real mode waits for #78;
+the screen says so. Code: `src/lib/activation/` (state machine, steps) and
+`src/lib/queries/activation.ts`.
+
 ## Route guard
 
 `src/middleware.ts` refreshes the Supabase session on every request and guards
@@ -136,11 +155,12 @@ role:
 | `/audit/*`   | `auditor`   |
 
 Every session belongs to a company: the middleware signs out a session that has
-no membership (for example, after a removal) and sends it to
-`/sign-in?error=no_company`. A signed-out visit goes to `/sign-in?next=<path>`,
-and a member with another role goes to their own area. If Supabase is
-unreachable or unconfigured, guarded areas are treated as signed out. The rules
-live in `src/lib/auth/guard.ts`.
+no membership (for example, after a removal), on this device only
+(`scope: "local"`), and sends it to `/sign-in?error=no_company`. A signed-out
+visit goes to `/sign-in?next=<path and query>`, and a member with another role
+goes to their own area. If Supabase is unreachable or unconfigured, or the
+membership lookup fails, guarded areas are treated as signed out (nobody is
+signed out over a failed lookup). The rules live in `src/lib/auth/guard.ts`.
 
 Row-level security is still the authorization boundary: the middleware only
 decides which page to show.
@@ -148,9 +168,14 @@ decides which page to show.
 ## Sign-in and sign-up
 
 There are no passwords. Each email carries a 6-digit code and a link, from the
-templates in `supabase/templates/`. The code is entered on the form; the link
-lands on `/auth/confirm`, which verifies its `token_hash` and works in any
+templates in `supabase/templates/`. The code is entered on the form. The link
+lands on `/auth/confirm`, which only shows a "Continue" button: the token is
+spent by that button's POST to `/auth/confirm/verify` (same-origin only), so a
+mail scanner that opens the link does not use it up, and it works in any
 browser. Both paths end in `completeSignIn` (`src/lib/auth/complete-sign-in.ts`).
+The confirm page sets `Referrer-Policy: same-origin`, not `no-referrer`: Chrome
+sends `Origin: null` with a form POST under the latter, which the verify route
+refuses.
 
 Accounts exist only to belong to a company, and there are two ways to get one:
 
@@ -160,11 +185,38 @@ Accounts exist only to belong to a company, and there are two ways to get one:
   Confirming the email accepts the invite (`accept_invite`) and lands on the
   area for the role.
 
-`/sign-in` without an invite never creates an account; an unknown email is told
-to create a company or use its invite. If a confirmation ends without a
-membership (an expired invite, for instance), the session is signed out again
-and the form shows why (`?error=<code>`, mapped in
-`src/lib/auth/sign-in-errors.ts`).
+`/sign-in` without an invite never creates an account, and it never reveals
+whether an email has one: an unknown email gets the same "code sent" step (no
+mail goes out, so any code fails with the generic message). "No company on this
+email" is shown only after a valid code from an account that has no membership.
+If a confirmation ends without a membership (an expired invite, for instance),
+the session is signed out again and the form shows why (`?error=<code>`, mapped
+in `src/lib/auth/sign-in-errors.ts`). A member who opens an invite is not
+dropped: they land on a page saying they already belong to a company, with a
+sign-out that returns to the invite. A failed membership lookup shows the form
+with a retry message, never a 500.
+
+Supabase rate-limits a repeat request per address only for addresses that have
+an account (a 429 `over_email_send_rate_limit`, where an unknown address still
+answers `otp_disabled`), so that 429 is shown as the same code step too: only the
+per-IP `over_request_rate_limit` says "too many attempts".
+
+Known and accepted limits of this design:
+
+- **Login CSRF through someone else's emailed link.** The confirm page cannot say
+  whose account the link signs into (the token is not read until the POST), so a
+  person who is handed an attacker's own valid link and presses Continue is signed
+  into the attacker's account. The origin check stops other sites posting for them,
+  not this.
+- **Enumeration timing.** An unknown address answers a little faster than one that
+  is mailed. Supabase's own rate limits are the control; nothing here tries to equalise it.
+
+The Sign out menu item ends this device's session only; "Sign out of all devices"
+(`signOutEverywhere`) ends them all. Both clear the `sb-*` cookies even if Supabase
+cannot be reached. Every response carries `frame-ancestors 'none'` and
+`X-Frame-Options: DENY` (`src/lib/security-headers.ts`); the confirm page and the
+verify route are `no-store`. Guarded routes must never carry a secret in their
+query string: it goes into `?next=` (minus Next's own `_rsc` and `__next*`).
 
 The invite token and company name ride through sign-in as form fields and
 inside the emailed link, so they survive opening the email on another device.

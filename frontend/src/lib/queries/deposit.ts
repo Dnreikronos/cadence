@@ -1,0 +1,99 @@
+"use client"
+
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { toast } from "sonner"
+import { api } from "@/lib/api"
+import {
+  MakePrivateController,
+  SUBMISSION_KIND,
+  type Deps,
+} from "@/lib/deposit/controller"
+import { readPublicUsdc } from "@/lib/solana/balances"
+import {
+  clearSubmission,
+  readSubmission,
+  recordSubmission,
+} from "@/lib/submissions"
+import { useSignAndConfirm } from "@/lib/wallet/context"
+import { invalidateBalances } from "./invalidate"
+import { queryKeys } from "./keys"
+
+export type { MakePrivateState } from "@/lib/deposit/controller"
+
+// The company's USDC that anyone can see on-chain, in base units. Money arrives
+// from outside the app, so it is refreshed while the screen is open.
+export function usePublicUsdc(wallet: string) {
+  return useQuery({
+    queryKey: queryKeys.deposit.publicUsdc(wallet),
+    queryFn: ({ signal }) => readPublicUsdc(wallet, signal),
+    enabled: wallet !== "",
+    refetchInterval: 20_000,
+  })
+}
+
+// The private balance, same answer as the sidebar's but keyed by the wallet.
+export function useCompanyBalance(wallet: string) {
+  return useQuery({
+    queryKey: queryKeys.balance.companyWallet(wallet),
+    queryFn: ({ signal }) => api.company.balance({ signal }),
+    enabled: wallet !== "",
+  })
+}
+
+// Make a deposit private: wrap, sign, then apply the pending credit. Leaving the
+// screen stops the flow before anything more is sent. A wrap already handed to
+// the network is recorded, and checked when the screen comes back, before
+// another can be sent.
+export function useMakePrivate(wallet: string) {
+  const queryClient = useQueryClient()
+  const signAndConfirm = useSignAndConfirm()
+  const deps = useRef<Deps>(null as never)
+  deps.current = {
+    wallet,
+    api,
+    signAndConfirm,
+    refresh: () => {
+      void invalidateBalances(queryClient)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.deposit.all })
+    },
+    toast: (message) => toast.success(message),
+    store: {
+      read: () => readSubmission(SUBMISSION_KIND),
+      record: (record) => recordSubmission(record),
+      clear: () => clearSubmission(SUBMISSION_KIND),
+    },
+  }
+  const [controller] = useState(
+    () => new MakePrivateController(() => deps.current),
+  )
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    controller.getState,
+    controller.getState,
+  )
+
+  useEffect(() => {
+    controller.start()
+    return () => controller.dispose()
+  }, [controller])
+
+  // A sent wrap is not undone by leaving: say so before the tab closes.
+  const inFlight = controller.inFlight
+  useEffect(() => {
+    if (!inFlight) return
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [inFlight])
+
+  return {
+    state,
+    // `units` is an integer base-unit string, already validated.
+    deposit: (units: string) => controller.deposit(units),
+    applyPending: () => controller.applyPending(),
+    retry: () => controller.retry(),
+    check: () => controller.check(),
+    dismiss: () => controller.dismiss(),
+  }
+}

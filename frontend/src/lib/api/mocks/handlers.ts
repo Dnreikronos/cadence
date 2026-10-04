@@ -182,6 +182,8 @@ async function confirmHandler(request: Request, kind: string) {
 // negative: a confirm that would is refused, and changes nothing.
 function applyEffect(kind: string, wallet: string, amount?: bigint) {
   if (kind === "wrap" && amount) {
+    if (amount > db.publicUsdc) return fail(409, "insufficient_usdc")
+    db.publicUsdc -= amount
     db.company.pending += amount
   } else if (kind === "accounts/configure" && wallet !== COMPANY_WALLET) {
     // Configuring needs a linked wallet, so it links one too. The company's
@@ -362,6 +364,11 @@ export const handlers = [
     if (error) return error
     if (scenarios.has("setup-required") && !data.setup) {
       return fail(409, "confidential_setup_required")
+    }
+    // Like the real service, refuse what the USDC account cannot cover. Confirm
+    // checks again, since the balance can fall in between.
+    if (BigInt(data.amount) > db.publicUsdc) {
+      return fail(409, "insufficient_usdc")
     }
     const p = prepared(data.company_wallet, 0)
     remember("wrap", p, data.company_wallet, BigInt(data.amount))
@@ -657,8 +664,7 @@ export const handlers = [
       const { data, error } = await parse(request, s.setAmountRequestSchema)
       if (error) return error
       const id = String(params.personId)
-      if (!seedPeople.some((p) => p.id === id))
-        return fail(404, "person_not_found")
+      if (!db.people.has(id)) return fail(404, "person_not_found")
       db.amounts.set(id, BigInt(data.amount))
       return HttpResponse.json({ person_id: id, amount: data.amount })
     },
@@ -668,7 +674,7 @@ export const handlers = [
     async ({ request, params }) => {
       const stopped = await guard(request, "admin")
       if (stopped) return stopped
-      if (!seedPeople.some((p) => p.id === String(params.personId))) {
+      if (!db.people.has(String(params.personId))) {
         return fail(404, "person_not_found")
       }
       return HttpResponse.json({

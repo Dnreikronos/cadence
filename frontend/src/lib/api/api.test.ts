@@ -1,4 +1,12 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from "vitest"
 import { ZodError } from "zod"
 import { createApiClient } from "./client"
 import { ApiError, ContractError, messageFor } from "./errors"
@@ -78,6 +86,8 @@ describe("contract validation", () => {
   })
 
   it("accepts exactly 2^48-1 base units and refuses one more", async () => {
+    // The wallet has to hold what it wraps, so give it the cap.
+    db.publicUsdc = 281474976710655n
     const ok = await api.wrap.prepare({
       company_wallet: COMPANY_WALLET,
       amount: "281474976710655",
@@ -344,6 +354,11 @@ describe("prepare, sign, confirm", () => {
   })
 
   it("enrolls a key once", async () => {
+    // The seed has the demo recipient enrolled already.
+    expect(await caught(api.keys.enroll(ME_WALLET, SIG))).toMatchObject({
+      code: "key_already_enrolled",
+    })
+    resetAccountStatus()
     await api.keys.enroll(ME_WALLET, SIG)
     expect(await caught(api.keys.enroll(ME_WALLET, SIG))).toMatchObject({
       code: "key_already_enrolled",
@@ -980,7 +995,18 @@ describe("account status", () => {
     })
   }
 
-  it("starts with every step undone", async () => {
+  // The seed is an activated recipient: these tests walk the steps from the start.
+  beforeEach(() => resetAccountStatus())
+
+  it("seeds an activated recipient, and resetAccountStatus undoes every step", async () => {
+    resetDb()
+    expect(await api.me.status()).toEqual({
+      wallet_linked: true,
+      key_enrolled: true,
+      account_configured: true,
+      pending_credits: false,
+    })
+    resetAccountStatus()
     expect(await api.me.status()).toEqual(none)
   })
 

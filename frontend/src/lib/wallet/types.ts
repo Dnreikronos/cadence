@@ -35,7 +35,11 @@ export function unavailableWallet(reason: string, loading = false): Wallet {
     loading,
     reason,
     address: "",
-    signer: { address: "", signTransaction: async () => fail() },
+    signer: {
+      address: "",
+      signTransaction: async () => fail(),
+      signMessage: async () => fail(),
+    },
     submit: async () => fail(),
   }
 }

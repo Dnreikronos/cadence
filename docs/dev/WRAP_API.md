@@ -16,10 +16,10 @@ and slots cannot be replaced or cleared. Only the migration administrator may
 remove arbitrary records. The cleanup migration below grants only bounded
 removal of expired unsigned requests.
 
-| Environment | Value |
-|---|---|
-| `PROOF_SUPABASE_URL` | Project HTTPS origin; loopback HTTP allowed for local Supabase |
-| `PROOF_SUPABASE_API_KEY` | Project public anon/publishable API key for the gateway |
+| Environment              | Value                                                                                             |
+| ------------------------ | ------------------------------------------------------------------------------------------------- |
+| `PROOF_SUPABASE_URL`     | Project HTTPS origin; loopback HTTP allowed for local Supabase                                    |
+| `PROOF_SUPABASE_API_KEY` | Project public anon/publishable API key for the gateway                                           |
 | `PROOF_WRAP_SERVICE_JWT` | Server-only, project-signed JWT with `role: cadence_wrap_service` and a deployment-managed expiry |
 
 Provision the restricted JWT outside the proof service using the project's
@@ -77,18 +77,18 @@ authentication or wallet-signature verification.
 `POST /wrap` accepts an integer base-unit string, with six USDC decimals:
 
 ```json
-{"company_wallet":"<wallet public key>","amount":"1000000"}
+{ "company_wallet": "<wallet public key>", "amount": "1000000" }
 ```
 
 For an unconfigured destination, include `setup`:
 
 ```json
 {
-  "company_wallet":"<wallet public key>",
-  "amount":"1000000",
+  "company_wallet": "<wallet public key>",
+  "amount": "1000000",
   "setup": {
-    "pubkey_validity_proof":"<base64 PubkeyValidityProofData bytes>",
-    "decryptable_zero_balance":"<base64 PodAeCiphertext bytes>"
+    "pubkey_validity_proof": "<base64 PubkeyValidityProofData bytes>",
+    "decryptable_zero_balance": "<base64 PodAeCiphertext bytes>"
   }
 }
 ```
@@ -118,15 +118,15 @@ The response contains:
 
 ```json
 {
-  "request_id":"<64-character request hash>",
-  "transaction":"<base64 unsigned v0 wire transaction>",
-  "transaction_version":0,
-  "required_signers":["<company wallet>"],
-  "destination":"<Token-2022 ATA>",
-  "mint":"CGL4U4VC8arAEUDxLh7c6K4rJnZr1T6faK9QQRn2sYmb",
-  "recent_blockhash":"<blockhash>",
-  "last_valid_block_height":123,
-  "deposit_state":"pending_after_confirmation"
+  "request_id": "<64-character request hash>",
+  "transaction": "<base64 unsigned v0 wire transaction>",
+  "transaction_version": 0,
+  "required_signers": ["<company wallet>"],
+  "destination": "<Token-2022 ATA>",
+  "mint": "CGL4U4VC8arAEUDxLh7c6K4rJnZr1T6faK9QQRn2sYmb",
+  "recent_blockhash": "<blockhash>",
+  "last_valid_block_height": 123,
+  "deposit_state": "pending_after_confirmation"
 }
 ```
 
@@ -146,7 +146,10 @@ before creating another deposit to avoid depositing twice.
 `POST /wrap/confirm`:
 
 ```json
-{"request_id":"<returned request ID>","signature":"<submitted transaction signature>"}
+{
+  "request_id": "<returned request ID>",
+  "signature": "<submitted transaction signature>"
+}
 ```
 
 The service reads the finalized base64 transaction with
@@ -160,8 +163,7 @@ longer available. A failed database write does not return success.
 Errors are fixed `{ "error": "<code>" }` objects without amounts. Malformed
 requests return 400; unknown request IDs return 404; missing setup, insufficient
 USDC, unavailable confidential credits, nonfinalized/failed/mismatched
-transactions and conflicting receipts return 409; RPC/storage outages return
-503. `transaction_not_finalized` can be retried. `confidential_setup_required`
+transactions and conflicting receipts return 409; RPC/storage outages return 503. `transaction_not_finalized` can be retried. `confidential_setup_required`
 requires activation artifacts, not a server-generated viewing key.
 
 Assembly uses public data and does not require a user JWT. Signing the returned

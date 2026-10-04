@@ -15,7 +15,25 @@ import {
 // Cadence runs the proof service and holds viewing keys (ADR B17), so it is always named.
 // `hasAuditor` undefined means not known yet: the longer sentence is the safe one,
 // never "no auditor".
-export function whoCanSee(viewerRole: Role, hasAuditor: boolean | undefined) {
+// `scope` is what the amount is: a payment has a counterparty who reads it too,
+// a balance is the holder's own (and Cadence's, and whoever the holder designated).
+export function whoCanSee(
+  viewerRole: Role,
+  hasAuditor: boolean | undefined,
+  scope: "payment" | "balance" = "payment",
+) {
+  if (scope === "balance" && viewerRole !== "auditor") {
+    const own = [
+      viewerRole === "admin" ? "Your company" : "You",
+      ...(hasAuditor === undefined
+        ? ["anyone your company has designated"]
+        : hasAuditor
+          ? ["your auditor"]
+          : []),
+      "Cadence",
+    ]
+    return `${list(own)} can read this amount. The public cannot: on-chain it is ciphertext.`
+  }
   const readers = {
     admin: [
       "Your company",
@@ -49,20 +67,31 @@ function list(items: string[]) {
 export function WhoCanSee({
   viewerRole,
   hasAuditor,
+  scope = "payment",
   note,
   className,
+  label = "Who can see this amount",
+  description,
+  cadenceLine = "Cadence reads amounts to prove transfers and to answer reads and exports by the company, the recipient and the auditor. Every read is logged.",
 }: {
   viewerRole: Role
   // Undefined while it is not known whether an auditor exists.
   hasAuditor: boolean | undefined
+  // What the amount is: a balance has no counterparty reading it.
+  scope?: "payment" | "balance"
   // An extra sentence, for a place where some amounts are an exception.
   note?: string
   className?: string
+  // For a page that shows no amount of its own: its own label and texts.
+  label?: string
+  description?: string
+  // Replaces the sentence about what Cadence reads.
+  cadenceLine?: string
 }) {
   return (
     <Popover>
       <PopoverTrigger
-        aria-label="Who can see this amount"
+        aria-label={label}
         className={cn(
           "inline-grid size-6 shrink-0 place-items-center rounded-md text-ink-muted transition-colors duration-150 outline-none hover:bg-canvas hover:text-ink focus-visible:ring-2 focus-visible:ring-ink/30 data-popup-open:bg-canvas data-popup-open:text-ink",
           className,
@@ -74,14 +103,10 @@ export function WhoCanSee({
         <PopoverHeader>
           <PopoverTitle>Who can see this</PopoverTitle>
           <PopoverDescription>
-            {whoCanSee(viewerRole, hasAuditor)}
+            {description ?? whoCanSee(viewerRole, hasAuditor, scope)}
           </PopoverDescription>
         </PopoverHeader>
-        <p className="text-caption/normal text-ink-muted">
-          Cadence reads amounts to prove transfers and to answer reads and
-          exports by the company, the recipient and the auditor. Every read is
-          logged.
-        </p>
+        <p className="text-caption/normal text-ink-muted">{cadenceLine}</p>
         {note && <p className="text-caption/normal text-ink-muted">{note}</p>}
       </PopoverContent>
     </Popover>

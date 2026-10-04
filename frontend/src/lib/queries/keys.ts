@@ -33,11 +33,16 @@ export const queryKeys = {
       [...balance, "company", viewer.company, viewer.email] as const,
     me: (viewer: ViewerScope) =>
       [...balance, "me", viewer.company, viewer.email] as const,
+    // The company balance as the deposit screen reads it, keyed by the wallet it
+    // belongs to. Under `all`, so `invalidateBalances` refreshes it too.
+    companyWallet: (wallet: string) =>
+      [...balance, "company-wallet", wallet] as const,
   },
   // The public USDC the company holds and can make private.
   deposit: {
     all: deposit,
-    info: () => [...deposit, "info"] as const,
+    publicUsdc: (wallet: string) =>
+      [...deposit, "public-usdc", wallet] as const,
   },
   payments: {
     all: payments,
@@ -63,7 +68,8 @@ export const queryKeys = {
   // What the signed-in recipient still has to do before they can be paid.
   status: {
     all: status,
-    me: () => [...status, "me"] as const,
+    me: (viewer: ViewerScope) =>
+      [...status, "me", viewer.company, viewer.email] as const,
   },
   // Receipts are built from payments, but cached on their own.
   receipts: {

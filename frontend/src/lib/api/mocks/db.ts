@@ -198,6 +198,9 @@ function seed() {
     counter: 0,
     role: null as "admin" | "recipient" | "auditor" | null,
     company: { available: 84_000_000_000n, pending: 0n } as Ledger,
+    // Plain USDC in the company wallet, read from the chain rather than the service.
+    // A confirmed wrap spends it.
+    publicUsdc: 12_500_000_000n,
     me: { available: 8_000_000_000n, pending: 0n } as Ledger,
     payments,
     amounts: new Map<string, bigint>([
@@ -206,6 +209,9 @@ function seed() {
       [seedPeople[2].id, 6_300_000_000n],
       [seedPeople[3].id, 9_500_000_000n],
     ]),
+    // Who the service accepts as a person of the company. The real one asks the
+    // people table, which a screen's own mock fills through `registerPerson`.
+    people: new Set<string>(seedPeople.map((person) => person.id)),
     requests: new Map<string, MockRequest>(),
     runs: new Map<
       string,
@@ -217,12 +223,14 @@ function seed() {
       }
     >(),
     runKeys: new Map<string, string>(),
-    enrolled: new Set<string>(),
+    // The demo recipient starts activated, so a page reload does not send every
+    // recipient screen back to /activate; `resetAccountStatus` makes a new one.
+    enrolled: new Set<string>([ME_WALLET]),
     // The account steps GET /me/status reports besides `enrolled`. The
     // recipient's wallet is linked by its enrollment or by its configure
     // confirm, whichever comes first, and the account configured by the latter.
-    walletLinked: false,
-    accountConfigured: false,
+    walletLinked: true,
+    accountConfigured: true,
     auditors: seedAuditors(),
     accessLog: seedAccessLog(),
   }
@@ -241,6 +249,10 @@ export function resetAccountStatus() {
   db.enrolled.clear()
   db.walletLinked = false
   db.accountConfigured = false
+}
+
+export function registerPerson(id: string) {
+  db.people.add(id)
 }
 
 export function nextId() {

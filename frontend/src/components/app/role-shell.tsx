@@ -1,9 +1,13 @@
 "use client"
 
+import { useMemo } from "react"
+import { doneFromStatus, isActivated } from "@/lib/activation/machine"
 import type { Role } from "@/lib/auth/guard"
 import { useShellBalance } from "@/lib/queries/balance"
+import { useAccountStatus } from "@/lib/queries/status"
 import { WalletProvider } from "@/lib/wallet/context"
 import { AppShell, type ShellCompany } from "./app-shell"
+import { ViewerScopeProvider } from "./viewer-scope"
 
 // The signed-in shell with its client-side data: the balance in the sidebar and the
 // wallet every screen signs with. The role layouts render this with what the server resolved.
@@ -18,12 +22,30 @@ export function RoleShell({
   email: string
   children: React.ReactNode
 }) {
-  const balance = useShellBalance(role, { email, company: company.name })
+  const viewer = useMemo(
+    () => ({ email, company: company.name }),
+    [email, company.name],
+  )
+  // A recipient's balance cannot be read before their account is set up, and reading
+  // it anyway is an error chip and an audit row. This is the same query, and so the
+  // same single request, as the one the /me gate and /activate read.
+  const status = useAccountStatus(viewer, role === "recipient")
+  const activated =
+    role !== "recipient" ||
+    (status.data !== undefined && isActivated(doneFromStatus(status.data)))
+  const balance = useShellBalance(role, viewer, activated)
   return (
     <WalletProvider role={role}>
-      <AppShell role={role} company={company} email={email} balance={balance}>
-        {children}
-      </AppShell>
+      <ViewerScopeProvider viewer={viewer}>
+        <AppShell
+          role={role}
+          company={company}
+          email={email}
+          balance={activated ? balance : undefined}
+        >
+          {children}
+        </AppShell>
+      </ViewerScopeProvider>
     </WalletProvider>
   )
 }

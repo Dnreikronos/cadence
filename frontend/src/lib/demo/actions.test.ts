@@ -7,7 +7,8 @@ const config = vi.hoisted(() => ({
 }))
 const store = vi.hoisted(() => ({ set: vi.fn(), delete: vi.fn() }))
 const requestHeaders = vi.hoisted(() => ({ current: new Headers() }))
-const supabaseSignOut = vi.hoisted(() => vi.fn())
+// Like Supabase's, it answers { error }: signOut now reads it.
+const supabaseSignOut = vi.hoisted(() => vi.fn(async () => ({ error: null })))
 const redirect = vi.hoisted(() =>
   vi.fn((to: string) => {
     throw new Error(`redirect:${to}`)
@@ -41,7 +42,7 @@ vi.mock("next/headers", () => ({
 vi.mock("next/navigation", () => ({ redirect }))
 
 import { signOut } from "@/lib/auth/actions"
-import { signInAsDemo } from "./actions"
+import { signInAsDemo, signInAsNewRecipient } from "./actions"
 
 const form = (fields: Record<string, string>) => {
   const data = new FormData()
@@ -130,6 +131,35 @@ describe("signInAsDemo", () => {
     await expect(signInAsDemo(form({ role: "admin" }))).rejects.toThrow(
       "redirect:/sign-in",
     )
+    expect(store.set).not.toHaveBeenCalled()
+  })
+})
+
+describe("signInAsNewRecipient", () => {
+  it("signs in as the recipient with the same cookie rules, and opens activation fresh", async () => {
+    requestHeaders.current = new Headers({ "x-forwarded-proto": "https" })
+    await expect(signInAsNewRecipient()).rejects.toThrow(
+      "redirect:/activate?fresh=1",
+    )
+    expect(store.set).toHaveBeenCalledWith(
+      "cadence-demo-role",
+      "recipient",
+      expect.objectContaining({
+        httpOnly: true,
+        sameSite: "lax",
+        secure: true,
+        path: "/",
+      }),
+    )
+  })
+
+  it.each([
+    ["Supabase is configured", { supabaseConfigured: true }],
+    ["the API is real", { mode: "real" }],
+    ["the cluster is mainnet", { isMainnet: true }],
+  ])("sets nothing when %s", async (_, change) => {
+    Object.assign(config, change)
+    await expect(signInAsNewRecipient()).rejects.toThrow("redirect:/sign-in")
     expect(store.set).not.toHaveBeenCalled()
   })
 })
