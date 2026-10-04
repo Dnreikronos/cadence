@@ -1,5 +1,5 @@
 use super::{
-    runs::{self, RunResponse, RunState},
+    runs::{self, ItemError, RunResponse, RunState},
     runs_confirm,
     transfer::proof_error,
 };
@@ -170,12 +170,37 @@ pub(super) async fn retry(
     if !state.limits.wallet(wallet) {
         return Err(AppError::TransferRateLimited);
     }
-    if run
+    let mut expired = HashSet::new();
+    if run.payments.iter().any(|p| p.status == Status::Prepared) {
+        state.devnet().await?;
+        let height = state.rpc.finalized_block_height().await?;
+        for p in run.payments.iter().filter(|p| p.status == Status::Prepared) {
+            let last = u64::try_from(p.last_valid_block_height.ok_or(AppError::RunUnavailable)?)
+                .map_err(|_| AppError::RunUnavailable)?;
+            if height > last {
+                expired.insert(p.position);
+            }
+        }
+    }
+    if run.payments.iter().any(|p| {
+        p.status == Status::Prepared
+            && !positions.contains(&p.position)
+            && !expired.contains(&p.position)
+    }) {
+        return Err(AppError::Conflict("outstanding_payments"));
+    }
+    let mut errors = vec![];
+    let mut unresolved = HashSet::new();
+    for p in run
         .payments
         .iter()
-        .any(|p| p.status == Status::Prepared && !positions.contains(&p.position))
+        .filter(|p| p.status == Status::Prepared && !positions.contains(&p.position))
     {
-        return Err(AppError::Conflict("outstanding_payments"));
+        unresolved.insert((p.position, p.attempt));
+        errors.push(ItemError {
+            position: p.position,
+            error: "transaction_history_unavailable",
+        });
     }
     for item in &request.payments {
         let p = run
@@ -184,14 +209,36 @@ pub(super) async fn retry(
             .find(|p| p.position == item.position)
             .ok_or(AppError::BadRequest("invalid_payment"))?;
         if p.status == Status::Prepared {
-            let sig = item
-                .signature
-                .as_deref()
-                .ok_or(AppError::Conflict("original_signature_required"))?;
-            runs_confirm::reconcile(&state, &user, &run, item.position, sig, true).await?;
+            let result = match item.signature.as_deref() {
+                Some(sig) => {
+                    runs_confirm::reconcile(&state, &user, &run, item.position, sig, true).await
+                }
+                None if expired.contains(&p.position) => {
+                    Err(AppError::Conflict("transaction_history_unavailable"))
+                }
+                None => return Err(AppError::Conflict("original_signature_required")),
+            };
+            match result {
+                Ok(()) => {}
+                Err(AppError::Conflict("transaction_history_unavailable")) => {
+                    unresolved.insert((p.position, p.attempt));
+                    errors.push(ItemError {
+                        position: p.position,
+                        error: "transaction_history_unavailable",
+                    });
+                }
+                Err(error) => return Err(error),
+            }
         }
     }
     run = service.runs.get(&user, &id).await?;
+    if run
+        .payments
+        .iter()
+        .any(|p| p.status == Status::Prepared && !unresolved.contains(&(p.position, p.attempt)))
+    {
+        return Err(AppError::Conflict("transaction_not_finalized"));
+    }
     let mut entries = vec![];
     for item in &request.payments {
         let p = run
@@ -203,7 +250,7 @@ pub(super) async fn retry(
             continue;
         }
         if p.status == Status::Prepared {
-            return Err(AppError::Conflict("transaction_not_finalized"));
+            continue;
         }
         entries.push(Entry {
             position: p.position,
@@ -212,15 +259,17 @@ pub(super) async fn retry(
             attempt: p.attempt,
         });
     }
+    let rebuilt = entries.iter().map(|p| p.position).collect::<HashSet<_>>();
     if entries.is_empty() {
-        return Ok(Json(runs::response(run, false)));
+        return Ok(Json(runs::retry_response(run, &rebuilt, errors)));
     }
     entries.sort_by_key(|p| p.position);
     let sender = runs::address(&run.sender)?;
     let payments = build(&state, &user, wallet, sender, aes, entries).await?;
-    Ok(Json(runs::response(
+    Ok(Json(runs::retry_response(
         service.runs.retry(&user, &id, &payments).await?,
-        true,
+        &rebuilt,
+        errors,
     )))
 }
 

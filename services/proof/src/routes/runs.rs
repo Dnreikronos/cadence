@@ -16,7 +16,7 @@ use axum::{
 };
 use serde::Serialize;
 use solana_address::Address;
-use std::{str::FromStr, sync::Arc};
+use std::{collections::HashSet, str::FromStr, sync::Arc};
 
 #[derive(Clone)]
 pub(super) struct RunState {
@@ -174,6 +174,21 @@ pub(super) fn response(run: Run, transactions: bool) -> RunResponse {
             .collect(),
         errors: vec![],
     }
+}
+pub(super) fn retry_response(
+    run: Run,
+    rebuilt: &HashSet<i16>,
+    errors: Vec<ItemError>,
+) -> RunResponse {
+    let mut response = response(run, true);
+    for p in &mut response.payments {
+        if !rebuilt.contains(&p.position) {
+            p.transaction = None;
+            p.last_valid_block_height = None;
+        }
+    }
+    response.errors = errors;
+    response
 }
 pub(super) fn error_code(error: &AppError) -> &'static str {
     match error {
