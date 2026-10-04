@@ -84,6 +84,42 @@ describe("POST /auth/confirm/verify", () => {
     expect(verifyOtp).not.toHaveBeenCalled()
   })
 
+  it("refuses an Origin on the same host but another port or scheme", async () => {
+    for (const origin of ["http://localhost:3001", "https://localhost:3000"]) {
+      const response = await post(
+        { token_hash: "abc", type: "email" },
+        { origin },
+      )
+      expect(response.status, origin).toBe(403)
+    }
+    expect(verifyOtp).not.toHaveBeenCalled()
+  })
+
+  it("answers 400, not a 500, to a body that is not a form", async () => {
+    const response = await POST(
+      new NextRequest("http://localhost:3000/auth/confirm/verify", {
+        method: "POST",
+        headers: {
+          host: "localhost:3000",
+          origin: "http://localhost:3000",
+          "content-type": "application/json",
+        },
+        body: '{"token_hash":"abc"}',
+      }),
+    )
+    expect(response.status).toBe(400)
+    expect(verifyOtp).not.toHaveBeenCalled()
+  })
+
+  it("lets no cache keep any of its answers", async () => {
+    const ok = await post({ token_hash: "abc", type: "email" })
+    const refused = await post({}, { origin: "https://evil.example" })
+    const expired = await post({ type: "email" })
+    for (const response of [ok, refused, expired]) {
+      expect(response.headers.get("cache-control")).toBe("no-store")
+    }
+  })
+
   it.each([
     ["no token", { type: "email" }],
     ["an empty token", { token_hash: "", type: "email" }],

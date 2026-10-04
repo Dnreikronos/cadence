@@ -7,13 +7,22 @@ import {
 import { confirmType, isSameOrigin } from "@/lib/auth/confirm-link"
 import { createClient } from "@/lib/supabase/server"
 
+// These responses carry or follow a session: no cache may keep or replay them.
+const noStore = { "cache-control": "no-store" }
+
 // The confirm page's form lands here. Verifying spends the one-time token, which is why
 // it takes a POST: a mail scanner that only opens the link never reaches this route.
 export async function POST(request: NextRequest) {
-  if (!isSameOrigin(request.headers)) {
-    return new NextResponse(null, { status: 403 })
+  if (!isSameOrigin(request.headers, request.nextUrl.protocol)) {
+    return new NextResponse(null, { status: 403, headers: noStore })
   }
-  const form = await request.formData()
+  let form: FormData
+  try {
+    form = await request.formData()
+  } catch {
+    // Not a form post (wrong content type, broken body): nothing of ours sent it.
+    return new NextResponse(null, { status: 400, headers: noStore })
+  }
   const intent = readIntent(form)
   // Errors go back to the form the viewer started from, with what they had typed in the intent.
   const path = intent.company ? "/sign-up" : "/sign-in"
@@ -21,7 +30,10 @@ export async function POST(request: NextRequest) {
   // location stays relative, so it follows whatever host the browser used (behind a proxy,
   // request.url may name the server's own).
   const to = (target: string) =>
-    new NextResponse(null, { status: 303, headers: { location: target } })
+    new NextResponse(null, {
+      status: 303,
+      headers: { location: target, ...noStore },
+    })
   const back = (error: string) => {
     const query = intentParams(intent)
     query.set("error", error)

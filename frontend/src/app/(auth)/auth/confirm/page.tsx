@@ -1,8 +1,8 @@
 import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 import { intentParams, readIntent } from "@/lib/auth/complete-sign-in"
-import { buttonVariants } from "@/components/ui/button"
 import { readSearchParams, type AuthSearchParams } from "../../search-params"
+import { ConfirmForm } from "./confirm-form"
 
 // The emailed link has to be safe to open without side effects: mail scanners fetch it before
 // the person does, and the token inside works once. So this page only shows a button, and
@@ -39,15 +39,11 @@ export default async function Confirm({
       <h1 className="text-[20px] font-semibold tracking-[-0.02em] text-ink">
         {action}
       </h1>
-      <p className="mt-2 text-ui/normal text-ink-muted">
+      <p id="confirm-why" className="mt-2 text-ui/normal text-ink-muted">
         One more step: confirm that you opened this link. We ask so an email
         scanner cannot use it up before you do.
       </p>
-      <form
-        method="post"
-        action="/auth/confirm/verify"
-        className="mt-5 space-y-3"
-      >
+      <ConfirmForm describedBy="confirm-why">
         <input type="hidden" name="token_hash" value={tokenHash} />
         <input
           type="hidden"
@@ -61,14 +57,7 @@ export default async function Confirm({
         {intent.company && (
           <input type="hidden" name="company" value={intent.company} />
         )}
-        <button
-          type="submit"
-          autoFocus
-          className={buttonVariants({ className: "w-full" })}
-        >
-          Continue
-        </button>
-      </form>
+      </ConfirmForm>
     </div>
   )
 }
