@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Mail, Pencil, Plus, Trash2, Users } from "lucide-react"
 import { ActivationPill } from "@/components/ui/activation-pill"
 import { AmountDisplay } from "@/components/ui/amount-display"
@@ -10,13 +10,24 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { ErrorState } from "@/components/ui/error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
-import { sumUnits, unitsToUsd } from "@/lib/money"
+import { unitsToUsd } from "@/lib/money"
+import { PeopleNotConfiguredError } from "@/lib/people/errors"
+import { MAX_PEOPLE } from "@/lib/people/paging"
+import { useInviteStale } from "@/lib/people/stale-invites"
+import { kindLabels, type PersonRecord } from "@/lib/people/types"
+import {
+  amountsView,
+  currentAmount,
+  hasActiveAuditor,
+  summarize,
+  type AmountsView,
+} from "@/lib/people/view"
+import { useAuditors } from "@/lib/queries/auditors"
 import {
   usePeople,
   usePersonAmounts,
   useSendInvite,
 } from "@/lib/queries/people"
-import { kindLabels, type PersonRecord } from "@/lib/people/types"
 import { PersonFormModal } from "./person-form"
 import { RemovePersonModal } from "./remove-person"
 
@@ -29,26 +40,22 @@ type Dialog =
   | { kind: "edit"; person: PersonRecord }
   | { kind: "remove"; person: PersonRecord }
 
-type Amounts =
-  | { state: "loading" }
-  | { state: "error" }
-  | { state: "ready"; byPerson: Record<string, string> }
-
 export function PeopleScreen() {
   const people = usePeople()
   const amountsQuery = usePersonAmounts()
+  const auditors = useAuditors()
   const [dialog, setDialog] = useState<Dialog | null>(null)
+  const addRef = useRef<HTMLButtonElement>(null)
   const close = () => setDialog(null)
 
-  // Amounts already read stay on screen when a refresh fails.
-  const amounts: Amounts = amountsQuery.data
-    ? { state: "ready", byPerson: amountsQuery.data }
-    : amountsQuery.isError
-      ? { state: "error" }
-      : { state: "loading" }
+  // Amounts already read stay on screen when a refresh fails, marked as stale.
+  const amounts = amountsView(amountsQuery)
+  // Unknown (loading or failed) reads as the longer sentence, never "no auditor".
+  const hasAuditor = hasActiveAuditor(auditors.data)
 
   const addButton = (
     <button
+      ref={addRef}
       type="button"
       onClick={() => setDialog({ kind: "add" })}
       className={buttonVariants()}
@@ -59,6 +66,14 @@ export function PeopleScreen() {
   )
 
   if (people.isPending) return <PeopleSkeleton />
+  if (people.isError && people.error instanceof PeopleNotConfiguredError) {
+    return (
+      <ErrorState
+        title="Sign-in is not configured"
+        description="This deployment has no Supabase project, so your people can't be read."
+      />
+    )
+  }
   if (people.isError) {
     return (
       <ErrorState
@@ -69,16 +84,8 @@ export function PeopleScreen() {
     )
   }
 
-  const list = people.data
-  const withAmount = list.filter(
-    (person) => amounts.state === "ready" && person.id in amounts.byPerson,
-  )
-  const total =
-    amounts.state === "ready"
-      ? sumUnits(withAmount.map((person) => amounts.byPerson[person.id]))
-      : undefined
-  const missing =
-    amounts.state === "ready" ? list.length - withAmount.length : 0
+  const list = people.data.people
+  const { total, missing } = summarize(list, amounts)
 
   return (
     <>
@@ -107,7 +114,7 @@ export function PeopleScreen() {
                 className="text-ink"
               />
               per month
-              <WhoCanSee viewerRole="admin" hasAuditor={false} />
+              <WhoCanSee viewerRole="admin" hasAuditor={hasAuditor} />
               {missing > 0 && (
                 <span className="basis-full text-caption sm:basis-auto">
                   · {missing} without an amount
@@ -117,6 +124,13 @@ export function PeopleScreen() {
             {addButton}
           </div>
 
+          {people.data.truncated && (
+            <p role="status" className="text-ui/normal text-ink-muted">
+              Showing the first {MAX_PEOPLE.toLocaleString("en-US")} people. The
+              rest aren&apos;t listed here, and the total only counts these.
+            </p>
+          )}
+
           {amounts.state === "error" && (
             <ErrorState
               title="Couldn't load the monthly amounts"
@@ -124,6 +138,20 @@ export function PeopleScreen() {
               onRetry={() => amountsQuery.refetch()}
             />
           )}
+          {amounts.state === "stale" && (
+            <ErrorState
+              title="Couldn't refresh the monthly amounts"
+              description="The amounts below may be out of date. Try again to refresh them."
+              onRetry={() => amountsQuery.refetch()}
+            />
+          )}
+          {(amounts.state === "ready" || amounts.state === "stale") &&
+            amounts.truncated && (
+              <p role="status" className="text-ui/normal text-ink-muted">
+                Some amounts weren&apos;t loaded because the list is long, so
+                they show as not loaded and the total may be short.
+              </p>
+            )}
 
           <div className="overflow-hidden rounded-xl border border-line bg-surface">
             <div
@@ -161,16 +189,21 @@ export function PeopleScreen() {
         key={dialog?.kind === "edit" ? dialog.person.id : "add"}
         person={dialog?.kind === "edit" ? dialog.person : undefined}
         amount={
-          dialog?.kind === "edit" && amounts.state === "ready"
-            ? { known: true, units: amounts.byPerson[dialog.person.id] }
+          dialog?.kind === "edit"
+            ? currentAmount(amounts, amountsQuery.isFetching, dialog.person.id)
             : { known: false }
         }
+        hasAuditor={hasAuditor}
         open={dialog?.kind === "add" || dialog?.kind === "edit"}
         onOpenChange={(open) => !open && close()}
       />
       <RemovePersonModal
         person={dialog?.kind === "remove" ? dialog.person : null}
         onClose={close}
+        onRemoved={() => {
+          // The row that opened the dialog is gone: put focus somewhere real.
+          setTimeout(() => addRef.current?.focus(), 0)
+        }}
       />
     </>
   )
@@ -183,7 +216,7 @@ function PersonRow({
   onRemove,
 }: {
   person: PersonRecord
-  amounts: Amounts
+  amounts: AmountsView
   onEdit: () => void
   onRemove: () => void
 }) {
@@ -196,7 +229,15 @@ function PersonRow({
     .join("")
     .toUpperCase()
   const units =
-    amounts.state === "ready" ? amounts.byPerson[person.id] : undefined
+    amounts.state === "ready" || amounts.state === "stale"
+      ? amounts.byPerson[person.id]
+      : undefined
+  const inviteText = invite.isPending
+    ? "Sending…"
+    : inviteVerb[person.activation]
+  const inviteStale = useInviteStale(person.id)
+  const hasInvite =
+    person.activation === "invited" || person.activation === "invite-expired"
 
   return (
     <li
@@ -214,8 +255,10 @@ function PersonRow({
         </span>
       </span>
       <span className="text-ui text-ink-muted">{kindLabels[person.kind]}</span>
-      {amounts.state === "ready" && units === undefined ? (
-        <span className="text-ui text-ink-muted">Not set</span>
+      {amountsKnown(amounts) && units === undefined ? (
+        <span className="text-ui text-ink-muted">
+          {amounts.truncated ? "Not loaded" : "Not set"}
+        </span>
       ) : (
         <AmountDisplay
           amount={units === undefined ? undefined : unitsToUsd(units)}
@@ -231,6 +274,11 @@ function PersonRow({
       )}
       <span>
         <ActivationPill activation={person.activation} />
+        {inviteStale && hasInvite && (
+          <span className="mt-1 block text-caption text-warning-fg">
+            Email changed: the old link won&apos;t work
+          </span>
+        )}
       </span>
       <span className="ml-auto flex items-center gap-1 md:ml-0 md:justify-end">
         {!isActive && (
@@ -238,11 +286,12 @@ function PersonRow({
             type="button"
             onClick={() => invite.mutate(person)}
             disabled={invite.isPending}
-            aria-label={`${inviteLabel[person.activation]} ${person.name}`}
+            // Starts with the visible text, so voice control can say it (WCAG 2.5.3).
+            aria-label={`${inviteText}, ${person.name}`}
             className={buttonVariants({ variant: "secondary", size: "sm" })}
           >
             <Mail className="size-3.5" />
-            {invite.isPending ? "Sending…" : inviteVerb[person.activation]}
+            {inviteText}
           </button>
         )}
         <IconButton label={`Edit ${person.name}`} onClick={onEdit}>
@@ -263,12 +312,11 @@ const inviteVerb = {
   "not-invited": "Send invite",
 } as const
 
-const inviteLabel = {
-  active: "",
-  invited: "Resend the invite to",
-  "invite-expired": "Send a new invite to",
-  "not-invited": "Send an invite to",
-} as const
+function amountsKnown(
+  view: AmountsView,
+): view is Extract<AmountsView, { state: "ready" | "stale" }> {
+  return view.state === "ready" || view.state === "stale"
+}
 
 function IconButton({
   label,

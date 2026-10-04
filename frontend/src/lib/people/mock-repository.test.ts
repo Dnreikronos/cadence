@@ -20,7 +20,7 @@ const newcomer = {
 
 describe("mock people repository", () => {
   it("is seeded with the proof-service mock's ids, in name order", async () => {
-    const people = await repository().list()
+    const people = (await repository().list()).people
     expect(people.map((person) => person.id).sort()).toEqual(
       seedPeople.map((person) => person.id).sort(),
     )
@@ -33,7 +33,7 @@ describe("mock people repository", () => {
 
   it("shows every activation the screen has a pill for", async () => {
     const created = repository()
-    const before = await created.list()
+    const before = (await created.list()).people
     const byName = Object.fromEntries(
       before.map((person) => [person.name, person.activation]),
     )
@@ -42,13 +42,13 @@ describe("mock people repository", () => {
     expect(byName["Mariana Souza"]).toBe("invite-expired")
 
     const { id } = await created.create(newcomer)
-    expect((await created.list()).find((p) => p.id === id)?.activation).toBe(
-      "not-invited",
-    )
+    expect(
+      (await created.list()).people.find((p) => p.id === id)?.activation,
+    ).toBe("not-invited")
     await created.recordInvite(id, new Date(now + 86_400_000).toISOString())
-    expect((await created.list()).find((p) => p.id === id)?.activation).toBe(
-      "invited",
-    )
+    expect(
+      (await created.list()).people.find((p) => p.id === id)?.activation,
+    ).toBe("invited")
   })
 
   it("lets the proof service know about a new person", async () => {
@@ -66,7 +66,7 @@ describe("mock people repository", () => {
 
   it("allows keeping your own email on an edit but not taking another's", async () => {
     const created = repository()
-    const [first, second] = await created.list()
+    const [first, second] = (await created.list()).people
     await created.update(first.id, { ...first, name: "Renamed" })
     await expect(
       created.update(first.id, { ...first, email: second.email }),
@@ -75,7 +75,7 @@ describe("mock people repository", () => {
 
   it("keeps a pending invite when the email changes, like the table does", async () => {
     const created = repository()
-    const mariana = (await created.list()).find(
+    const mariana = (await created.list()).people.find(
       (p) => p.name === "Mariana Souza",
     )!
     await created.recordInvite(
@@ -83,16 +83,20 @@ describe("mock people repository", () => {
       new Date(now + 86_400_000).toISOString(),
     )
     await created.update(mariana.id, { ...mariana, email: "new@souza.test" })
-    const after = (await created.list()).find((p) => p.id === mariana.id)!
+    const after = (await created.list()).people.find(
+      (p) => p.id === mariana.id,
+    )!
     expect(after.email).toBe("new@souza.test")
     expect(after.activation).toBe("invited")
   })
 
   it("removes a person from the list and for good", async () => {
     const created = repository()
-    const [first] = await created.list()
+    const [first] = (await created.list()).people
     await created.remove(first.id)
-    expect((await created.list()).some((p) => p.id === first.id)).toBe(false)
+    expect((await created.list()).people.some((p) => p.id === first.id)).toBe(
+      false,
+    )
     await expect(created.remove(first.id)).rejects.toBeInstanceOf(
       PersonNotFoundError,
     )
@@ -103,7 +107,7 @@ describe("mock people repository", () => {
 
   it("keeps a removed person's email taken", async () => {
     const created = repository()
-    const [first] = await created.list()
+    const [first] = (await created.list()).people
     await created.remove(first.id)
     await expect(
       created.create({ ...newcomer, email: first.email }),
@@ -124,12 +128,12 @@ describe("mock people repository", () => {
     )
     const { id } = await created.create(newcomer)
     await created.recordInvite(id, new Date(now + 1000).toISOString())
-    expect((await created.list()).find((p) => p.id === id)?.activation).toBe(
-      "invited",
-    )
+    expect(
+      (await created.list()).people.find((p) => p.id === id)?.activation,
+    ).toBe("invited")
     clock = now + 2000
-    expect((await created.list()).find((p) => p.id === id)?.activation).toBe(
-      "invite-expired",
-    )
+    expect(
+      (await created.list()).people.find((p) => p.id === id)?.activation,
+    ).toBe("invite-expired")
   })
 })

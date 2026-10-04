@@ -23,6 +23,14 @@ export class PeopleStoreError extends Error {
   }
 }
 
+// Real mode without a Supabase project: there is nowhere to read people from.
+export class PeopleNotConfiguredError extends Error {
+  constructor() {
+    super("people_not_configured")
+    this.name = "PeopleNotConfiguredError"
+  }
+}
+
 // The person was saved but the amount was not: the list is right, the amount is
 // missing or stale.
 export class AmountNotSavedError extends Error {
@@ -63,6 +71,9 @@ export function peopleMessageFor(error: unknown) {
   if (error instanceof PeopleStoreError) {
     return "Couldn't reach your people list. Try again."
   }
+  if (error instanceof PeopleNotConfiguredError) {
+    return "Sign-in is not configured, so the people list can't be read."
+  }
   if (error instanceof AmountNotSavedError) {
     return `Saved, but the monthly amount wasn't. ${amountMessageFor(error.reason)}`
   }
@@ -76,9 +87,10 @@ function amountMessageFor(error: unknown) {
   return messageFor(error)
 }
 
-// Worth offering a retry: the same request may work in a moment.
+// Worth offering a retry right now. A 429 is not: its message already says to
+// wait, and a button that invites an immediate retry would contradict it. Nor is
+// an AmountNotSavedError: repeating a create would add the person twice.
 export function isRetryablePeopleError(error: unknown) {
   if (error instanceof PeopleStoreError) return true
-  // Not an AmountNotSavedError: repeating a create would add the person twice.
-  return isApiError(error) && error.isRetryable
+  return isApiError(error) && error.isRetryable && error.status !== 429
 }

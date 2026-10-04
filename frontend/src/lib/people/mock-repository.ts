@@ -83,7 +83,7 @@ export function createMockPeopleRepository(
   return {
     async list() {
       await wait()
-      return visible()
+      const people = visible()
         .map((row) => ({
           id: row.id,
           name: row.name,
@@ -98,6 +98,7 @@ export function createMockPeopleRepository(
         .sort(
           (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id),
         )
+      return { people, truncated: false }
     },
     async create(input: PersonInput) {
       await wait()

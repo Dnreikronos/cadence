@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { buttonVariants } from "@/components/ui/button"
 import { Modal } from "@/components/ui/modal"
 import { removeDescription, shortName } from "@/lib/people/display"
@@ -10,15 +11,25 @@ import { useRemovePerson } from "@/lib/queries/people"
 export function RemovePersonModal({
   person,
   onClose,
+  onRemoved,
 }: {
   person: PersonRecord | null
   onClose: () => void
+  // The row the dialog came from is gone, so focus has nowhere to return to.
+  onRemoved: () => void
 }) {
   const remove = useRemovePerson()
+  const [blocked, setBlocked] = useState(false)
 
-  // A removal in flight keeps the dialog, so its outcome is never missed.
+  // A removal in flight keeps the dialog, so its outcome is never missed: a try
+  // to close it says so instead of doing nothing.
   function handleOpenChange(open: boolean) {
-    if (open || remove.isPending) return
+    if (open) return
+    if (remove.isPending) {
+      setBlocked(true)
+      return
+    }
+    setBlocked(false)
     remove.reset()
     onClose()
   }
@@ -30,6 +41,11 @@ export function RemovePersonModal({
       title={person ? `Remove ${shortName(person.name)}?` : "Remove person"}
       description={person ? removeDescription(person.activation) : undefined}
     >
+      {blocked && remove.isPending && (
+        <p role="status" className="mb-4 text-ui/normal text-ink-muted">
+          Still removing. This closes when it&apos;s done.
+        </p>
+      )}
       {remove.isError && (
         <p role="alert" className="mb-4 text-ui/normal text-danger-fg">
           {peopleMessageFor(remove.error)}
@@ -50,7 +66,13 @@ export function RemovePersonModal({
           disabled={remove.isPending}
           onClick={() => {
             if (!person) return
-            remove.mutate(person, { onSuccess: onClose })
+            remove.mutate(person, {
+              onSuccess: () => {
+                setBlocked(false)
+                onClose()
+                onRemoved()
+              },
+            })
           }}
           className={buttonVariants({
             className: "bg-danger-fg text-white hover:bg-danger-fg/90",

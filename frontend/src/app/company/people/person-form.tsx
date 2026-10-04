@@ -23,33 +23,37 @@ import {
   type PersonKind,
   type PersonRecord,
 } from "@/lib/people/types"
+import type { CurrentAmount } from "@/lib/people/view"
 import { useSavePerson } from "@/lib/queries/people"
 import { cn } from "@/lib/utils"
 
 type Errors = Partial<Record<"name" | "email" | "monthlyAmount", string>>
 
-// What the proof service holds for the person being edited. Unknown while the
-// amounts are loading or failed to load: the field is then optional and blank.
-export type CurrentAmount =
-  { known: true; units: string | undefined } | { known: false }
-
 export function PersonFormModal({
   person,
   amount,
+  hasAuditor,
   open,
   onOpenChange,
 }: {
   // Absent when adding.
   person?: PersonRecord
   amount: CurrentAmount
+  hasAuditor: boolean | undefined
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
   const save = useSavePerson()
+  const [blocked, setBlocked] = useState(false)
 
-  // A save in flight keeps the dialog, so its outcome is never missed.
+  // A save in flight keeps the dialog, so its outcome is never missed: a try to
+  // close it says so instead of doing nothing.
   function handleOpenChange(next: boolean) {
-    if (!next && save.isPending) return
+    if (!next && save.isPending) {
+      setBlocked(true)
+      return
+    }
+    setBlocked(false)
     if (!next) save.reset()
     onOpenChange(next)
   }
@@ -70,7 +74,9 @@ export function PersonFormModal({
         <PersonForm
           person={person}
           amount={amount}
+          hasAuditor={hasAuditor}
           save={save}
+          blocked={blocked && save.isPending}
           onDone={() => handleOpenChange(false)}
         />
       )}
@@ -81,23 +87,31 @@ export function PersonFormModal({
 function PersonForm({
   person,
   amount: current,
+  hasAuditor,
   save,
+  blocked,
   onDone,
 }: {
   person?: PersonRecord
   amount: CurrentAmount
+  hasAuditor: boolean | undefined
   save: ReturnType<typeof useSavePerson>
+  blocked: boolean
   onDone: () => void
 }) {
   const id = useId()
   const [name, setName] = useState(person?.name ?? "")
   const [email, setEmail] = useState(person?.email ?? "")
   const [kind, setKind] = useState<PersonKind>(person?.kind ?? "employee")
-  const [amount, setAmount] = useState(
+  // The amount as the form opened with it. It may have sub-cent digits that the
+  // two-decimal rule would refuse, so a field left as it was is not validated or
+  // written again.
+  const [initialAmount] = useState(
     current.known && current.units !== undefined
       ? formatBaseUnits(BigInt(current.units))
       : "",
   )
+  const [amount, setAmount] = useState(initialAmount)
   const [errors, setErrors] = useState<Errors>({})
 
   // A stale message would contradict what the field now holds.
@@ -107,6 +121,7 @@ function PersonForm({
   // Blank is allowed only when editing a person whose amount can't be read:
   // it means "leave it as it is".
   const amountOptional = person !== undefined && !current.known
+  const untouched = initialAmount !== "" && amount === initialAmount
   const hasInvite =
     person?.activation === "invited" || person?.activation === "invite-expired"
   const emailChanged =
@@ -115,7 +130,7 @@ function PersonForm({
 
   function submit(event: React.FormEvent) {
     event.preventDefault()
-    const leaveAmount = amountOptional && amount.trim() === ""
+    const leaveAmount = untouched || (amountOptional && amount.trim() === "")
     const fields = personFieldsSchema.safeParse({ name, email, kind })
     const monthly = leaveAmount
       ? undefined
@@ -144,7 +159,7 @@ function PersonForm({
       {
         id: person?.id,
         input,
-        // An unchanged amount is not written again.
+        // An unchanged amount is not written again. An unknown one always is.
         amount: current.known && units === current.units ? undefined : units,
         invitedEmail: hasInvite ? person?.email : undefined,
       },
@@ -212,7 +227,7 @@ function PersonForm({
           id={`${id}-amount`}
           label="Monthly amount (USD)"
           error={errors.monthlyAmount}
-          adornment={<WhoCanSee viewerRole="admin" hasAuditor={false} />}
+          adornment={<WhoCanSee viewerRole="admin" hasAuditor={hasAuditor} />}
         >
           <input
             id={`${id}-amount`}
@@ -246,6 +261,17 @@ function PersonForm({
           new one after saving.
         </p>
       )}
+      {emailChanged && person?.activation === "active" && (
+        <p className="text-caption/normal text-ink-muted">
+          Their sign-in is not changed: they keep signing in with the email they
+          joined with.
+        </p>
+      )}
+      {blocked && (
+        <p role="status" className="text-ui/normal text-ink-muted">
+          Still saving. This closes when it&apos;s done.
+        </p>
+      )}
       {save.isError && !(save.error instanceof DuplicateEmailError) && (
         <p role="alert" className="text-ui/normal text-danger-fg">
           {peopleMessageFor(save.error)}
@@ -255,6 +281,7 @@ function PersonForm({
         <button
           type="button"
           onClick={onDone}
+          disabled={save.isPending}
           className={buttonVariants({ variant: "secondary" })}
         >
           Cancel

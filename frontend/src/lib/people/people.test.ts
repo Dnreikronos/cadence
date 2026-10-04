@@ -97,11 +97,37 @@ describe("readAllAmounts", () => {
       },
     }
     const fetchPage = vi.fn(async (cursor?: string) => pages[cursor ?? "first"])
-    expect(await readAllAmounts(fetchPage)).toEqual({ a: "1", b: "2" })
+    expect(await readAllAmounts(fetchPage)).toEqual({
+      byPerson: { a: "1", b: "2" },
+      truncated: false,
+    })
     expect(fetchPage.mock.calls.map(([cursor]) => cursor)).toEqual([
       undefined,
       "50",
     ])
+  })
+
+  it("says so when the page cap stops a read that has more", async () => {
+    let page = 0
+    const fetchPage = vi.fn(async () => ({
+      items: [{ person_id: `p${page}`, amount: "1" }],
+      next_cursor: String(++page),
+    }))
+    const read = await readAllAmounts(fetchPage, 3)
+    expect(fetchPage).toHaveBeenCalledTimes(3)
+    expect(Object.keys(read.byPerson)).toEqual(["p0", "p1", "p2"])
+    expect(read.truncated).toBe(true)
+  })
+
+  it("is not truncated when the last allowed page is the last page", async () => {
+    let page = 0
+    const fetchPage = vi.fn(async () => ({
+      items: [{ person_id: `p${page}`, amount: "1" }],
+      next_cursor: ++page === 3 ? null : String(page),
+    }))
+    const read = await readAllAmounts(fetchPage, 3)
+    expect(read.truncated).toBe(false)
+    expect(Object.keys(read.byPerson)).toHaveLength(3)
   })
 
   it("stops on a cursor that does not move", async () => {
@@ -109,7 +135,8 @@ describe("readAllAmounts", () => {
       items: [{ person_id: "a", amount: "1" }],
       next_cursor: "same",
     }))
-    await readAllAmounts(fetchPage)
+    const read = await readAllAmounts(fetchPage)
+    expect(read.truncated).toBe(false)
     // First page, then the repeated cursor once; never an endless loop.
     expect(fetchPage).toHaveBeenCalledTimes(2)
   })
@@ -117,7 +144,7 @@ describe("readAllAmounts", () => {
   it("is empty for a company without amounts", async () => {
     expect(
       await readAllAmounts(async () => ({ items: [], next_cursor: null })),
-    ).toEqual({})
+    ).toEqual({ byPerson: {}, truncated: false })
   })
 })
 
@@ -183,7 +210,9 @@ describe("messages", () => {
   })
 
   it("offers a retry for a busy service, not for a half-done create", () => {
-    expect(isRetryablePeopleError(new ApiError(429, "rate_limited"))).toBe(true)
+    expect(isRetryablePeopleError(new ApiError(503, "auth_unavailable"))).toBe(
+      true,
+    )
     expect(isRetryablePeopleError(new PeopleStoreError())).toBe(true)
     expect(isRetryablePeopleError(new ApiError(409, "person_removed"))).toBe(
       false,
@@ -198,7 +227,7 @@ describe("messages", () => {
 
 function fakeRepository() {
   return {
-    list: vi.fn(async () => []),
+    list: vi.fn(async () => ({ people: [], truncated: false })),
     create: vi.fn(async () => ({ id: "new-id" })),
     update: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
