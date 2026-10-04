@@ -12,6 +12,7 @@ import {
   db,
   nextId,
   seedPeople,
+  type MockAuditor,
   type MockPayment,
   type MockRunPayment,
 } from "./db"
@@ -180,6 +181,8 @@ async function confirmHandler(request: Request, kind: string) {
 function applyEffect(kind: string, wallet: string, amount?: bigint) {
   if (kind === "wrap" && amount) {
     db.company.pending += amount
+  } else if (kind === "accounts/configure") {
+    db.accountConfigured = true
   } else if (kind === "accounts/apply-pending") {
     const ledger = wallet === COMPANY_WALLET ? db.company : db.me
     ledger.available += ledger.pending
@@ -235,6 +238,13 @@ function paged<T>(request: Request, rows: T[]) {
 
 const newestFirst = (a: MockPayment, b: MockPayment) =>
   b.paidAt.localeCompare(a.paidAt)
+
+const auditorItem = (auditor: MockAuditor) => ({
+  id: auditor.id,
+  email: auditor.email,
+  status: auditor.status,
+  invited_at: auditor.invitedAt,
+})
 
 // RFC 4180 quoting, after a spreadsheet-formula guard: a cell that starts with
 // = + - @ tab or CR gets a leading quote so Excel never runs it.
@@ -573,10 +583,22 @@ export const handlers = [
     if (error) return error
     if (db.enrolled.has(data.wallet)) return fail(409, "key_already_enrolled")
     db.enrolled.add(data.wallet)
+    db.walletLinked = true
     return HttpResponse.json({ status: "enrolled" })
   }),
 
   // ---- Reads
+  http.get(at("/me/status"), async ({ request }) => {
+    const stopped = await guard(request, "recipient")
+    if (stopped) return stopped
+    return HttpResponse.json({
+      wallet_linked: db.walletLinked,
+      // The mock has one recipient, so any enrolled wallet is theirs.
+      key_enrolled: db.enrolled.size > 0,
+      account_configured: db.accountConfigured,
+      pending_credits: db.me.pending > 0n,
+    })
+  }),
   http.get(at("/me/balance"), async ({ request }) => {
     const stopped = await guard(request, "recipient")
     if (stopped) return stopped
@@ -651,6 +673,61 @@ export const handlers = [
       })
     },
   ),
+
+  // ---- Auditors (admin only; nothing here carries an amount)
+  http.get(at("/company/auditors"), async ({ request }) => {
+    const stopped = await guard(request, "admin")
+    if (stopped) return stopped
+    const rows = [...db.auditors]
+      .sort(
+        (a, b) =>
+          b.invitedAt.localeCompare(a.invitedAt) || a.id.localeCompare(b.id),
+      )
+      .map(auditorItem)
+    return paged(request, rows)
+  }),
+  http.post(at("/company/auditors"), async ({ request }) => {
+    const stopped = await guard(request, "admin")
+    if (stopped) return stopped
+    const { data, error } = await parse(request, s.inviteAuditorRequestSchema)
+    if (error) return error
+    // An address is the same address whatever its case.
+    const email = data.email.toLowerCase()
+    const index = db.auditors.findIndex((a) => a.email.toLowerCase() === email)
+    const same = db.auditors[index]
+    if (same?.status === "active") return fail(409, "auditor_already_active")
+    if (same?.status === "invited") return fail(409, "auditor_already_invited")
+    // An expired invite no longer counts: the new one replaces it.
+    if (same) db.auditors.splice(index, 1)
+    const auditor: MockAuditor = {
+      id: randomUuid(),
+      email: data.email,
+      status: "invited",
+      invitedAt: new Date().toISOString(),
+    }
+    db.auditors.push(auditor)
+    return HttpResponse.json(auditorItem(auditor), { status: 201 })
+  }),
+  http.delete(
+    at("/company/auditors/:auditorId"),
+    async ({ request, params }) => {
+      const stopped = await guard(request, "admin")
+      if (stopped) return stopped
+      const index = db.auditors.findIndex((a) => a.id === params.auditorId)
+      if (index < 0) return fail(404, "auditor_not_found")
+      db.auditors.splice(index, 1)
+      return HttpResponse.json({ status: "revoked" })
+    },
+  ),
+
+  // ---- Access log (auditor only): who decrypted what, never an amount
+  http.get(at("/audit/access-log"), async ({ request }) => {
+    const stopped = await guard(request, "auditor")
+    if (stopped) return stopped
+    const rows = [...db.accessLog].sort((a, b) => b.at.localeCompare(a.at))
+    return paged(request, rows)
+  }),
+
   http.get(at("/audit/:companyId/payments"), async ({ request, params }) => {
     const stopped = await guard(request, "auditor")
     if (stopped) return stopped

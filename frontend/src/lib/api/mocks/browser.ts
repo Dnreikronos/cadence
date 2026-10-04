@@ -1,6 +1,6 @@
 import { setupWorker } from "msw/browser"
 import { handlers } from "./handlers"
-import { resetDb, db } from "./db"
+import { resetAccountStatus, resetDb, db } from "./db"
 import { isScenario, scenarioNames, scenarios } from "./scenario"
 
 const worker = setupWorker(...handlers)
@@ -25,6 +25,7 @@ export function startMockWorker() {
             db.role = role
           },
           reset: resetDb,
+          resetAccountStatus,
         },
       })
     })

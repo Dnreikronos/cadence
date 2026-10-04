@@ -1,4 +1,10 @@
-import type { PaymentStatus, Receipt, RunCreated } from "../schemas"
+import type {
+  AccessLogItem,
+  AuditorStatus,
+  PaymentStatus,
+  Receipt,
+  RunCreated,
+} from "../schemas"
 
 // Fixed ids so tests and screens can refer to the seed data.
 export const COMPANY_ID = "c0000000-0000-4000-8000-000000000001"
@@ -40,6 +46,13 @@ export type MockRunPayment = {
   receipt?: Receipt
 }
 
+export type MockAuditor = {
+  id: string
+  email: string
+  status: AuditorStatus
+  invitedAt: string
+}
+
 export const seedPeople: MockPerson[] = [
   {
     id: "a0000000-0000-4000-8000-000000000001",
@@ -66,6 +79,59 @@ export const seedPeople: MockPerson[] = [
 export const ME_PERSON = seedPeople[0].id
 
 type Ledger = { available: bigint; pending: bigint }
+
+export const seedAuditors: MockAuditor[] = [
+  {
+    id: "d0000000-0000-4000-8000-000000000001",
+    email: "ana.ribeiro@northwind-audit.example",
+    status: "active",
+    invitedAt: "2026-09-10T09:00:00Z",
+  },
+  {
+    id: "d0000000-0000-4000-8000-000000000002",
+    email: "paulo.lima@northwind-audit.example",
+    status: "invited",
+    invitedAt: "2026-10-02T09:00:00Z",
+  },
+]
+
+// Twenty-five reads, one an hour, newest first. Who and what, never an amount.
+const accessReads: Pick<AccessLogItem, "actor" | "action" | "scope">[] = [
+  {
+    actor: { kind: "service", label: "Payroll run" },
+    action: "read_balance",
+    scope: "Company balance",
+  },
+  {
+    actor: { kind: "company", label: "Solaris admin" },
+    action: "read_payments",
+    scope: "Company payments",
+  },
+  {
+    actor: { kind: "recipient", label: "Bruno Costa" },
+    action: "read_balance",
+    scope: "Own balance",
+  },
+  {
+    actor: { kind: "auditor", label: "Ana Ribeiro" },
+    action: "read_payments",
+    scope: "Company payments",
+  },
+  {
+    actor: { kind: "recipient", label: "Bruno Costa" },
+    action: "export_csv",
+    scope: "Own payments",
+  },
+]
+
+function seedAccessLog(): AccessLogItem[] {
+  const newest = Date.parse("2026-10-03T18:00:00Z")
+  return Array.from({ length: 25 }, (_, i) => ({
+    id: `e0000000-0000-4000-8000-${String(i + 1).padStart(12, "0")}`,
+    at: new Date(newest - i * 3_600_000).toISOString(),
+    ...accessReads[i % accessReads.length],
+  }))
+}
 
 function seed() {
   const payments: MockPayment[] = [
@@ -126,6 +192,12 @@ function seed() {
     >(),
     runKeys: new Map<string, string>(),
     enrolled: new Set<string>(),
+    // The account steps GET /me/status reports besides `enrolled`. A wallet is
+    // linked by its first enrollment, an account configured by its confirm.
+    walletLinked: false,
+    accountConfigured: false,
+    auditors: seedAuditors.map((a) => ({ ...a })),
+    accessLog: seedAccessLog(),
   }
 }
 
@@ -133,6 +205,16 @@ export let db = seed()
 
 export function resetDb() {
   db = seed()
+}
+
+// Back to a recipient who has done none of the activation steps and has no
+// credits waiting, for a screen that wants to replay the flow. `resetDb`
+// resets everything else too.
+export function resetAccountStatus() {
+  db.enrolled.clear()
+  db.walletLinked = false
+  db.accountConfigured = false
+  db.me.pending = 0n
 }
 
 export function nextId() {
