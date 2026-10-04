@@ -40,6 +40,7 @@ src/app/            App Router. (auth)/sign-in, sign-up; auth/confirm; company/,
 src/components/     app/ (signed-in shell)
 src/lib/            auth/ (guard, sign-in, invites), demo/, wallet/, queries/, money.ts, supabase/, solana/
 src/middleware.ts   role-based route guard
+e2e/                Playwright tests (specs) and e2e/support/ (helpers)
 ```
 
 ## API client and mocks
@@ -223,6 +224,63 @@ inside the emailed link, so they survive opening the email on another device.
 The link is built from `{{ .RedirectTo }}`. Every deployed origin must therefore
 be listed under the Supabase Auth redirect URLs (`additional_redirect_urls`
 locally) as `<origin>/**`.
+
+## End-to-end tests
+
+`pnpm e2e` drives the screens in a real browser ([Playwright](https://playwright.dev)),
+against the production build in demo mode: the mock API and no Supabase, whatever
+`.env.local` says (`playwright.config.ts` sets the environment). It is not part of
+`pnpm test`, which stays a fast Vitest run over `src/`; CI runs it as the `e2e` job.
+
+```sh
+pnpm e2e                      # build, serve on :3300 and run everything (about a minute and a half to run)
+E2E_SKIP_BUILD=1 pnpm e2e     # reuse the build in .next, e.g. when only a test changed
+E2E_REUSE_SERVER=1 pnpm e2e   # reuse a server already on :3300 (you started it)
+pnpm e2e e2e/auth.spec.ts     # one file; add -g "partial failure" for one test
+pnpm e2e:ui                   # Playwright's UI mode: watch, time-travel, pick locators
+```
+
+The browser is Google Chrome when `/usr/bin/google-chrome-stable` (or
+`PLAYWRIGHT_CHROME_PATH`) exists, and always on CI. Without it, install Playwright's
+own once with `pnpm exec playwright install chromium`.
+
+**Debugging.** A failed run leaves `playwright-report/` (open it with
+`pnpm exec playwright show-report`) and, for a test that was retried on CI, a trace:
+`pnpm exec playwright show-trace test-results/<test>/trace.zip` (CI uploads both as the
+`playwright-report` artifact). Locally, `pnpm e2e --debug` steps through a test and
+`--trace on` records one for every test.
+
+**The demo host.** Tests open `http://e2e.localhost:3300`. The demo role is a cookie,
+and cookies belong to the host and not the port, so a unique `*.localhost` name keeps it
+apart from your dev server on `localhost:3000` (Chrome resolves every `*.localhost` to
+the loopback). Every test also gets its own browser context, so no cookie carries over.
+
+**Adding a test.** Import `test` and `expect` from `e2e/support/test`, not from
+Playwright: it fails the test on an uncaught page error or any console error. A forced
+mock scenario answers 4xx and 5xx on purpose and Chrome logs them, so name the statuses
+you expect with `watch.allowStatus(409)`. In `e2e/support/demo.ts`: `signInAs(page, role)`
+and `freshRecipient(page)` go through the demo panel, `setMock(page, "instant", ...)`
+sets scenarios, `navLink` clicks a sidebar link, `expectNoHorizontalOverflow` checks
+the layout. Two things to know about the mock:
+
+- It lives in the page's memory, so a full load (`page.goto`, a reload, the sign-in form)
+  starts from the seed data again. Set a scenario after the page you test has loaded
+  and move on by clicking links, which are client-side navigations.
+- The confirmation poll of a money flow takes about five seconds in real time. Add
+  `"instant"` to the scenarios unless the test is about that wait.
+
+Use accessible locators (`getByRole`, `getByLabel`, text) and web-first assertions
+(`await expect(locator)...`, `expect.poll`), never a sleep. A new main screen goes in
+`e2e/support/screens.ts`, which the responsive and accessibility specs walk; an
+accessibility violation that cannot be fixed with the screen goes in the commented
+`knownIssues` list of `e2e/support/a11y.ts`, with the screen and the axe rule, so it is
+visible and not silenced.
+
+**A failure is a finding, not noise.** Do not rerun a red test until it is green and do
+not raise a timeout to get past it. Reproduce it (`--repeat-each=20`, `--workers=1`, the
+trace), find the cause, and fix the app or the test. CI retries once so that a trace
+exists, but a test that passes only on the retry is reported as flaky and treated as
+a failure.
 
 ## Solana
 
