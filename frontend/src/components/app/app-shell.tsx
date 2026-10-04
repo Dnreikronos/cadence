@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 import { AmountDisplay, type AmountState } from "@/components/ui/amount-display"
 import { signOut, signOutEverywhere } from "@/lib/auth/actions"
 import { buttonVariants } from "@/components/ui/button"
+import { SkipLink, mainId } from "@/components/ui/skip-link"
 import {
   Popover,
   PopoverContent,
@@ -47,6 +48,7 @@ export function AppShell({
 
   return (
     <div className="min-h-svh bg-canvas">
+      <SkipLink />
       <BarTop
         role={role}
         company={company}
@@ -57,7 +59,11 @@ export function AppShell({
         <aside className="sticky top-14 hidden h-[calc(100svh-3.5rem)] border-r border-line bg-surface-subtle lg:block print:hidden">
           <Sidebar role={role} balance={shownBalance} />
         </aside>
-        <main className="min-w-0 px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+        <main
+          id={mainId}
+          tabIndex={-1}
+          className="min-w-0 px-4 py-6 outline-none sm:px-6 lg:px-10 lg:py-8"
+        >
           {children}
         </main>
       </div>
