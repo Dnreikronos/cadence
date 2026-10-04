@@ -3,6 +3,9 @@ import { readIntent } from "@/lib/auth/complete-sign-in"
 import { safeNext } from "@/lib/auth/guard"
 import { signInErrorMessage } from "@/lib/auth/sign-in-errors"
 import { currentViewer } from "@/lib/auth/viewer"
+import { isDemoEnabled } from "@/lib/demo/mode"
+import { ClearQueryCache } from "./clear-query-cache"
+import { DemoPanel } from "./demo-panel"
 import { EmailCodeForm } from "./email-code-form"
 
 export type AuthSearchParams = Promise<
@@ -25,11 +28,20 @@ export async function AuthPage({
   // Every session belongs to a company, so a signed-in visitor goes straight to it.
   const viewer = await currentViewer()
   if (viewer) redirect(safeNext(intent.next, viewer.membership.role))
+  // Without Supabase there is no code to email: the demo is the way in.
+  const demo = mode === "sign-in" && (await isDemoEnabled())
   return (
-    <EmailCodeForm
-      mode={mode}
-      intent={intent}
-      error={signInErrorMessage(params.get("error"))}
-    />
+    <>
+      <ClearQueryCache />
+      {demo ? (
+        <DemoPanel next={intent.next} />
+      ) : (
+        <EmailCodeForm
+          mode={mode}
+          intent={intent}
+          error={signInErrorMessage(params.get("error"))}
+        />
+      )}
+    </>
   )
 }

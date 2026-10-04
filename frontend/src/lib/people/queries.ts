@@ -8,12 +8,11 @@ import {
   sendInvite,
   updatePerson,
 } from "./mock"
+import { queryKeys } from "@/lib/queries/keys"
 import type { PersonInput } from "./types"
 
-const peopleKey = ["people"] as const
-
 export function usePeople() {
-  return useQuery({ queryKey: peopleKey, queryFn: listPeople })
+  return useQuery({ queryKey: queryKeys.people.list(), queryFn: listPeople })
 }
 
 function useInvalidating<TVariables>(
@@ -22,7 +21,8 @@ function useInvalidating<TVariables>(
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: peopleKey }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.people.all }),
   })
 }
 

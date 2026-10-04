@@ -21,6 +21,10 @@ the real service and wiring Turnkey; no screen is redone.
   returns the mock signer. The real Turnkey implementation is #78/#80's integration work
   and is gated on the security decisions in
   `docs/dev/spikes/2026-10-03-embedded-wallet.md`.
+- **Money-moving mutations refresh the shell.** Every mutation that moves money
+  (deposit, payment, withdrawal, retry) calls `invalidateBalances(queryClient)` from
+  `src/lib/queries/invalidate.ts` on success; the sidebar balance does not refetch on
+  its own.
 - **Amounts** are integer base-unit strings in the client and are converted for display
   with `src/lib/money.ts`. No float math on money.
 - **Copy is honest about privacy**: Cadence can read amounts (ADR B17); deposits and

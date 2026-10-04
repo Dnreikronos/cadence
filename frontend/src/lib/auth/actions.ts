@@ -1,9 +1,12 @@
 "use server"
 
 import type { AuthError } from "@supabase/supabase-js"
-import { headers } from "next/headers"
+import { cookies, headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { z } from "zod"
+import { isDemoEnabled } from "@/lib/demo/mode"
+import { DEMO_COOKIE } from "@/lib/demo/viewer"
+import { isSupabaseConfigured } from "@/lib/supabase/env"
 import { createClient } from "@/lib/supabase/server"
 import {
   completeSignIn,
@@ -114,6 +117,11 @@ async function verifyCode(
 }
 
 export async function signOut() {
+  // The demo viewer has no Supabase session: its cookie is all there is to end.
+  const store = await cookies()
+  store.delete(DEMO_COOKIE)
+  if (!isSupabaseConfigured())
+    redirect((await isDemoEnabled()) ? "/sign-in" : "/")
   const supabase = await createClient()
   await supabase.auth.signOut()
   redirect("/")

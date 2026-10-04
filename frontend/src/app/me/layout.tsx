@@ -1,5 +1,4 @@
-import { AppShell } from "@/components/app/app-shell"
-import { pendingBalance } from "@/components/app/pending-membership"
+import { RoleShell } from "@/components/app/role-shell"
 import { requireMember } from "@/lib/auth/viewer"
 
 export default async function Layout({
@@ -9,13 +8,8 @@ export default async function Layout({
 }) {
   const { email, membership } = await requireMember("recipient")
   return (
-    <AppShell
-      role="recipient"
-      company={membership.company}
-      email={email}
-      balance={pendingBalance}
-    >
+    <RoleShell role="recipient" company={membership.company} email={email}>
       {children}
-    </AppShell>
+    </RoleShell>
   )
 }
