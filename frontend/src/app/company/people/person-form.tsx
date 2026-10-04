@@ -35,6 +35,7 @@ export function PersonFormModal({
   hasAuditor,
   open,
   onOpenChange,
+  finalFocus,
 }: {
   // Absent when adding.
   person?: PersonRecord
@@ -42,6 +43,7 @@ export function PersonFormModal({
   hasAuditor: boolean | undefined
   open: boolean
   onOpenChange: (open: boolean) => void
+  finalFocus?: () => HTMLElement | boolean
 }) {
   const save = useSavePerson()
   const [blocked, setBlocked] = useState(false)
@@ -62,6 +64,7 @@ export function PersonFormModal({
     <Modal
       open={open}
       onOpenChange={handleOpenChange}
+      finalFocus={finalFocus}
       title={person ? `Edit ${shortName(person.name)}` : "Add a person"}
       description={
         person

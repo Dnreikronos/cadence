@@ -12,11 +12,13 @@ export function RemovePersonModal({
   person,
   onClose,
   onRemoved,
+  finalFocus,
 }: {
   person: PersonRecord | null
   onClose: () => void
   // The row the dialog came from is gone, so focus has nowhere to return to.
   onRemoved: () => void
+  finalFocus?: () => HTMLElement | boolean
 }) {
   const remove = useRemovePerson()
   const [blocked, setBlocked] = useState(false)
@@ -38,6 +40,7 @@ export function RemovePersonModal({
     <Modal
       open={person !== null}
       onOpenChange={handleOpenChange}
+      finalFocus={finalFocus}
       title={person ? `Remove ${shortName(person.name)}?` : "Remove person"}
       description={person ? removeDescription(person.activation) : undefined}
     >
@@ -69,8 +72,8 @@ export function RemovePersonModal({
             remove.mutate(person, {
               onSuccess: () => {
                 setBlocked(false)
-                onClose()
                 onRemoved()
+                onClose()
               },
             })
           }}
