@@ -214,7 +214,7 @@ Statuses and routes are part of the proposal.
 | 409    | `person_already_active`, `person_removed` | `POST /company/people/:person_id/invite`, see [Invites](#invites-).                                                                                                                                                                                                                  |
 | 409    | `auditor_already_invited`                 | `POST /company/auditors`, for an address with a pending invite, see [Auditors](#auditors-).                                                                                                                                                                                          |
 | 409    | `auditor_already_active`                  | `POST /company/auditors`, for an address that already audits the company.                                                                                                                                                                                                            |
-| 429    | `rate_limited`                            | The auditor, access log and account status routes, with `Retry-After: 60`. They are not payments, so they do not use `wrap_rate_limited` or `transfer_rate_limited`. Which code the other reads and `POST /runs` answer with is not decided (the mock uses `transfer_rate_limited`). |
+| 429    | `rate_limited`                            | The auditor, access log and account status routes, with `Retry-After: 60`. They are not payments, so they do not use `wrap_rate_limited` or `transfer_rate_limited`. Which code the other reads answer with is not decided (the mock uses `rate_limited`; `POST /runs` uses `transfer_rate_limited`). |
 
 The review findings below propose three more (`run_in_progress`,
 `idempotency_key_reused`, `invalid_cursor`); they are not part of the shapes yet. The
@@ -1154,7 +1154,8 @@ handler, including each failure that changes the UI:
   available balance, `forbidden_role` once a role is chosen. **`transaction_mismatch`
   is not mocked**: no handler emits it, so no screen has been exercised against it.
 - `401` (`unauthenticated`), `429` with `Retry-After` (`rate-limited`), `503` with
-  `auth_unavailable` (`service-down`; `/health` answers its own `503` body).
+  `service_unavailable` (`service-down`; `/health` answers its own `503` body) and
+  `503` with `auth_unavailable` (`auth-down`).
 - Slow responses (`slow`, 1.5 s), so the progress states are exercised.
 - The auditor routes with three seeded auditors (one active, one invited and one
   whose invite has expired, derived from the age of the invite), both conflicts, and
@@ -1203,10 +1204,11 @@ and each one is a place where a screen has only been exercised against the mock.
   sent but unconfirmed, so the row stays at "Check again". `POST /runs` prepares every
   payment at once and never refuses a run for balance, and a reused
   `idempotency_key` returns the first run whatever the new list says.
-- **Rate limits.** `rate-limited` answers `transfer_rate_limited` on every route except
-  the wrap routes (`wrap_rate_limited`) and the auditor, access log and status routes
-  (`rate_limited`), so reads and `POST /runs` use a code the draft does not assign
-  them.
+- **Rate limits.** `rate-limited` answers `wrap_rate_limited` on the wrap routes and
+  `transfer_rate_limited` on the routes that prepare or confirm a transaction
+  (`/transfer`, `/runs` and its payments, `/unwrap`, `/accounts/configure` and
+  `/accounts/apply-pending`), and `rate_limited` on every other route, so reads and the
+  people and invite routes use a code the draft does not assign them.
 - **Paging.** The cursor is an offset, `limit` is clamped at 100, and a malformed
   `limit` or `cursor` is `400 invalid_request` instead of `invalid_cursor`.
 - **People and invites.** `POST /company/people/:id/invite` always answers `sent`
