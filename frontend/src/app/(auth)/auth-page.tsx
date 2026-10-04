@@ -2,15 +2,15 @@ import { redirect } from "next/navigation"
 import { readIntent } from "@/lib/auth/complete-sign-in"
 import { safeNext } from "@/lib/auth/guard"
 import { signInErrorMessage } from "@/lib/auth/sign-in-errors"
-import { currentViewer } from "@/lib/auth/viewer"
+import { currentViewer, type CurrentViewer } from "@/lib/auth/viewer"
 import { isDemoEnabled } from "@/lib/demo/mode"
+import { AlreadyMember } from "./already-member"
 import { ClearQueryCache } from "./clear-query-cache"
 import { DemoPanel } from "./demo-panel"
 import { EmailCodeForm } from "./email-code-form"
+import { readSearchParams, type AuthSearchParams } from "./search-params"
 
-export type AuthSearchParams = Promise<
-  Record<string, string | string[] | undefined>
->
+export type { AuthSearchParams }
 
 export async function AuthPage({
   mode,
@@ -19,17 +19,38 @@ export async function AuthPage({
   mode: "sign-in" | "sign-up"
   searchParams: AuthSearchParams
 }) {
-  const params = new URLSearchParams(
-    Object.entries(await searchParams).flatMap(([key, value]) =>
-      typeof value === "string" ? [[key, value]] : [],
-    ),
-  )
+  const params = await readSearchParams(searchParams)
   const intent = readIntent(params)
-  // Every session belongs to a company, so a signed-in visitor goes straight to it.
-  const viewer = await currentViewer()
-  if (viewer) redirect(safeNext(intent.next, viewer.membership.role))
+  const demoEnabled = await isDemoEnabled()
+  // A failed membership lookup is not "signed out": the form stays, with a way to retry.
+  let viewer: CurrentViewer | null = null
+  let lookupFailed = false
+  try {
+    viewer = await currentViewer()
+  } catch (error) {
+    console.error("viewer lookup failed", error)
+    lookupFailed = true
+  }
+  if (viewer) {
+    // A member who opened an invite is told why it cannot be used rather than dropped. The demo
+    // viewer has no invites: it keeps going straight to its area.
+    const opensInvite =
+      intent.invite || params.get("error") === "invite_already_member"
+    if (!demoEnabled && opensInvite) {
+      return (
+        <>
+          <ClearQueryCache />
+          <AlreadyMember viewer={viewer} invite={intent.invite} />
+        </>
+      )
+    }
+    // Every session belongs to a company, so a signed-in visitor goes straight to it.
+    redirect(safeNext(intent.next, viewer.membership.role))
+  }
   // Without Supabase there is no code to email: the demo is the way in.
-  const demo = mode === "sign-in" && (await isDemoEnabled())
+  const demo = mode === "sign-in" && demoEnabled
+  const retry = new URLSearchParams(params)
+  retry.delete("error")
   return (
     <>
       <ClearQueryCache />
@@ -39,7 +60,13 @@ export async function AuthPage({
         <EmailCodeForm
           mode={mode}
           intent={intent}
-          error={signInErrorMessage(params.get("error"))}
+          noCompany={mode === "sign-in" && params.get("error") === "no_company"}
+          error={
+            lookupFailed
+              ? signInErrorMessage("lookup_failed")
+              : signInErrorMessage(params.get("error"))
+          }
+          retryHref={lookupFailed ? `/${mode}?${retry}` : null}
         />
       )}
     </>

@@ -21,13 +21,18 @@ export function requiredRole(pathname: string): Role | null {
 }
 
 // `viewer` is the signed-in member's role, or null when signed out: every session has a membership.
-export function guard(pathname: string, viewer: Role | null): Decision {
+// `search` (with its "?") rides along in `next`, so a filtered page survives the sign-in.
+export function guard(
+  pathname: string,
+  viewer: Role | null,
+  search = "",
+): Decision {
   const role = requiredRole(pathname)
   if (!role) return { kind: "next" }
   if (!viewer) {
     return {
       kind: "redirect",
-      to: `/sign-in?next=${encodeURIComponent(pathname)}`,
+      to: `/sign-in?next=${encodeURIComponent(pathname + search)}`,
     }
   }
   if (viewer !== role) return { kind: "redirect", to: homeFor(viewer) }

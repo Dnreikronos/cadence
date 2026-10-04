@@ -28,6 +28,17 @@ describe("guard", () => {
     })
   })
 
+  it("keeps the query string in `next`, encoded, so a filtered page survives sign-in", () => {
+    expect(guard("/company/people", null, "?tab=invites&q=a b")).toEqual({
+      kind: "redirect",
+      to: "/sign-in?next=%2Fcompany%2Fpeople%3Ftab%3Dinvites%26q%3Da%20b",
+    })
+  })
+
+  it("does not carry a query string through for a public page", () => {
+    expect(guard("/sign-in", null, "?next=%2Fme")).toEqual({ kind: "next" })
+  })
+
   it("sends a recipient away from /company to their own area, not back to sign-in", () => {
     expect(guard("/company", "recipient")).toEqual({
       kind: "redirect",
@@ -56,7 +67,30 @@ describe("safeNext", () => {
     "https://evil.example/me",
     "/\\evil.example",
     "me",
-  ])("never leaves the site for %s", (next) => {
+    // Dot segments collapse into a scheme-relative URL.
+    "/me/..//evil.example",
+    "/me/../\\evil.example",
+    // The URL parser drops tabs and newlines, so these read as "//evil.example".
+    "/\t/evil.example",
+    "/\n/evil.example",
+    "/\r/evil.example",
+    "\t//evil.example",
+    "/me%2F..%2F..//evil.example",
+    "javascript:alert(1)",
+    "",
+  ])("never leaves the site for %j", (next) => {
     expect(safeNext(next, "recipient")).toBe("/me")
+  })
+
+  it("does not follow a dot segment out of the role's area", () => {
+    expect(safeNext("/me/../company", "recipient")).toBe("/me")
+    expect(safeNext("/me/../company", "admin")).toBe("/company")
+  })
+
+  it("returns a path, never a full URL", () => {
+    expect(safeNext("/me/history?page=2", "recipient")).toBe(
+      "/me/history?page=2",
+    )
+    expect(safeNext("/me//history", "recipient")).toBe("/me//history")
   })
 })

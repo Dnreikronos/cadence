@@ -1,5 +1,5 @@
 import type { ServerClient } from "@/lib/supabase/server"
-import { membershipOf } from "@/lib/supabase/membership"
+import { membershipOf, type Membership } from "@/lib/supabase/membership"
 import { safeNext } from "./guard"
 import { inviteFailure, type SignInError } from "./sign-in-errors"
 
@@ -12,6 +12,11 @@ export type SignInIntent = {
 
 export type SignInOutcome = { to: string } | { error: SignInError }
 
+// Where a member who opened an invite is sent: the sign-in page explains why it cannot be used,
+// and keeps the invite (already in their address bar) for after they sign out.
+export const inviteAlreadyMemberPath = (invite: string) =>
+  `/sign-in?${new URLSearchParams({ invite, error: "invite_already_member" })}`
+
 // Both verification paths (code and link) end here. Every session must belong to a company:
 // when this one does not, it is signed out again and the error is shown on the form.
 export async function completeSignIn(
@@ -23,10 +28,22 @@ export async function completeSignIn(
   let failure: SignInError | null = null
   if (invite) failure = await acceptInvite(supabase, invite)
   else if (company) failure = await createCompany(supabase, company)
-  const membership = await membershipOf(supabase, data.user.id)
-  // A member reopening a used invite, or signing up twice, simply carries on to their area.
-  if (membership) return { to: safeNext(next, membership.role) }
-  await supabase.auth.signOut()
+  let membership: Membership | null
+  try {
+    membership = await membershipOf(supabase, data.user.id)
+  } catch (error) {
+    // Not "no membership": the session is fine, so it is kept and the viewer may retry.
+    console.error("membership lookup failed", error)
+    return { error: "lookup_failed" }
+  }
+  if (membership) {
+    // An invite that did not apply to a member must say so, not vanish. Signing up twice
+    // is harmless: the member just carries on to their area.
+    if (invite && failure) return { to: inviteAlreadyMemberPath(invite) }
+    return { to: safeNext(next, membership.role) }
+  }
+  // This device only: signing out here must not end the viewer's sessions elsewhere.
+  await supabase.auth.signOut({ scope: "local" })
   return { error: failure ?? "no_company" }
 }
 

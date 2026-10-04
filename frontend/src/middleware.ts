@@ -32,7 +32,8 @@ export async function middleware(request: NextRequest) {
     const membership = await membershipOf(session.supabase, data.user.id)
     if (!membership) {
       // Every session belongs to a company; one without (e.g. removed) is ended here.
-      await session.supabase.auth.signOut()
+      // This device only: other sessions of the same user are not ours to end.
+      await session.supabase.auth.signOut({ scope: "local" })
       return redirect(
         request,
         "/sign-in?error=no_company",
@@ -54,7 +55,7 @@ function decide(
   response: NextResponse,
   cacheHeaders: Record<string, string> = {},
 ) {
-  const decision = guard(request.nextUrl.pathname, role)
+  const decision = guard(request.nextUrl.pathname, role, request.nextUrl.search)
   if (decision.kind === "next") return response
   return redirect(request, decision.to, response, cacheHeaders)
 }

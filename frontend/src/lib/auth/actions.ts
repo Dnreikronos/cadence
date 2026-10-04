@@ -18,9 +18,11 @@ import { signInErrorMessage, type SignInError } from "./sign-in-errors"
 
 // React resets the form after an action, so the email step gets back what was typed.
 // The code step keeps the intent read at the email step, so sign-up's company name survives it.
+// `no_company` is a valid code from an email that belongs to no company: the only place that says so.
 export type SignInState =
   | { step: "email"; email?: string; company?: string; error?: string | null }
   | { step: "code"; email: string; intent: SignInIntent; error?: string }
+  | { step: "no_company"; email?: string; intent: SignInIntent }
 
 const email = z.email()
 const code = z.string().regex(/^\d{6}$/)
@@ -84,13 +86,16 @@ async function sendCode(
       emailRedirectTo: confirm.toString(),
     },
   })
-  if (error) return fail(signInErrorMessage(sendFailure(error)))
+  const failure = error && sendFailure(error)
+  if (failure) return fail(signInErrorMessage(failure))
   return { step: "code", email: address.data, intent }
 }
 
-function sendFailure(error: AuthError): SignInError {
-  // Raised when the email has no account and this sign-in may not create one.
-  if (error.code === "otp_disabled") return "no_company"
+function sendFailure(error: AuthError): SignInError | null {
+  // Raised when the email has no account and this sign-in may not create one. Saying so
+  // would tell anyone which emails have accounts: the code step shows regardless, and a
+  // missing company is only told after a valid code.
+  if (error.code === "otp_disabled") return null
   console.error("signInWithOtp failed", error.message)
   return error.status === 429 ? "too_many_attempts" : "send_failed"
 }
@@ -111,18 +116,29 @@ async function verifyCode(
   if (error) return { ...state, error: "That code is wrong or has expired." }
   const outcome = await completeSignIn(supabase, state.intent)
   if ("error" in outcome) {
+    if (outcome.error === "no_company") {
+      return { step: "no_company", email: state.email, intent: state.intent }
+    }
     return backToEmail(state, signInErrorMessage(outcome.error))
   }
   redirect(outcome.to)
 }
 
-export async function signOut() {
+// `invite` (a hidden field of the "already a member" page) sends the viewer back to that
+// invite once signed out, to use it with another account.
+export async function signOut(form?: FormData) {
   // The demo viewer has no Supabase session: its cookie is all there is to end.
   const store = await cookies()
   store.delete(DEMO_COOKIE)
   if (!isSupabaseConfigured())
     redirect((await isDemoEnabled()) ? "/sign-in" : "/")
   const supabase = await createClient()
-  await supabase.auth.signOut()
-  redirect("/")
+  // This device only: signing out here must not end the viewer's sessions elsewhere.
+  await supabase.auth.signOut({ scope: "local" })
+  const invite = form && readIntent(form).invite
+  redirect(
+    invite
+      ? `/sign-in?${intentParams({ invite, company: null, next: null })}`
+      : "/",
+  )
 }

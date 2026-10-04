@@ -9,6 +9,7 @@ const config = vi.hoisted(() => ({
 }))
 const createMiddlewareClient = vi.hoisted(() => vi.fn())
 const getUser = vi.hoisted(() => vi.fn())
+const signOut = vi.hoisted(() => vi.fn())
 
 vi.mock("@/lib/api/mode", () => ({
   apiConfig: {
@@ -32,6 +33,7 @@ vi.mock("@/lib/supabase/env", () => ({
 vi.mock("@/lib/supabase/middleware", () => ({ createMiddlewareClient }))
 vi.mock("@/lib/supabase/membership", () => ({ membershipOf: vi.fn() }))
 
+import { membershipOf } from "@/lib/supabase/membership"
 import { middleware } from "./middleware"
 
 const COOKIE = "cadence-demo-role"
@@ -57,10 +59,12 @@ beforeEach(() => {
   })
   createMiddlewareClient.mockReset()
   getUser.mockReset()
+  signOut.mockReset().mockResolvedValue({ error: null })
+  vi.mocked(membershipOf).mockReset()
   // Supabase configured: a visitor with no session.
   getUser.mockResolvedValue({ data: { user: null } })
   createMiddlewareClient.mockImplementation(() => ({
-    supabase: { auth: { getUser } },
+    supabase: { auth: { getUser, signOut } },
     response: () => NextResponse.next(),
     cacheHeaders: {},
   }))
@@ -160,6 +164,99 @@ describe("demo cookie everywhere else is ignored", () => {
       throw new Error("Set NEXT_PUBLIC_SUPABASE_URL")
     })
     expect(outcome(await visit("/sign-in", "admin"))).toBe("next")
+  })
+})
+
+describe("a Supabase session", () => {
+  const signedIn = (role: "admin" | "recipient" | "auditor" | null) => {
+    config.supabaseConfigured = true
+    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } })
+    vi.mocked(membershipOf).mockResolvedValue(
+      role && { role, company: { name: "Solaris" } },
+    )
+  }
+
+  it("lets a member into their own area", async () => {
+    signedIn("admin")
+    expect(outcome(await visit("/company/people"))).toBe("next")
+    expect(membershipOf).toHaveBeenCalledWith(expect.anything(), "user-1")
+    expect(signOut).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ["recipient", "/company", "/me"],
+    ["admin", "/audit", "/company"],
+    ["auditor", "/me/history", "/audit"],
+  ] as const)("sends a %s from %s to %s", async (role, path, home) => {
+    signedIn(role)
+    expect(outcome(await visit(path))).toBe(home)
+  })
+
+  it("sends a visitor with no session to sign-in, query string kept", async () => {
+    config.supabaseConfigured = true
+    expect(outcome(await visit("/company/people?tab=invites&q=a%20b"))).toBe(
+      "/sign-in?next=%2Fcompany%2Fpeople%3Ftab%3Dinvites%26q%3Da%2520b",
+    )
+    expect(membershipOf).not.toHaveBeenCalled()
+  })
+
+  it("lets a visitor with no session see public pages", async () => {
+    config.supabaseConfigured = true
+    expect(outcome(await visit("/sign-in?invite=tok"))).toBe("next")
+  })
+
+  it("ends a session without a membership on this device only, then explains", async () => {
+    signedIn(null)
+    expect(outcome(await visit("/company"))).toBe("/sign-in?error=no_company")
+    expect(signOut).toHaveBeenCalledExactlyOnceWith({ scope: "local" })
+  })
+
+  it("ends it on public pages too: no session lingers without a company", async () => {
+    signedIn(null)
+    expect(outcome(await visit("/"))).toBe("/sign-in?error=no_company")
+    expect(signOut).toHaveBeenCalledOnce()
+  })
+
+  it("carries the session cookies and no-store headers onto redirects", async () => {
+    signedIn("recipient")
+    createMiddlewareClient.mockImplementation(() => ({
+      supabase: { auth: { getUser, signOut } },
+      response: () => {
+        const response = NextResponse.next()
+        response.cookies.set("sb-session", "refreshed")
+        return response
+      },
+      cacheHeaders: { "cache-control": "no-store" },
+    }))
+    const response = await visit("/company")
+    expect(outcome(response)).toBe("/me")
+    expect(response.cookies.get("sb-session")?.value).toBe("refreshed")
+    expect(response.headers.get("cache-control")).toBe("no-store")
+  })
+
+  describe("when the membership lookup fails", () => {
+    beforeEach(() => {
+      signedIn("admin")
+      vi.mocked(membershipOf).mockRejectedValue(new Error("lookup failed"))
+      vi.spyOn(console, "error").mockImplementation(() => {})
+    })
+
+    it("does not sign anyone out over it", async () => {
+      await visit("/company")
+      await visit("/sign-in")
+      expect(signOut).not.toHaveBeenCalled()
+    })
+
+    it("treats a guarded page as signed out", async () => {
+      expect(outcome(await visit("/company?tab=x"))).toBe(
+        "/sign-in?next=%2Fcompany%3Ftab%3Dx",
+      )
+    })
+
+    it("still serves public pages", async () => {
+      expect(outcome(await visit("/sign-in"))).toBe("next")
+      expect(outcome(await visit("/"))).toBe("next")
+    })
   })
 })
 
