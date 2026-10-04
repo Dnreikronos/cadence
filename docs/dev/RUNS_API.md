@@ -72,7 +72,8 @@ preceding prepared payments succeeded. If one fails, stop sending later stale
 transactions and reprepare unpaid positions in the same run. Refreshing proofs
 and blockhashes under the original approval lets payments with verified failures
 continue. Long runs may outlive their blockhash. An expired attempt with missing
-history stays unresolved and cannot be automatically rebuilt. Never edit the
+history stays unresolved and cannot be automatically rebuilt. Other eligible
+positions can continue after that attempt expires. Never edit the
 returned message or start a second run for recipients who might already be paid.
 Wallet session
 management and the approval UI belong to #83/#77.
@@ -123,12 +124,23 @@ and retry. Aggregate status is `completed` when all payments finalized,
 }
 ```
 
-Include all still-prepared positions; each requires its original valid wallet
-signature, even if never submitted. The service observes finalized block height
-before reconciling signatures. Landed successes are recorded and excluded from
-re-preparation. Finalized failures can retry. A missing transaction before expiry
-returns `409 transaction_not_finalized`. After expiry it returns
-`409 transaction_history_unavailable` and leaves the original attempt prepared.
+Include all prepared positions whose blockhash has not expired; each requires
+its original valid wallet signature, even if never submitted. Omitting one
+returns `409 outstanding_payments`. The service observes finalized block height
+before reconciling signatures. Equality with the last-valid height is still live.
+Landed successes are recorded and excluded from re-preparation. Finalized
+failures can retry. A missing transaction before expiry returns
+`409 transaction_not_finalized`.
+
+After finalized block height exceeds the stored last-valid height, missing
+history leaves that position prepared at the same attempt and adds
+`{position, error: "transaction_history_unavailable"}` to `errors` in an HTTP 200
+response. Eligible positions still retry. Expired unresolved positions can be
+omitted or included without a signature; supplied signatures still undergo
+verification and reconciliation. Their stored transactions remain unchanged and
+are omitted from the signing response. If nothing can rebuild, no proof or Vault
+read occurs. Other validation and RPC failures retain their HTTP errors.
+
 A null [transaction lookup](https://solana.com/docs/rpc/http/gettransaction)
 does not prove that a payment never executed. Automatic recovery of expired,
 unsubmitted attempts is also blocked because this RPC contract cannot prove
@@ -138,8 +150,11 @@ run for a recipient whose payment remains unresolved.
 Preparation failures need no signature. Positions/recipients stay fixed; callers
 resupply approved amounts because no plaintext intent is stored. Retry builds
 against fresh sender state, keeps finalized payments, increments `attempt` and
-archives the replaced terminal attempt. Concurrent retries cannot replace the
-same attempt twice. Execute returned transactions in ascending position again.
+archives the replaced terminal attempt. The fresh balance includes any earlier
+execution whose history is now missing. Retry responses contain transaction and
+expiry payloads only for positions rebuilt in that request. Concurrent retries
+cannot replace the same attempt twice. Execute returned transactions in
+ascending position again.
 
 ## Storage, limits and verification
 
