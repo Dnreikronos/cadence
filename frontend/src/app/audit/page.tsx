@@ -1,19 +1,19 @@
-import { Send } from "lucide-react"
 import { PageHeader } from "@/components/app/page-header"
-import { EmptyState } from "@/components/ui/empty-state"
+import { requireMember } from "@/lib/auth/viewer"
+import { AuditScreen } from "./audit-screen"
 
-export default function AuditPage() {
+export default async function AuditPage() {
+  const { membership } = await requireMember("auditor")
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Auditor"
         title="Payments"
-        description="Only members with the auditor role reach this page."
+        description="Every payment the company made, with its amount. You can read and export them; you cannot move money."
       />
-      <EmptyState
-        icon={Send}
-        title="No payments to review"
-        description="Payments from the company you audit appear here."
+      <AuditScreen
+        companyId={membership.company.id}
+        company={membership.company.name}
       />
     </div>
   )
