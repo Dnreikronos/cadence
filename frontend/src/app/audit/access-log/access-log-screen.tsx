@@ -3,9 +3,9 @@
 import { ScrollText, ShieldCheck } from "lucide-react"
 import { EmptyState } from "@/components/ui/empty-state"
 import { ErrorState } from "@/components/ui/error-state"
-import { isApiError, messageFor } from "@/lib/api/errors"
+import { messageFor } from "@/lib/api/errors"
 import { accessRow } from "@/lib/audit/access-log"
-import { listState, loadedItems } from "@/lib/audit/pages"
+import { canRetry, listState, loadedItems } from "@/lib/audit/pages"
 import { useAccessLog } from "@/lib/queries/audit"
 import { ListSkeleton, LoadMore, Time, timeFormat } from "../list-parts"
 
@@ -30,34 +30,21 @@ export function AccessLogScreen({ company }: { company: string }) {
           className="mt-0.5 size-4 shrink-0 text-ink-muted"
         />
         <span className="min-w-0">
-          Every time an amount of{" "}
-          <strong className="font-medium wrap-break-word">{company}</strong> is
-          decrypted, by the company, a recipient, an auditor or Cadence&apos;s
-          service, the read is recorded here with who did it. Cadence can read
-          amounts too, which is why its reads are listed. Opening this log
-          decrypts nothing, so it does not add a row.
+          Cadence records reads of{" "}
+          <strong className="font-medium wrap-break-word">{company}</strong>
+          &apos;s data here: who read, when, and what kind of data. Cadence can
+          read amounts too, so its reads are listed with the others. An entry
+          names the data read, never an amount.
         </span>
       </p>
 
       {state === "loading" && <ListSkeleton label="Loading the access log" />}
 
-      {state === "not-found" && (
-        <EmptyState
-          icon={ScrollText}
-          title="Nothing to show"
-          description="We couldn't find an access log for this account."
-        />
-      )}
-
       {state === "error" && (
         <ErrorState
           title="Couldn't load the access log"
           description={messageFor(log.error)}
-          onRetry={
-            !isApiError(log.error) || log.error.isRetryable
-              ? () => log.refetch()
-              : undefined
-          }
+          onRetry={canRetry(log.error) ? () => log.refetch() : undefined}
         />
       )}
 
@@ -65,45 +52,57 @@ export function AccessLogScreen({ company }: { company: string }) {
         <EmptyState
           icon={ScrollText}
           title="No reads recorded yet"
-          description="Reads appear here as soon as someone decrypts an amount."
+          description="Reads of the company's data appear here once someone has made one."
         />
       )}
 
       {state === "ready" && (
         <section className="space-y-4">
-          <div className="overflow-hidden rounded-xl border border-line bg-surface">
+          <div
+            role="table"
+            aria-label="Access log"
+            className="overflow-hidden rounded-xl border border-line bg-surface"
+          >
             <div
-              className={`hidden border-b border-line bg-surface-subtle px-4 py-2 text-label text-ink-muted uppercase md:grid ${columns}`}
+              role="row"
+              className={`sr-only text-label text-ink-muted uppercase md:not-sr-only md:grid md:border-b md:border-line md:bg-surface-subtle md:px-4 md:py-2 ${columns}`}
             >
-              <span>When</span>
-              <span>Who</span>
-              <span>What</span>
-              <span>Scope</span>
+              <span role="columnheader">When</span>
+              <span role="columnheader">Who</span>
+              <span role="columnheader">What</span>
+              <span role="columnheader">Scope</span>
             </div>
-            <ul>
-              {rows.map((row) => (
-                <li
-                  key={row.id}
-                  className={`grid gap-y-0.5 border-b border-line px-4 py-3 text-ui last:border-0 ${columns}`}
+            {rows.map((row) => (
+              <div
+                key={row.key}
+                role="row"
+                className={`grid gap-y-0.5 border-b border-line px-4 py-3 text-ui last:border-0 ${columns}`}
+              >
+                <span
+                  role="cell"
+                  className="text-caption text-ink-muted md:text-ui"
                 >
-                  <span className="text-caption text-ink-muted md:text-ui">
-                    <Time iso={row.at} format={timeFormat} />
-                  </span>
-                  <span className="min-w-0 wrap-break-word text-ink">
-                    <span className="font-medium">{row.who}</span>
-                    <span className="text-ink-muted"> · {row.kind}</span>
-                  </span>
-                  <span className="min-w-0 wrap-break-word text-ink">
-                    {row.action}
-                  </span>
-                  <span className="min-w-0 wrap-break-word text-ink-muted">
-                    {row.scope}
-                  </span>
-                </li>
-              ))}
-            </ul>
+                  <Time iso={row.at} format={timeFormat} />
+                </span>
+                <span role="cell" className="min-w-0 wrap-break-word text-ink">
+                  <span className="font-medium">{row.who}</span>
+                  <span className="text-ink-muted"> · {row.kind}</span>
+                </span>
+                <span role="cell" className="min-w-0 wrap-break-word text-ink">
+                  {row.action}
+                </span>
+                <span
+                  role="cell"
+                  className="min-w-0 wrap-break-word text-ink-muted"
+                >
+                  {row.scope}
+                </span>
+              </div>
+            ))}
           </div>
           <LoadMore
+            noun="entries"
+            count={rows.length}
             hasMore={log.hasNextPage}
             loading={log.isFetchingNextPage}
             error={log.isFetchNextPageError ? log.error : null}

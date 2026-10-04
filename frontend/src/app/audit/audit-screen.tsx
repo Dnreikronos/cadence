@@ -11,14 +11,20 @@ import { fieldClass } from "@/components/ui/field"
 import { StatusPill } from "@/components/ui/status-pill"
 import { TransparentBadge } from "@/components/ui/transparent-badge"
 import { WhoCanSee } from "@/components/ui/who-can-see"
-import { isApiError, messageFor } from "@/lib/api/errors"
-import { listState, loadedItems } from "@/lib/audit/pages"
+import { messageFor } from "@/lib/api/errors"
+import {
+  canRetry,
+  listState,
+  loadedItems,
+  showFilterNote,
+} from "@/lib/audit/pages"
 import {
   auditRow,
   filterPayments,
   filtersActive,
   isStatusFilter,
   noFilters,
+  receiptLabel,
   statusFilters,
   type AuditRow,
   type PaymentFilters,
@@ -42,6 +48,8 @@ export function AuditScreen({
   const exportCsv = useExportAudit(companyId, company)
   const [filters, setFilters] = useState<PaymentFilters>(noFilters)
   const [receipt, setReceipt] = useState<AuditRow | null>(null)
+  const noteId = useId()
+  const exportNoteId = useId()
 
   const loaded = loadedItems(payments.data)
   const shown = filterPayments(loaded, filters).map(auditRow)
@@ -50,7 +58,9 @@ export function AuditScreen({
     error: payments.error,
     loaded: loaded.length,
     shown: shown.length,
+    companyScoped: true,
   })
+  const noteShown = showFilterNote(filtersActive(filters), payments.hasNextPage)
 
   return (
     <div className="space-y-4">
@@ -59,14 +69,14 @@ export function AuditScreen({
         <span className="min-w-0">
           You can see every amount of{" "}
           <strong className="font-medium wrap-break-word">{company}</strong>.
-          Cadence logs every read, and you can review the{" "}
+          Cadence logs every read, including yours; the{" "}
           <Link
             href="/audit/access-log"
             className="underline underline-offset-2"
           >
             access log
-          </Link>
-          .
+          </Link>{" "}
+          lists them.
         </span>
       </p>
 
@@ -85,9 +95,7 @@ export function AuditScreen({
           title="Couldn't load the payments"
           description={messageFor(payments.error)}
           onRetry={
-            !isApiError(payments.error) || payments.error.isRetryable
-              ? () => payments.refetch()
-              : undefined
+            canRetry(payments.error) ? () => payments.refetch() : undefined
           }
         />
       )}
@@ -103,26 +111,36 @@ export function AuditScreen({
       {(state === "ready" || state === "no-match") && (
         <section className="space-y-4">
           <div className="flex flex-wrap items-end gap-3">
-            <Filters filters={filters} onChange={setFilters} />
+            <Filters
+              filters={filters}
+              onChange={setFilters}
+              describedBy={noteShown ? noteId : undefined}
+            />
             <button
               type="button"
-              disabled={exportCsv.isPending}
-              onClick={() => exportCsv.mutate()}
+              aria-describedby={exportNoteId}
+              aria-disabled={exportCsv.isPending || undefined}
+              onClick={() => {
+                if (!exportCsv.isPending) exportCsv.mutate()
+              }}
               className={buttonVariants({
                 variant: "secondary",
-                className: "md:ml-auto",
+                className: "aria-disabled:opacity-50 md:ml-auto",
               })}
             >
               <Download className="size-4" />
-              {exportCsv.isPending ? "Exporting…" : "Export CSV"}
+              {exportCsv.isPending ? "Exporting…" : "Export all payments (CSV)"}
             </button>
           </div>
-          {filtersActive(filters) && payments.hasNextPage && (
-            <p className="text-caption text-ink-muted">
-              Filters apply to the {loaded.length} payments loaded so far. Load
-              more to search further.
-            </p>
-          )}
+          <p id={exportNoteId} className="text-caption text-ink-muted">
+            The CSV holds every payment with its amount, whatever the filters
+            show.
+          </p>
+          <p id={noteId} role="status" className="text-caption text-ink-muted">
+            {noteShown
+              ? `Filters apply to the ${loaded.length} payments loaded so far. Load more to search further.`
+              : null}
+          </p>
 
           {state === "no-match" ? (
             <EmptyState
@@ -140,10 +158,12 @@ export function AuditScreen({
               }
             />
           ) : (
-            <PaymentList rows={shown} onReceipt={setReceipt} />
+            <PaymentTable rows={shown} onReceipt={setReceipt} />
           )}
 
           <LoadMore
+            noun="payments"
+            count={loaded.length}
             hasMore={payments.hasNextPage}
             loading={payments.isFetchingNextPage}
             error={payments.isFetchNextPageError ? payments.error : null}
@@ -164,9 +184,11 @@ export function AuditScreen({
 function Filters({
   filters,
   onChange,
+  describedBy,
 }: {
   filters: PaymentFilters
   onChange: (filters: PaymentFilters) => void
+  describedBy?: string
 }) {
   const id = useId()
   return (
@@ -183,6 +205,7 @@ function Filters({
           type="search"
           autoComplete="off"
           placeholder="Search by name"
+          aria-describedby={describedBy}
           value={filters.search}
           onChange={(event) =>
             onChange({ ...filters, search: event.target.value })
@@ -199,6 +222,7 @@ function Filters({
         </label>
         <select
           id={`${id}-status`}
+          aria-describedby={describedBy}
           value={filters.status}
           onChange={(event) => {
             const { value } = event.target
@@ -217,7 +241,9 @@ function Filters({
   )
 }
 
-function PaymentList({
+// A table for assistive technology at every width. Its header is only drawn from md up; below
+// that it stays in the accessibility tree, and the cells stack in reading order.
+function PaymentTable({
   rows,
   onReceipt,
 }: {
@@ -225,57 +251,67 @@ function PaymentList({
   onReceipt: (row: AuditRow) => void
 }) {
   return (
-    <div className="overflow-hidden rounded-xl border border-line bg-surface">
+    <div
+      role="table"
+      aria-label="Payments"
+      className="overflow-hidden rounded-xl border border-line bg-surface"
+    >
       <div
-        className={`hidden border-b border-line bg-surface-subtle px-4 py-2 text-label text-ink-muted uppercase md:grid ${columns}`}
+        role="row"
+        className={`sr-only text-label text-ink-muted uppercase md:not-sr-only md:grid md:border-b md:border-line md:bg-surface-subtle md:px-4 md:py-2 ${columns}`}
       >
-        <span>Date</span>
-        <span>Paid to</span>
-        <span className="flex items-center gap-1">
+        <span role="columnheader">Date</span>
+        <span role="columnheader">Paid to</span>
+        <span role="columnheader" className="flex items-center gap-1">
           Amount
-          <WhoCanSee viewerRole="auditor" hasAuditor />
+          <span className="hidden md:inline-flex">
+            <WhoCanSee viewerRole="auditor" hasAuditor />
+          </span>
         </span>
-        <span>Status</span>
-        <span className="sr-only">Receipt</span>
+        <span role="columnheader">Status</span>
+        <span role="columnheader" className="sr-only">
+          Receipt
+        </span>
       </div>
-      <ul>
-        {rows.map((row) => (
-          <li
-            key={row.id}
-            className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1.5 border-b border-line px-4 py-3 last:border-0 ${columns}`}
+      {rows.map((row) => (
+        <div
+          key={row.id}
+          role="row"
+          className={`grid gap-y-1.5 border-b border-line px-4 py-3 last:border-0 ${columns}`}
+        >
+          <span role="cell" className="text-caption text-ink-muted md:text-ui">
+            <Time iso={row.paidAt} />
+          </span>
+          <span
+            role="cell"
+            className="min-w-0 text-ui font-medium wrap-break-word text-ink md:font-normal"
           >
-            <span className="order-2 text-caption text-ink-muted md:order-0 md:text-ui">
-              <Time iso={row.paidAt} />
-            </span>
-            <span className="order-1 min-w-0 text-ui font-medium wrap-break-word text-ink md:order-0 md:font-normal">
-              {row.name}
-            </span>
-            <span className="order-3 inline-flex items-center gap-1.5 text-ui md:order-0">
-              <AmountDisplay amount={row.usd} />
-              <WhoCanSee
-                viewerRole="auditor"
-                hasAuditor
-                className="md:hidden"
-              />
-            </span>
-            <span className="order-4 flex flex-wrap items-center justify-end gap-1.5 md:order-0 md:justify-start">
-              <StatusPill status={row.status} />
-              {row.transparent && <TransparentBadge />}
-            </span>
-            <span className="order-5 col-span-2 flex md:order-0 md:col-span-1 md:justify-end">
-              <button
-                type="button"
-                onClick={() => onReceipt(row)}
-                aria-label={`Receipt for ${row.name}, ${row.paidAt.slice(0, 10)}`}
-                className={buttonVariants({ variant: "secondary", size: "sm" })}
-              >
-                <ReceiptText className="size-3.5" />
-                Receipt
-              </button>
-            </span>
-          </li>
-        ))}
-      </ul>
+            {row.name}
+          </span>
+          <span
+            role="cell"
+            className="inline-flex items-center gap-1.5 text-ui"
+          >
+            <AmountDisplay amount={row.usd} />
+            <WhoCanSee viewerRole="auditor" hasAuditor className="md:hidden" />
+          </span>
+          <span role="cell" className="flex flex-wrap items-center gap-1.5">
+            <StatusPill status={row.status} />
+            {row.transparent && <TransparentBadge />}
+          </span>
+          <span role="cell" className="flex md:justify-end">
+            <button
+              type="button"
+              onClick={() => onReceipt(row)}
+              aria-label={receiptLabel(row)}
+              className={buttonVariants({ variant: "secondary", size: "sm" })}
+            >
+              <ReceiptText className="size-3.5" />
+              Receipt
+            </button>
+          </span>
+        </div>
+      ))}
     </div>
   )
 }

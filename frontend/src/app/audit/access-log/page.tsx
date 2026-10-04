@@ -9,7 +9,7 @@ export default async function AccessLogPage() {
       <PageHeader
         eyebrow="Auditor"
         title="Access log"
-        description="Who read which amounts, and when."
+        description="Who read company data, and when."
       />
       <AccessLogScreen company={membership.company.name} />
     </div>

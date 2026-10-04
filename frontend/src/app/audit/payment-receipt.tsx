@@ -1,5 +1,6 @@
 "use client"
 
+import { useState } from "react"
 import { ExternalLink } from "lucide-react"
 import { AmountDisplay } from "@/components/ui/amount-display"
 import { ButtonCopy } from "@/components/ui/button-copy"
@@ -24,6 +25,11 @@ export function PaymentReceipt({
   company: string
   onClose: () => void
 }) {
+  // The dialog fades out after `row` is gone: it keeps showing the last one until it has.
+  const [last, setLast] = useState(row)
+  if (row && row !== last) setLast(row)
+  const shown = row ?? last
+
   return (
     <Modal
       open={row !== null}
@@ -31,34 +37,34 @@ export function PaymentReceipt({
       title="Payment receipt"
       description="As the auditor you read the amount; the public sees ciphertext unless the payment is marked transparent."
     >
-      {row && (
+      {shown && (
         <div className="space-y-4">
           <dl className="space-y-3 text-ui">
             <Detail label="Paid by">{company}</Detail>
-            <Detail label="Paid to">{row.name}</Detail>
+            <Detail label="Paid to">{shown.name}</Detail>
             <Detail label="Amount">
               <span className="inline-flex items-center gap-1.5">
-                <AmountDisplay amount={row.usd} />
+                <AmountDisplay amount={shown.usd} />
                 <WhoCanSee viewerRole="auditor" hasAuditor />
               </span>
             </Detail>
             <Detail label="Status">
               <span className="inline-flex flex-wrap items-center gap-1.5">
-                <StatusPill status={row.status} />
-                {row.transparent && <TransparentBadge />}
+                <StatusPill status={shown.status} />
+                {shown.transparent && <TransparentBadge />}
               </span>
             </Detail>
             <Detail label="Date">
-              <Time iso={row.paidAt} format={timeFormat} />
+              <Time iso={shown.paidAt} format={timeFormat} />
             </Detail>
             <Detail label="Signature">
-              {row.signature ? (
+              {shown.signature ? (
                 <span className="flex items-start gap-2">
                   <span className="min-w-0 font-mono text-caption break-all">
-                    {row.signature}
+                    {shown.signature}
                   </span>
                   <ButtonCopy
-                    value={row.signature}
+                    value={shown.signature}
                     label="Copy signature"
                     toastTitle="Signature copied"
                   />
@@ -69,9 +75,9 @@ export function PaymentReceipt({
             </Detail>
           </dl>
           <div className="flex justify-end gap-2">
-            {row.signature && (
+            {shown.signature && (
               <a
-                href={explorerTxUrl(row.signature, cluster.name)}
+                href={explorerTxUrl(shown.signature, cluster.name)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={buttonVariants({ variant: "secondary" })}
