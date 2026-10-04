@@ -185,14 +185,15 @@ Statuses and routes are part of the proposal.
 | 404 | `run_not_found` | `GET /runs/:run_id` and the per-payment confirm and retry routes, when the run is not in the caller's company. |
 | 404 | `payment_not_found` | `POST /runs/:run_id/payments/:payment_id/confirm` and `/retry`, when the payment is not in that run. |
 | 404 | `person_not_found` | `POST /runs`, `PUT /company/people/:person_id/amount` and `POST /company/people/:person_id/invite`, when `person_id` is not in the caller's company. |
+| 404 | `auditor_not_found` | `POST /company/auditors/:auditor_id/revoke`, when the id is not an auditor or pending invite of the caller's company. |
 | 409 | `recipient_not_activated` | `POST /runs` and the retry route, for a person without an activated account. |
 | 409 | `reveal_risk_not_acknowledged` | `POST /unwrap`, see [Unwrap](#unwrap-private-usdc-to-public-with-the-reveal-risk-flag-). |
 | 409 | `credit_counter_mismatch` | `POST /accounts/apply-pending/confirm`. |
 | 409 | `key_already_enrolled` | `POST /keys/enroll`. |
 | 409 | `person_already_active`, `person_removed` | `POST /company/people/:person_id/invite`, see [Invites](#invites-). |
-| 404 | `auditor_not_found` | `DELETE /company/auditors/:auditor_id`, when the id is not an auditor or pending invite of the caller's company. |
 | 409 | `auditor_already_invited` | `POST /company/auditors`, for an address with a pending invite, see [Auditors](#auditors-). |
 | 409 | `auditor_already_active` | `POST /company/auditors`, for an address that already audits the company. |
+| 429 | `rate_limited` | The auditor, access log and account status routes, with `Retry-After: 60`. They are not payments, so they do not use `wrap_rate_limited` or `transfer_rate_limited`. |
 
 The review findings below propose three more (`run_in_progress`,
 `idempotency_key_reused`, `invalid_cursor`); they are not part of the shapes yet.
@@ -202,7 +203,9 @@ The review findings below propose three more (`run_in_progress`,
 - The client ignores unknown fields in a response, and treats an unknown enum
   value as its safest class: an unknown `reveal_risk.level` as `exact`, an unknown
   payment or run `status` as `pending` (not confirmed, never shown as money moved),
-  an unknown error code as its status class.
+  an unknown error code as its status class, an unknown auditor `status` as a pending
+  invite (it never claims access), and an unknown access-log `actor.kind` or `action`
+  as plain text to show as sent.
 - Changes are additive: new fields, codes, enum values and routes may appear.
   Removing or renaming a field, changing a type or a meaning, or changing a code's
   status is a breaking change and needs a new route or a version prefix, announced
@@ -679,7 +682,7 @@ carries an amount**.
 |---|---|
 | `GET /company/auditors` | `{ "items": [ <auditor> ], "next_cursor": "<opaque> \| null" }`, newest invite first, paged like the other reads |
 | `POST /company/auditors` | the new `<auditor>`, with `201` |
-| `DELETE /company/auditors/:auditor_id` | `200` with `{ "status": "revoked" }` |
+| `POST /company/auditors/:auditor_id/revoke` | `200` with `{ "status": "revoked" }` |
 
 An auditor:
 
@@ -694,7 +697,7 @@ An auditor:
 
 `POST /company/auditors` takes `{ "email": "<address>" }` and creates an invite. The
 address must match `^[^@\s]+@[^@\s]+$` and be at most 320 characters, the same rule as
-the invites table (`20261001000000_tenancy.sql:27`); anything else, an unknown field
+the invites table (`20261001000000_tenancy.sql:41`); anything else, an unknown field
 included, is `400 invalid_request`. The web app checks the same rule before it sends.
 As with [Invites](#invites-), the response never contains the invite token or link.
 
@@ -702,15 +705,19 @@ As with [Invites](#invites-), the response never contains the invite token or li
   `409 auditor_already_active` when it already audits the company. Addresses are
   compared without regard to case. This draft assumes a pending invite that has
   expired (`invite-expired`) does not block a new one: the new invite replaces it.
-- `DELETE` revokes an active auditor or withdraws a pending invite. An id that is
-  not in the caller's company is `404 auditor_not_found`, never `403`, so a response
-  never confirms that it exists, and a second `DELETE` of the same id is also `404`.
-  It answers `200 { "status": "revoked" }` and not `204`, so that every route in this
-  contract returns a JSON body that the client validates; a client treats an empty
-  `204` as a contract error.
-- **Blocked: `DELETE` fails CORS preflight**, like `PUT` (see
-  [Conventions](#conventions)). This document does not change the shape; the choice
-  between allowing `DELETE` and a `POST` is in [Open questions](#open-questions).
+- `POST /company/auditors/:auditor_id/revoke` takes no body. It revokes an active
+  auditor or withdraws a pending invite. An id that is not in the caller's company is
+  `404 auditor_not_found`, never `403`, so a response never confirms that it exists,
+  and a second revoke of the same id is also `404`. It answers
+  `200 { "status": "revoked" }` and not `204`, so that every route in this contract
+  returns a JSON body that the client validates; a client treats an empty `204` as a
+  contract error.
+- **Revoke is a `POST`, not a `DELETE`**, because the service's CORS allows only GET
+  and POST and a `DELETE` fails preflight from a browser (see
+  [Conventions](#conventions)).
+- The `status` is `invited` while the invite is pending, `invite-expired` once it has
+  lapsed (invites live seven days) and `active` after it is accepted. A client treats
+  any other value as `invited`.
 
 ### Access log 🟡
 
@@ -796,13 +803,18 @@ handler, including each failure that changes the UI:
   `transaction_mismatch`, `credit_counter_mismatch`, `forbidden_role`.
 - `401`, `429` with `Retry-After`, and `503` with `auth_unavailable`.
 - Slow responses, so the progress states are exercised.
-- The auditor routes with one active and one invited auditor, both conflicts, and
+- The auditor routes with three seeded auditors (one active, one invited and one
+  whose invite has expired, derived from the age of the invite), both conflicts, and
   an expired invite that a new one replaces; an access log of 25 rows, so paging is
-  exercisable; and an account status derived from the mock's own state. Enrolling a
-  key links the wallet, confirming `configure` sets `account_configured`, and
-  credits that a run payment left pending set `pending_credits`. The mock also has a
-  reset for that status alone (`resetAccountStatus`, and `cadenceMock.resetAccountStatus()`
-  in the browser).
+  exercisable; and an account status derived from the mock's own state. Enrolling the
+  recipient's key links the wallet and sets `key_enrolled`, confirming `configure`
+  links it too and sets `account_configured`, and credits that a run payment left
+  pending set `pending_credits`. Nothing the company's wallet does changes that
+  status. "Linked but not enrolled" can be reached by configuring first, but not by
+  stopping between a wallet link and the enrollment, because one enroll call flips
+  both flags. The mock also has a reset for the steps alone (`resetAccountStatus`, and
+  `cadenceMock.resetAccountStatus()` in the browser); it leaves balances, credits and
+  requests already in flight alone.
 
 A handler returns an error body with **only** `{ "error": code }`, so a mock cannot
 teach a screen to depend on a field the real service will not send. A mock that
@@ -1026,17 +1038,24 @@ These need an answer from the backend owner before the 🟡 routes are built.
     or does the service build them for `/accounts/configure`?
 21. **Rate-limit budgets for runs and invites.** What are the per-user and per-run
     quotas, and the per-person, per-company and per-address invite limits? The
-    existing limiter is per instance and per peer (finding 11).
+    existing limiter is per instance and per peer (finding 11). Auditor invites
+    need the same per-company and per-address budgets as person invites, and the
+    auditor, access log and account status routes answer a limit with
+    `rate_limited`, not a wrap or transfer code.
 22. **Versioning.** Is "additive only, plus `api_version` on `/health`" acceptable,
     and where does a breaking change go?
 23. **CORS: `PUT` and `Retry-After`.** Will CORS allow `PUT`, or does
     `PUT /company/people/:person_id/amount` become a `POST`? Will the service send
     `Access-Control-Expose-Headers: Retry-After`?
-24. **Auditor invites and revocation.** `DELETE /company/auditors/:auditor_id` fails
-    CORS preflight like `PUT`: allow `DELETE`, or make it a `POST`? Does an expired
-    invite get replaced by a new one (this draft) or revived, and are addresses
-    compared without regard to case? Is `200 { "status": "revoked" }` acceptable, or
-    should it be `204`?
+24. **Auditor invites and revocation.** Revoke is `POST /company/auditors/:auditor_id/revoke`
+    because `DELETE` fails CORS preflight (question 23); if CORS later allows
+    `DELETE`, should it become `DELETE /company/auditors/:auditor_id`? An expired
+    invite is replaced by a new one in this draft. `invites_pending_email` is unique
+    per `(company_id, lower(email))` among unaccepted rows, so replacing means deleting
+    the old row and inserting a new one, which also changes the invite id. Is that
+    right, or should the old invite be revived? Are addresses compared without regard
+    to case (the index lowercases them)? Is `200 { "status": "revoked" }` acceptable,
+    or should it be `204`?
 25. **Access log scope.** Is every audit row of #49 shown, or only the ones whose
     subject is the auditor's company? How long is the log kept, and does reading it
     (or an export) write an audit row of its own?
@@ -1055,9 +1074,10 @@ These need an answer from the backend owner before the 🟡 routes are built.
   proposals that leave the shapes unchanged. Reworded Q10, extended the open
   questions to 23, and fixed the ADR B13 justification.
 - 2026-10-04: added three 🟡 proposals the remaining screens need, all additive:
-  [Auditors](#auditors-) (`GET`, `POST` and `DELETE /company/auditors`, #85), the
+  [Auditors](#auditors-) (`GET` and `POST /company/auditors`, `POST /company/auditors/:id/revoke`, #85), the
   [access log](#access-log-) (`GET /audit/access-log`, #88) and
   [account status](#account-status-) (`GET /me/status`, #80), with the codes
-  `auditor_already_invited`, `auditor_already_active` and `auditor_not_found`, and
+  `auditor_already_invited`, `auditor_already_active`, `auditor_not_found` and the
+  generic `rate_limited`, and
   open questions 24 and 25. The client and the mock implement them. No existing
   route changed.
