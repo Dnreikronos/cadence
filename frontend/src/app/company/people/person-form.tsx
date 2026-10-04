@@ -5,6 +5,7 @@ import { Modal } from "@/components/ui/modal"
 import { buttonVariants } from "@/components/ui/button"
 import { fieldClass } from "@/components/ui/field"
 import { WhoCanSee } from "@/components/ui/who-can-see"
+import { DECIMAL_HINT, isCommaDecimal } from "@/lib/deposit/schema"
 import { formatBaseUnits } from "@/lib/money"
 import { shortName } from "@/lib/people/display"
 import {
@@ -149,7 +150,9 @@ function PersonForm({
         }
       }
       if (monthly && !monthly.success) {
-        next.monthlyAmount = monthly.error.issues[0].message
+        next.monthlyAmount = isCommaDecimal(amount)
+          ? DECIMAL_HINT
+          : monthly.error.issues[0].message
       }
       setErrors(next)
       return

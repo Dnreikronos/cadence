@@ -1,13 +1,43 @@
 import { describe, expect, it } from "vitest"
 import {
+  DECIMAL_HINT,
   baseUnitsToUsdc,
   formatBaseUnits,
+  isCommaDecimal,
   maxBaseUnits,
   parseAmount,
+  parseUnits,
   toBaseUnits,
 } from "./schema"
 
 const usdc = (whole: number) => BigInt(whole) * 1_000_000n
+
+describe("a decimal comma", () => {
+  it("is still refused, with the way to type it", () => {
+    expect(DECIMAL_HINT).toBe("Use digits and a dot for decimals, like 1.50")
+    for (const input of ["1,5", "4200,50", " 0,25 ", "4.200,50", "7,"]) {
+      expect(parseAmount(input)).toBeUndefined()
+      expect(parseUnits(input)).toEqual({ ok: false, message: DECIMAL_HINT })
+      expect(isCommaDecimal(input)).toBe(true)
+    }
+  })
+
+  it("is not mistaken for thousands commas, a blank or text", () => {
+    // These parse, so the hint is never reached.
+    for (const input of ["1,500", "1,500.25", "1.50"]) {
+      expect(parseAmount(input)).toBeDefined()
+    }
+    expect(parseUnits("1,500")).toEqual({ ok: true, units: 1_500_000_000n })
+    // These are not decimals with a comma: the plain message stays.
+    for (const input of ["", "abc", "1,2,3", ",5"]) {
+      expect(isCommaDecimal(input)).toBe(false)
+      expect(parseUnits(input)).toEqual({
+        ok: false,
+        message: "Enter an amount",
+      })
+    }
+  })
+})
 
 describe("parseAmount", () => {
   it.each([
@@ -61,7 +91,9 @@ describe("toBaseUnits", () => {
   it.each([
     ["", "Enter an amount"],
     ["abc", "Enter an amount"],
-    ["1,5", "Enter an amount"],
+    ["1,5", DECIMAL_HINT],
+    ["4200,50", DECIMAL_HINT],
+    ["4.200,50", DECIMAL_HINT],
     ["0", "The amount must be more than zero"],
     ["0.000000", "The amount must be more than zero"],
     ["1000.000001", "That is more public USDC than you hold"],
