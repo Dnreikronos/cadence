@@ -29,9 +29,9 @@ use spl_token_2022_interface::{
     state::{Account, Mint},
 };
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -45,6 +45,12 @@ pub const OTHER: &str = "22222222-2222-4222-8222-222222222222";
 pub struct Backend {
     pub accounts: Mutex<HashMap<String, Value>>,
     pub transaction: Mutex<Value>,
+    pub transactions: Mutex<HashMap<String, Value>>,
+    pub finalized_height: AtomicU64,
+    pub unavailable_accounts: Mutex<HashSet<String>>,
+    pub delayed_accounts: Mutex<HashMap<String, Duration>>,
+    pub active_account_reads: AtomicUsize,
+    pub peak_account_reads: AtomicUsize,
     pub calls: Mutex<Vec<Value>>,
     pub wrong_cluster: AtomicBool,
 }
@@ -77,6 +83,33 @@ async fn user(headers: HeaderMap) -> Result<Json<Value>, StatusCode> {
 }
 async fn rpc(State(state): State<Arc<Backend>>, Json(request): Json<Value>) -> Json<Value> {
     state.calls.lock().unwrap().push(request.clone());
+    let delay = if request["method"] == "getAccountInfo" {
+        state
+            .delayed_accounts
+            .lock()
+            .unwrap()
+            .get(request["params"][0].as_str().unwrap())
+            .copied()
+    } else {
+        None
+    };
+    if let Some(delay) = delay {
+        let active = state.active_account_reads.fetch_add(1, Ordering::SeqCst) + 1;
+        state.peak_account_reads.fetch_max(active, Ordering::SeqCst);
+        tokio::time::sleep(delay).await;
+        state.active_account_reads.fetch_sub(1, Ordering::SeqCst);
+    }
+    if request["method"] == "getAccountInfo"
+        && state
+            .unavailable_accounts
+            .lock()
+            .unwrap()
+            .contains(request["params"][0].as_str().unwrap())
+    {
+        return Json(
+            json!({"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"sensitive-value"}}),
+        );
+    }
     let result = match request["method"].as_str().unwrap() {
         "getGenesisHash" => {
             if state.wrong_cluster.load(Ordering::SeqCst) {
@@ -92,7 +125,14 @@ async fn rpc(State(state): State<Arc<Backend>>, Json(request): Json<Value>) -> J
         "getAccountInfo" => {
             json!({"value": state.accounts.lock().unwrap().get(request["params"][0].as_str().unwrap()).cloned().unwrap_or(Value::Null)})
         }
-        "getTransaction" => state.transaction.lock().unwrap().clone(),
+        "getBlockHeight" => json!(state.finalized_height.load(Ordering::SeqCst)),
+        "getTransaction" => state
+            .transactions
+            .lock()
+            .unwrap()
+            .get(request["params"][0].as_str().unwrap())
+            .cloned()
+            .unwrap_or_else(|| state.transaction.lock().unwrap().clone()),
         other => panic!("unexpected RPC: {other}"),
     };
     Json(json!({"jsonrpc": "2.0", "id": 1, "result": result}))

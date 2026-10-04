@@ -1,5 +1,13 @@
 # Gotchas
 
+- Payment-run retries cannot infer nonexecution from a null finalized RPC lookup,
+  even after blockhash expiry. Preserve unresolved attempts until finalized
+  evidence is available, and isolate their errors after finalized expiry so
+  eligible payments can rebuild from fresh sender state. Keep live prepared
+  payments blocking retries, and return signing payloads only for rebuilt
+  positions. Bound recipient RPC reads separately from CPU proofs
+  and acquire the shared proof permit after the RPC fetches.
+
 - Before claiming provider credentials are missing, check the project's ignored
   `.env` files as well as the process environment, including the checkout used
   for the previous experiment. Inspect setting names/presence without printing

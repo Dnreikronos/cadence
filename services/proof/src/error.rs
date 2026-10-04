@@ -3,6 +3,10 @@ use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    #[error("run not found")]
+    RunNotFound,
+    #[error("run storage is unavailable")]
+    RunUnavailable,
     #[error("authentication required")]
     Unauthorized,
     #[error("wallet access denied")]
@@ -36,6 +40,8 @@ pub enum AppError {
 impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
+            Self::RunNotFound => StatusCode::NOT_FOUND,
+            Self::RunUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::Forbidden => StatusCode::FORBIDDEN,
             Self::TransferNotFound => StatusCode::NOT_FOUND,
@@ -67,6 +73,8 @@ impl IntoResponse for AppError {
                 .into_response();
         }
         let code = match self {
+            Self::RunNotFound => "run_not_found",
+            Self::RunUnavailable => "run_storage_unavailable",
             Self::Unauthorized => "authentication_required",
             Self::Forbidden => "wallet_access_denied",
             Self::TransferNotFound => "transfer_not_found",
