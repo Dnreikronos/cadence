@@ -6,3 +6,6 @@
 .env.keys
 .env.local
 .env.*.local
+
+# Local auth signing key (spikes/embedded-wallet/README.md): a private key, never commit
+signing_keys.json

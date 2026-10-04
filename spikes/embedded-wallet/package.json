@@ -1,0 +1,14 @@
+{
+  "name": "embedded-wallet-spike",
+  "private": true,
+  "type": "module",
+  "description": "Throwaway spike for #77: Supabase session to a Turnkey embedded wallet in the browser.",
+  "dependencies": {
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
+    "@supabase/supabase-js": "^2.117.2",
+    "@turnkey/core": "^2.12.1",
+    "@turnkey/sdk-server": "^8.6.0",
+    "bs58": "^6.0.0"
+  }
+}
