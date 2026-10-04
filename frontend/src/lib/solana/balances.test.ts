@@ -11,7 +11,7 @@ import {
 } from "vitest"
 import { MOCK_ORIGIN } from "@/lib/api/config"
 import { createApiClient } from "@/lib/api/client"
-import { COMPANY_WALLET, ME_WALLET, resetDb } from "@/lib/api/mocks/db"
+import { COMPANY_WALLET, ME_WALLET, db, resetDb } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
 
@@ -24,38 +24,43 @@ vi.mock("@/lib/api/mode", () => ({
   },
 }))
 
-import { fetchPublicUsdc, readPublicUsdc, usdcMints } from "./balances"
+import {
+  associatedTokenAddress,
+  fetchPublicUsdc,
+  readPublicUsdc,
+  usdcMints,
+} from "./balances"
 import { mockPublicUsdc } from "./mock-balances"
 
-// What the node answers for getTokenAccountsByOwner with jsonParsed data.
+const OWNER = COMPANY_WALLET
+
+// What the node answers for getAccountInfo with jsonParsed data.
 function tokenAccount(amount: string) {
   return {
-    pubkey: COMPANY_WALLET,
-    account: {
-      data: {
-        parsed: {
-          info: { tokenAmount: { amount, decimals: 6, uiAmount: 0 } },
-          type: "account",
-        },
-        program: "spl-token",
-        space: 165,
+    data: {
+      parsed: {
+        info: { tokenAmount: { amount, decimals: 6, uiAmount: 0 } },
+        type: "account",
       },
-      executable: false,
-      lamports: 2_039_280,
-      owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
-      rentEpoch: 0,
+      program: "spl-token",
+      space: 165,
     },
+    executable: false,
+    lamports: 2_039_280,
+    owner: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    rentEpoch: 0,
+    space: 165,
   }
 }
 
-function rpcAnswering(accounts: ReturnType<typeof tokenAccount>[]) {
+function rpcAnswering(account: ReturnType<typeof tokenAccount> | null) {
   const sent: { method: string; params: unknown[] }[] = []
   const transport = (async ({ payload }: { payload: unknown }) => {
     sent.push(payload as (typeof sent)[number])
     return {
       jsonrpc: "2.0",
       id: (payload as { id: unknown }).id,
-      result: { context: { slot: 1 }, value: accounts },
+      result: { context: { slot: 1 }, value: account },
     }
   }) as RpcTransport
   return { sent, rpc: createSolanaRpcFromTransport(transport) }
@@ -70,41 +75,66 @@ describe("usdcMints", () => {
   })
 })
 
+describe("associatedTokenAddress", () => {
+  // Worked out independently of the kit: sha256 of the owner, the token program,
+  // the mint, the bump, the associated-token program and the PDA marker, with
+  // the first bump (from 255 down) that lands off the ed25519 curve.
+  it.each([
+    [OWNER, usdcMints.devnet, "326FkmYoBjhvybQaiiyvsBk2ULFhMFnJRKYDnKJCVfw6"],
+    [OWNER, usdcMints.mainnet, "YWqYJ4UXkbSRYmfuM6n9kQjhzyNNMVdSj61HCX28rtP"],
+    [
+      ME_WALLET,
+      usdcMints.devnet,
+      "5K3tmjKHJcLujL7SLZcEjutEZnrzMruUXTzQV6z5cQT6",
+    ],
+    [
+      ME_WALLET,
+      usdcMints.mainnet,
+      "F4YA4H7HeXLCvjLRKdh56FgE4cyHpPqLP1VCM6fEqEmX",
+    ],
+  ])("derives the account of %s for mint %s", async (owner, mint, expected) => {
+    expect(await associatedTokenAddress(owner, mint)).toBe(expected)
+  })
+})
+
 describe("fetchPublicUsdc", () => {
-  it("asks the node for the wallet's accounts of the USDC mint, parsed", async () => {
-    const { sent, rpc } = rpcAnswering([tokenAccount("1")])
-    await fetchPublicUsdc(COMPANY_WALLET, { rpc, mint: usdcMints.devnet })
-    expect(sent[0].method).toBe("getTokenAccountsByOwner")
-    expect(sent[0].params[0]).toBe(COMPANY_WALLET)
-    expect(sent[0].params[1]).toEqual({ mint: usdcMints.devnet })
-    expect(sent[0].params[2]).toMatchObject({ encoding: "jsonParsed" })
+  it("asks the node for the wallet's associated USDC account, parsed", async () => {
+    const { sent, rpc } = rpcAnswering(tokenAccount("1"))
+    await fetchPublicUsdc(OWNER, { rpc, mint: usdcMints.devnet })
+    expect(sent[0].method).toBe("getAccountInfo")
+    expect(sent[0].params[0]).toBe(
+      "326FkmYoBjhvybQaiiyvsBk2ULFhMFnJRKYDnKJCVfw6",
+    )
+    expect(sent[0].params[1]).toMatchObject({ encoding: "jsonParsed" })
   })
 
-  it("sums every account in exact base units, past what a float holds", async () => {
-    const { rpc } = rpcAnswering([
-      tokenAccount("12500000000"),
-      tokenAccount("1"),
-      tokenAccount("9007199254740993"),
-    ])
-    await expect(fetchPublicUsdc(COMPANY_WALLET, { rpc })).resolves.toBe(
-      "9007211754740994",
+  it("reads the balance in exact base units, past what a float holds", async () => {
+    const { rpc } = rpcAnswering(tokenAccount("9007199254740993"))
+    await expect(fetchPublicUsdc(OWNER, { rpc })).resolves.toBe(
+      "9007199254740993",
     )
   })
 
-  it("is zero for a wallet that owns no account of the mint", async () => {
-    const { rpc } = rpcAnswering([])
-    await expect(fetchPublicUsdc(COMPANY_WALLET, { rpc })).resolves.toBe("0")
+  it("is zero when the account does not exist yet", async () => {
+    const { rpc } = rpcAnswering(null)
+    await expect(fetchPublicUsdc(OWNER, { rpc })).resolves.toBe("0")
   })
 
   it("refuses an amount that is not whole digits", async () => {
-    const { rpc } = rpcAnswering([tokenAccount("1.5")])
-    await expect(fetchPublicUsdc(COMPANY_WALLET, { rpc })).rejects.toThrow(
-      RangeError,
-    )
+    const { rpc } = rpcAnswering(tokenAccount("1.5"))
+    await expect(fetchPublicUsdc(OWNER, { rpc })).rejects.toThrow(RangeError)
+  })
+
+  it("refuses an account that is not a parsed token account", async () => {
+    const { rpc } = rpcAnswering({
+      ...tokenAccount("1"),
+      data: ["AAAA", "base64"] as never,
+    })
+    await expect(fetchPublicUsdc(OWNER, { rpc })).rejects.toThrow(TypeError)
   })
 
   it("refuses a wallet that is not an address", async () => {
-    const { rpc } = rpcAnswering([])
+    const { rpc } = rpcAnswering(null)
     await expect(fetchPublicUsdc("not-an-address", { rpc })).rejects.toThrow()
   })
 })
@@ -143,18 +173,34 @@ describe("the mock public balance", () => {
     await expect(mockPublicUsdc(COMPANY_WALLET)).resolves.toBe("10000000000")
   })
 
-  it("refuses to confirm a wrap larger than what the wallet holds, and spends nothing", async () => {
+  it("refuses to prepare a wrap larger than what the wallet holds", async () => {
+    await expect(
+      api.wrap.prepare({
+        company_wallet: COMPANY_WALLET,
+        amount: "12500000001",
+      }),
+    ).rejects.toMatchObject({ code: "insufficient_usdc" })
+    await expect(
+      api.wrap.prepare({
+        company_wallet: COMPANY_WALLET,
+        amount: "12500000000",
+      }),
+    ).resolves.toBeDefined()
+  })
+
+  it("still refuses at confirm when the balance fell after the prepare, and spends nothing", async () => {
     scenarios.set("instant")
     const prepared = await api.wrap.prepare({
       company_wallet: COMPANY_WALLET,
-      amount: "12500000001",
+      amount: "5000000000",
     })
+    db.publicUsdc = 1_000_000n
 
     await expect(
       api.wrap.confirm({ request_id: prepared.request_id, signature: SIG }),
     ).rejects.toMatchObject({ code: "insufficient_usdc" })
 
-    await expect(mockPublicUsdc(COMPANY_WALLET)).resolves.toBe("12500000000")
+    await expect(mockPublicUsdc(COMPANY_WALLET)).resolves.toBe("1000000")
   })
 
   it("fails like an unreachable node under rpc-down", async () => {

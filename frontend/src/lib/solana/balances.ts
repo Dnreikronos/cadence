@@ -1,4 +1,9 @@
-import { address, type Address } from "@solana/kit"
+import {
+  address,
+  getAddressEncoder,
+  getProgramDerivedAddress,
+  type Address,
+} from "@solana/kit"
 import { apiConfig } from "@/lib/api/mode"
 import { sumUnits } from "@/lib/money"
 import { cluster, type ClusterName } from "./cluster"
@@ -11,19 +16,39 @@ export const usdcMints: Record<ClusterName, string> = {
   mainnet: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 }
 
+const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+const ASSOCIATED_TOKEN_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+
+// The account a wallet's USDC lives in: the SPL Token associated account. A wrap
+// debits exactly this one (docs/dev/WRAP_API.md), so it is the balance that can
+// be made private. Another USDC account the wallet happens to own is not.
+export async function associatedTokenAddress(
+  owner: string,
+  mint: string,
+): Promise<Address> {
+  const encode = getAddressEncoder()
+  const [derived] = await getProgramDerivedAddress({
+    programAddress: address(ASSOCIATED_TOKEN_PROGRAM),
+    seeds: [
+      encode.encode(address(owner)),
+      encode.encode(address(TOKEN_PROGRAM)),
+      encode.encode(address(mint)),
+    ],
+  })
+  return derived
+}
+
 // The part of the RPC this read uses, so a test can answer it.
 export type TokenBalanceRpc = {
-  getTokenAccountsByOwner: (
-    owner: Address,
-    filter: { mint: Address },
+  getAccountInfo: (
+    account: Address,
     config: { encoding: "jsonParsed" },
   ) => {
     send: (options?: { abortSignal?: AbortSignal }) => Promise<{
-      value: readonly {
-        account: {
-          data: { parsed: { info: { tokenAmount: { amount: string } } } }
-        }
-      }[]
+      // Null when the account does not exist.
+      value: {
+        data: unknown
+      } | null
     }>
   }
 }
@@ -34,22 +59,31 @@ type Options = {
   signal?: AbortSignal
 }
 
-// What `wallet` holds of the cluster's USDC, in base units, summed over every
-// token account it owns for that mint. "0" when it owns none.
+function amountOf(data: unknown): string {
+  const info = (
+    data as {
+      parsed?: { info?: { tokenAmount?: { amount?: unknown } } }
+    }
+  )?.parsed?.info?.tokenAmount?.amount
+  if (typeof info !== "string") {
+    throw new TypeError("The account is not a parsed token account")
+  }
+  return info
+}
+
+// What `wallet` holds of the cluster's USDC in its associated token account, in
+// base units. "0" when the account does not exist yet.
 export async function fetchPublicUsdc(
   wallet: string,
   { rpc = createRpc(), mint = usdcMints[cluster.name], signal }: Options = {},
 ): Promise<string> {
   const { value } = await rpc
-    .getTokenAccountsByOwner(
-      address(wallet),
-      { mint: address(mint) },
-      { encoding: "jsonParsed" },
-    )
+    .getAccountInfo(await associatedTokenAddress(wallet, mint), {
+      encoding: "jsonParsed",
+    })
     .send({ abortSignal: signal })
-  return sumUnits(
-    value.map((a) => a.account.data.parsed.info.tokenAmount.amount),
-  )
+  // Reads the digits through the same strict check as every other amount.
+  return value ? sumUnits([amountOf(value.data)]) : "0"
 }
 
 // The public USDC balance of a wallet: the chain in real mode, a stand-in in

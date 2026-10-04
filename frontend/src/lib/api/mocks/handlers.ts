@@ -365,6 +365,11 @@ export const handlers = [
     if (scenarios.has("setup-required") && !data.setup) {
       return fail(409, "confidential_setup_required")
     }
+    // Like the real service, refuse what the USDC account cannot cover. Confirm
+    // checks again, since the balance can fall in between.
+    if (BigInt(data.amount) > db.publicUsdc) {
+      return fail(409, "insufficient_usdc")
+    }
     const p = prepared(data.company_wallet, 0)
     remember("wrap", p, data.company_wallet, BigInt(data.amount))
     return HttpResponse.json({

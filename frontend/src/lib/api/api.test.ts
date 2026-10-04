@@ -78,6 +78,8 @@ describe("contract validation", () => {
   })
 
   it("accepts exactly 2^48-1 base units and refuses one more", async () => {
+    // The wallet has to hold what it wraps, so give it the cap.
+    db.publicUsdc = 281474976710655n
     const ok = await api.wrap.prepare({
       company_wallet: COMPANY_WALLET,
       amount: "281474976710655",
