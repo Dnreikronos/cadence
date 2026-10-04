@@ -1,6 +1,7 @@
+import { notFound } from "next/navigation"
 import { PageHeader } from "@/components/app/page-header"
 import { idSchema } from "@/lib/api/schemas"
-import { RunNotFound, RunScreen } from "./run-screen"
+import { RunScreen } from "./run-screen"
 
 export default async function RunPage({
   params,
@@ -8,9 +9,9 @@ export default async function RunPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  // The id goes into a request path: only a guid reaches the client. Anything else is
-  // the same screen as a run that does not exist, not a bare 404.
-  const valid = idSchema.safeParse(id).success
+  // The id goes into a request path: only a guid reaches the client. Anything else is a
+  // real 404 that renders this route's not-found, the same "Run not found" as an unknown run.
+  if (!idSchema.safeParse(id).success) notFound()
   return (
     <div className="space-y-6">
       <PageHeader
@@ -18,7 +19,7 @@ export default async function RunPage({
         title="Run progress"
         description="Where each payment in this run stands."
       />
-      {valid ? <RunScreen runId={id} /> : <RunNotFound />}
+      <RunScreen runId={id} />
     </div>
   )
 }
