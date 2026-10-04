@@ -52,7 +52,7 @@ jobs:
     timeout-minutes: 20
     strategy:
       matrix:
-        suite: [keys, confidential_vault, transfer_http, runs_http]
+        suite: [keys, confidential_vault, transfer_http, runs_http, unwrap_http]
     services:
       postgres:
         image: supabase/postgres:17.6.1.143
