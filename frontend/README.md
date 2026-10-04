@@ -136,11 +136,12 @@ role:
 | `/audit/*`   | `auditor`   |
 
 Every session belongs to a company: the middleware signs out a session that has
-no membership (for example, after a removal) and sends it to
-`/sign-in?error=no_company`. A signed-out visit goes to `/sign-in?next=<path>`,
-and a member with another role goes to their own area. If Supabase is
-unreachable or unconfigured, guarded areas are treated as signed out. The rules
-live in `src/lib/auth/guard.ts`.
+no membership (for example, after a removal), on this device only
+(`scope: "local"`), and sends it to `/sign-in?error=no_company`. A signed-out
+visit goes to `/sign-in?next=<path and query>`, and a member with another role
+goes to their own area. If Supabase is unreachable or unconfigured, or the
+membership lookup fails, guarded areas are treated as signed out (nobody is
+signed out over a failed lookup). The rules live in `src/lib/auth/guard.ts`.
 
 Row-level security is still the authorization boundary: the middleware only
 decides which page to show.
@@ -148,9 +149,14 @@ decides which page to show.
 ## Sign-in and sign-up
 
 There are no passwords. Each email carries a 6-digit code and a link, from the
-templates in `supabase/templates/`. The code is entered on the form; the link
-lands on `/auth/confirm`, which verifies its `token_hash` and works in any
+templates in `supabase/templates/`. The code is entered on the form. The link
+lands on `/auth/confirm`, which only shows a "Continue" button: the token is
+spent by that button's POST to `/auth/confirm/verify` (same-origin only), so a
+mail scanner that opens the link does not use it up, and it works in any
 browser. Both paths end in `completeSignIn` (`src/lib/auth/complete-sign-in.ts`).
+The confirm page sets `Referrer-Policy: same-origin`, not `no-referrer`: Chrome
+sends `Origin: null` with a form POST under the latter, which the verify route
+refuses.
 
 Accounts exist only to belong to a company, and there are two ways to get one:
 
@@ -160,11 +166,16 @@ Accounts exist only to belong to a company, and there are two ways to get one:
   Confirming the email accepts the invite (`accept_invite`) and lands on the
   area for the role.
 
-`/sign-in` without an invite never creates an account; an unknown email is told
-to create a company or use its invite. If a confirmation ends without a
-membership (an expired invite, for instance), the session is signed out again
-and the form shows why (`?error=<code>`, mapped in
-`src/lib/auth/sign-in-errors.ts`).
+`/sign-in` without an invite never creates an account, and it never reveals
+whether an email has one: an unknown email gets the same "code sent" step (no
+mail goes out, so any code fails with the generic message). "No company on this
+email" is shown only after a valid code from an account that has no membership.
+If a confirmation ends without a membership (an expired invite, for instance),
+the session is signed out again and the form shows why (`?error=<code>`, mapped
+in `src/lib/auth/sign-in-errors.ts`). A member who opens an invite is not
+dropped: they land on a page saying they already belong to a company, with a
+sign-out that returns to the invite. A failed membership lookup shows the form
+with a retry message, never a 500.
 
 The invite token and company name ride through sign-in as form fields and
 inside the emailed link, so they survive opening the email on another device.
