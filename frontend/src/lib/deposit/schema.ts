@@ -22,14 +22,25 @@ export function parseAmount(input: string): string | undefined {
 export type AmountResult =
   { ok: true; units: bigint } | { ok: false; message: string }
 
-// Validates the typed amount against the public balance, all in integer base units.
-export function toBaseUnits(input: string, available: bigint): AmountResult {
+// Reads a typed amount into integer base units. Zero is a valid reading; limits are the caller's.
+export function parseUnits(input: string): AmountResult {
   const amount = parseAmount(input)
   if (amount === undefined) return fail("Enter an amount")
   const [whole, fraction = ""] = amount.split(".")
   if (fraction.length > decimals) return fail("Use at most six decimal places")
-  const units =
-    BigInt(whole || "0") * unitsPerUsdc + BigInt(fraction.padEnd(decimals, "0"))
+  return {
+    ok: true,
+    units:
+      BigInt(whole || "0") * unitsPerUsdc +
+      BigInt(fraction.padEnd(decimals, "0")),
+  }
+}
+
+// Validates the typed amount against the public balance, all in integer base units.
+export function toBaseUnits(input: string, available: bigint): AmountResult {
+  const parsed = parseUnits(input)
+  if (!parsed.ok) return parsed
+  const { units } = parsed
   if (units < 1n) return fail("The amount must be more than zero")
   if (units > available) return fail("That is more public USDC than you hold")
   if (units > maxBaseUnits) return fail("That amount is too large")
