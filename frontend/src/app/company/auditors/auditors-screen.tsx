@@ -1,6 +1,7 @@
 "use client"
 
 import { useAuditors } from "@/lib/auditors/queries"
+import { ActivationPill } from "@/app/company/people/activation-pill"
 
 export function AuditorsScreen() {
   const auditors = useAuditors()
@@ -12,9 +13,18 @@ export function AuditorsScreen() {
     <ul>
       {auditors.data.map((auditor) => (
         <li key={auditor.id}>
-          {auditor.email} - {auditor.status}
+          {auditor.email} - <ActivationPill activation={auditor.status} /> -
+          {formatDate(auditor.invitedAt)}
         </li>
       ))}
     </ul>
   )
+}
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })
 }

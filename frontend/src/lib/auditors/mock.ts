@@ -5,19 +5,19 @@ let auditors: Auditor[] = [
     id: "a1",
     email: "joao@accounting.example",
     status: "invited",
-    invitedAt: "2026-10-03",
+    invitedAt: "2026-10-03T14:00:00.000Z",
   },
   {
     id: "a2",
     email: "bruna@accounting.example",
     status: "active",
-    invitedAt: "2026-10-01",
+    invitedAt: "2026-10-01T14:00:00.000Z",
   },
   {
     id: "a3",
     email: "eduardo@accounting.example",
     status: "invite-expired",
-    invitedAt: "2026-09-20",
+    invitedAt: "2026-09-20T14:00:00.000Z",
   },
 ]
 
