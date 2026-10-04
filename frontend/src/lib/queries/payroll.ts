@@ -108,13 +108,11 @@ export function useRun(runId: string) {
     refetchInterval: (query) => {
       const run = query.state.data
       if (!run || query.state.status === "error") return false
-      const open = run.payments.some(
-        (payment) => {
-          // An unknown status is read as pending: keep asking.
-          const status = knownRunPaymentStatus(payment.status)
-          return status === "pending" || status === "signed"
-        },
-      )
+      const open = run.payments.some((payment) => {
+        // An unknown status is read as pending: keep asking.
+        const status = knownRunPaymentStatus(payment.status)
+        return status === "pending" || status === "signed"
+      })
       return open ? runPollMs : false
     },
   })
