@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { defineConfig, devices } from "@playwright/test"
+import { demoEnv, markerFile, markerFor } from "./e2e/support/demo-env.cjs"
 
 // A fixed port and a `*.localhost` host that no other local server uses: the demo
 // cookie belongs to the host (not the port), so it must never be shared with a dev
@@ -19,9 +20,29 @@ const browser = chromePath
     ? { channel: "chrome" as const }
     : {}
 
-// `next start` serves a production build. `E2E_SKIP_BUILD=1` reuses the build already in
-// `.next` (CI builds in its own step, and the build is the slow part of a local rerun).
+// `next start` serves a production build. It is not bound to the loopback with `--hostname`:
+// Next then builds its redirect URLs on that name, so a guarded route would send the
+// browser from `e2e.localhost` to `localhost` and the demo cookie with it. `E2E_SKIP_BUILD=1` reuses
+// the build already in `.next` (CI builds in its own step with `pnpm e2e:build`, and the
+// build is the slow part of a local rerun) but only one that `pnpm e2e:build` made: a
+// plain `pnpm build`, or one with Supabase configured, is not the demo.
 const serve = `pnpm exec next start --port ${PORT}`
+
+function assertDemoBuild() {
+  let marker: unknown
+  try {
+    marker = JSON.parse(readFileSync(markerFile, "utf8"))
+  } catch {
+    marker = undefined
+  }
+  if (JSON.stringify(marker) !== JSON.stringify(markerFor(demoEnv))) {
+    throw new Error(
+      "E2E_SKIP_BUILD=1, but .next was not built by `pnpm e2e:build` in demo mode " +
+        "(mock API, no Supabase). Run `pnpm e2e:build`, or drop E2E_SKIP_BUILD to build and serve.",
+    )
+  }
+}
+if (process.env.E2E_SKIP_BUILD) assertDemoBuild()
 
 export default defineConfig({
   testDir: "e2e",
@@ -44,25 +65,20 @@ export default defineConfig({
     // does not depend on the machine.
     locale: "en-US",
     timezoneId: "UTC",
+    // Dialogs and drawers animate in: with reduced motion they are in place at once, so a
+    // check never reads one mid-transition. One accessibility test runs with motion on.
+    reducedMotion: "reduce",
     trace: "on-first-retry",
   },
   // Every test gets a fresh browser context (Playwright's default), so demo cookies and
   // the in-page mock never leak from one test to the next.
   projects: [{ name: "chromium" }],
   webServer: {
-    command: process.env.E2E_SKIP_BUILD ? serve : `pnpm build && ${serve}`,
+    command: process.env.E2E_SKIP_BUILD ? serve : `pnpm e2e:build && ${serve}`,
     // The readiness probe is Node's, not Chrome's: use the numeric address.
     url: `http://127.0.0.1:${PORT}/sign-in`,
     reuseExistingServer: !!process.env.E2E_REUSE_SERVER,
     timeout: 240_000,
-    env: {
-      // Demo mode: the mock API and no Supabase, whatever the developer's .env.local says.
-      NEXT_PUBLIC_API_MODE: "mock",
-      NEXT_PUBLIC_SUPABASE_URL: "",
-      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "",
-      NEXT_PUBLIC_SOLANA_CLUSTER: "devnet",
-      NEXT_PUBLIC_SOLANA_RPC_URL: "",
-      NEXT_PUBLIC_PROOF_API_URL: "",
-    },
+    env: demoEnv,
   },
 })

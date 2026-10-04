@@ -66,9 +66,8 @@ jobs:
           key: nextjs-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}-${{ hashFiles('frontend/src/**', 'frontend/public/**', 'frontend/*.config.*') }}
           restore-keys: |
             nextjs-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}-
-      - run: pnpm build
-        env:
-          NEXT_PUBLIC_API_MODE: mock
+      # The demo build the suite serves (mock API, no Supabase), with a marker the suite checks.
+      - run: pnpm e2e:build
       # The build is done: the config only serves it, with `next start`.
       - run: pnpm e2e
         env:

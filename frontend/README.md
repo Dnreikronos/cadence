@@ -234,7 +234,8 @@ against the production build in demo mode: the mock API and no Supabase, whateve
 
 ```sh
 pnpm e2e                      # build, serve on :3300 and run everything (about a minute and a half to run)
-E2E_SKIP_BUILD=1 pnpm e2e     # reuse the build in .next, e.g. when only a test changed
+pnpm e2e:build                # just the demo build (what CI runs first)
+E2E_SKIP_BUILD=1 pnpm e2e     # reuse that build, e.g. when only a test changed
 E2E_REUSE_SERVER=1 pnpm e2e   # reuse a server already on :3300 (you started it)
 pnpm e2e e2e/auth.spec.ts     # one file; add -g "partial failure" for one test
 pnpm e2e:ui                   # Playwright's UI mode: watch, time-travel, pick locators
@@ -243,6 +244,11 @@ pnpm e2e:ui                   # Playwright's UI mode: watch, time-travel, pick l
 The browser is Google Chrome when `/usr/bin/google-chrome-stable` (or
 `PLAYWRIGHT_CHROME_PATH`) exists, and always on CI. Without it, install Playwright's
 own once with `pnpm exec playwright install chromium`.
+
+`E2E_SKIP_BUILD=1` only accepts a `.next` that `pnpm e2e:build` made (it leaves a marker
+saying the build was mock mode with no Supabase); a plain `pnpm build` is refused, because
+the suite would not be running against the demo. The server is not bound with `--hostname`:
+Next would then build redirect URLs on that name and move the browser off `e2e.localhost`.
 
 **Debugging.** A failed run leaves `playwright-report/` (open it with
 `pnpm exec playwright show-report`) and, for a test that was retried on CI, a trace:
@@ -258,7 +264,8 @@ the loopback). Every test also gets its own browser context, so no cookie carrie
 **Adding a test.** Import `test` and `expect` from `e2e/support/test`, not from
 Playwright: it fails the test on an uncaught page error or any console error. A forced
 mock scenario answers 4xx and 5xx on purpose and Chrome logs them, so name the statuses
-you expect with `watch.allowStatus(409)`. In `e2e/support/demo.ts`: `signInAs(page, role)`
+and the URL it is expected for with `watch.allowStatus(409, /\/wrap\/confirm$/)`: the
+same status on another URL still fails the test. In `e2e/support/demo.ts`: `signInAs(page, role)`
 and `freshRecipient(page)` go through the demo panel, `setMock(page, "instant", ...)`
 sets scenarios, `navLink` clicks a sidebar link, `expectNoHorizontalOverflow` checks
 the layout. Two things to know about the mock:
@@ -270,7 +277,8 @@ the layout. Two things to know about the mock:
   `"instant"` to the scenarios unless the test is about that wait.
 
 Use accessible locators (`getByRole`, `getByLabel`, text) and web-first assertions
-(`await expect(locator)...`, `expect.poll`), never a sleep. A new main screen goes in
+(`await expect(locator)...`, `expect.poll`), never a sleep. `e2e/support/known-noise.ts` lists console errors that someone else owns (each with a
+probe that fails the suite the day the cause is gone, so the entry gets deleted). A new main screen goes in
 `e2e/support/screens.ts`, which the responsive and accessibility specs walk; an
 accessibility violation that cannot be fixed with the screen goes in the commented
 `knownIssues` list of `e2e/support/a11y.ts`, with the screen and the axe rule, so it is
