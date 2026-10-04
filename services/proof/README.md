@@ -268,6 +268,15 @@ CONFIDENTIAL_VAULT_TEST_DATABASE_URL=postgres://postgres:keys-test-only@localhos
 
 CI gives each Vault test suite a separate fresh instance through its test matrix.
 
+## Unwrap USDC with reveal-risk warning
+
+`POST /unwrap` checks finalized incoming payment ciphertexts through an audited
+Vault read, warns on exact/near amounts, and requires acknowledgement before
+building the unsigned confidential withdrawal plus unwrap. `/unwrap/check`
+exposes the flag independently; `/unwrap/confirm` records a verified immutable
+receipt. See the [unwrap API contract](../../docs/dev/UNWRAP_API.md) for the
+migration, balance-key fields, configurable tolerance and targeted checks.
+
 ## Wrap USDC
 
 `POST /wrap` builds an unsigned v0 devnet transaction that configures the company
