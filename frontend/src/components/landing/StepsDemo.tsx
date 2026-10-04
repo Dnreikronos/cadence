@@ -198,11 +198,11 @@ function DemoDeposit({ isActive, onDone }: DemoProps) {
         </div>
         <dl className="relative mt-4 grid grid-cols-2 gap-3 font-mono text-caption">
           <div>
-            <dt className="text-white/45">Solaris sees</dt>
+            <dt className="text-night-muted">Solaris sees</dt>
             <dd className="mt-1 text-[16px] tabular-nums">$84,000.00</dd>
           </div>
           <div>
-            <dt className="text-white/45">The chain sees</dt>
+            <dt className="text-night-muted">The chain sees</dt>
             <dd className="mt-1 text-[16px] tabular-nums">
               <Redacted isRevealed={!isWrapped && !isReduced} delay={500}>
                 $84,000.00
@@ -244,7 +244,7 @@ function DemoPay({ isActive, onDone }: DemoProps) {
           className="absolute -right-10 -bottom-10 size-32 text-glow/25"
         />
         <p className="relative text-[12.5px] font-medium">Private USDC</p>
-        <p className="relative mt-1 font-mono text-[11px] text-white/45">
+        <p className="relative mt-1 font-mono text-[11px] text-night-muted">
           Solaris
         </p>
         <span

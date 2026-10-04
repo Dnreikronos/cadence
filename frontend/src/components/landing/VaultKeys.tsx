@@ -65,7 +65,7 @@ export function VaultKeys() {
           className="relative overflow-hidden rounded-2xl border border-white/10 bg-night-raised lg:col-span-8"
         >
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
-            <p className="text-eyebrow tracking-widest text-white/45">
+            <p className="text-eyebrow tracking-widest text-night-muted">
               Solaris · payments · March 2026
             </p>
             <p
@@ -107,7 +107,7 @@ export function VaultKeys() {
                         {payment.name}
                       </span>
                     </span>
-                    <span className="hidden text-ui text-white/40 sm:block">
+                    <span className="hidden text-ui text-night-muted sm:block">
                       {payment.kind}
                     </span>
                     <span className="flex items-center justify-end gap-2 font-mono text-[14px] text-white tabular-nums">
@@ -134,42 +134,46 @@ export function VaultKeys() {
           </div>
         </div>
 
-        <dl
+        <div
           key={perspective}
           className="rounded-2xl border border-white/10 bg-white/2 p-5 lg:col-span-4"
         >
-          <p className="text-eyebrow tracking-widest text-white/45">
+          <p className="text-eyebrow tracking-widest text-night-muted">
             {active.label} key can
           </p>
-          {abilities[perspective].map((ability, index) => (
-            <div
-              key={ability.label}
-              className="flex animate-[fade-in_400ms_var(--ease-out)_both] items-start gap-3 border-b border-white/[0.07] py-4 last:border-0"
-              style={{ animationDelay: `${index * 60}ms` }}
-            >
-              <span
-                className={cn(
-                  "mt-0.5 grid size-5 shrink-0 place-items-center rounded-full",
-                  ability.isAllowed
-                    ? "bg-glow text-ink"
-                    : "bg-white/8 text-white/45",
-                )}
+          <dl>
+            {abilities[perspective].map((ability, index) => (
+              // A group of one term and its detail: the icon lives in the term, so the
+              // list holds only dt and dd.
+              <div
+                key={ability.label}
+                className="animate-[fade-in_400ms_var(--ease-out)_both] border-b border-white/[0.07] py-4 last:border-0"
+                style={{ animationDelay: `${index * 60}ms` }}
               >
-                {ability.isAllowed ? (
-                  <Check className="size-3" strokeWidth={2.5} />
-                ) : (
-                  <Minus className="size-3" strokeWidth={2.5} />
-                )}
-              </span>
-              <div>
-                <dt className="text-[14px] text-white">{ability.label}</dt>
-                <dd className="mt-0.5 text-ui/normal text-white/45">
+                <dt className="flex items-start gap-3 text-[14px] text-white">
+                  <span
+                    className={cn(
+                      "mt-0.5 grid size-5 shrink-0 place-items-center rounded-full",
+                      ability.isAllowed
+                        ? "bg-glow text-ink"
+                        : "bg-white/8 text-white/45",
+                    )}
+                  >
+                    {ability.isAllowed ? (
+                      <Check className="size-3" strokeWidth={2.5} />
+                    ) : (
+                      <Minus className="size-3" strokeWidth={2.5} />
+                    )}
+                  </span>
+                  {ability.label}
+                </dt>
+                <dd className="mt-0.5 pl-8 text-ui/normal text-night-muted">
                   {ability.note}
                 </dd>
               </div>
-            </div>
-          ))}
-        </dl>
+            ))}
+          </dl>
+        </div>
       </div>
     </div>
   )
@@ -244,12 +248,12 @@ function CardKey({
         <span
           className={cn(
             "block text-ui transition-colors",
-            isActive ? "text-white/75" : "text-white/45",
+            isActive ? "text-white/75" : "text-night-muted",
           )}
         >
           {item.holder}
         </span>
-        <span className="mt-0.5 block text-label text-white/30">
+        <span className="mt-0.5 block text-label text-night-muted">
           {keyIds[item.id]}
         </span>
       </span>
