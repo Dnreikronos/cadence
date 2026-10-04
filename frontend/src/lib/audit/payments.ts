@@ -1,0 +1,64 @@
+import type { PaymentItem } from "@/lib/api/schemas"
+import { unitsToUsd } from "@/lib/money"
+
+type ItemStatus = PaymentItem["status"]
+
+export type PaymentFilters = { status: ItemStatus | "all"; search: string }
+
+export const noFilters: PaymentFilters = { status: "all", search: "" }
+
+export const statusFilters: {
+  value: PaymentFilters["status"]
+  label: string
+}[] = [
+  { value: "all", label: "All statuses" },
+  { value: "confirmed", label: "Confirmed" },
+  { value: "pending", label: "Pending" },
+  { value: "failed", label: "Failed" },
+]
+
+export function isStatusFilter(
+  value: string,
+): value is PaymentFilters["status"] {
+  return statusFilters.some((filter) => filter.value === value)
+}
+
+export function filtersActive(filters: PaymentFilters) {
+  return filters.status !== "all" || filters.search.trim() !== ""
+}
+
+// Filters run over what has been loaded: the service pages by cursor and has no filter parameters.
+export function filterPayments(
+  items: readonly PaymentItem[],
+  { status, search }: PaymentFilters,
+) {
+  const needle = search.trim().toLowerCase()
+  return items.filter(
+    (item) =>
+      (status === "all" || item.status === status) &&
+      (needle === "" || item.counterparty.name.toLowerCase().includes(needle)),
+  )
+}
+
+// What a row shows: the amount in dollars for display only, everything else as sent.
+export type AuditRow = {
+  id: string
+  name: string
+  usd: number
+  status: ItemStatus
+  transparent: boolean
+  paidAt: string
+  signature: string | null
+}
+
+export function auditRow(item: PaymentItem): AuditRow {
+  return {
+    id: item.payment_id,
+    name: item.counterparty.name,
+    usd: unitsToUsd(item.amount),
+    status: item.status,
+    transparent: item.transparent,
+    paidAt: item.paid_at,
+    signature: item.signature,
+  }
+}
