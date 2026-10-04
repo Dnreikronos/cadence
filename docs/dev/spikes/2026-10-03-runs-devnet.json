@@ -1,0 +1,39 @@
+{
+  "approvals": 1,
+  "database": "disposable local Supabase",
+  "independent_rpc_ciphertext_verified": true,
+  "key_read_audited": true,
+  "payments": [
+    {
+      "context_accounts_closed": 3,
+      "position": 0,
+      "recipient_credit_verified": true,
+      "signature": "2vMGTitkiE8RPf9XeHTtVyVf6XK9oXCSCU5DtgtqVENvAfqud6QUGSkZ78jpiLXLrTNgzCCZWEYvJbG7C3PLyHYS",
+      "slot": 507099198,
+      "status": "finalized",
+      "wire_bytes": 2913
+    },
+    {
+      "context_accounts_closed": 3,
+      "position": 1,
+      "recipient_credit_verified": true,
+      "signature": "4bXi9HSFkuXuzRcRpdS3VYwaE26MyKMbdcgxGGUfLwcQkkhmcofvwGBAQwivw68ns5uBiv8to1mEVMUqTzn8uXkW",
+      "slot": 507099212,
+      "status": "finalized",
+      "wire_bytes": 2913
+    },
+    {
+      "context_accounts_closed": 3,
+      "position": 2,
+      "recipient_credit_verified": true,
+      "signature": "23aXgPLLqWQJTBk12ru71r9zXr19US72WHnuPVAMyGXjLu1PvsX9XWzyagyhCwG8F1eUaPeJKRkwTo1LgvYakiLJ",
+      "slot": 507099225,
+      "status": "finalized",
+      "wire_bytes": 2913
+    }
+  ],
+  "run_id": "0b6bf3e1-5f65-47a2-a14e-c1877f33b96a",
+  "sender_debit_verified": true,
+  "signer": "Turnkey root test adapter driven by one browser approval",
+  "supabase_login_verified": true
+}

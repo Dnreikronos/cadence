@@ -4,7 +4,6 @@ import {
   useIsMutating,
   useMutation,
   useMutationState,
-  useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -20,16 +19,6 @@ import {
 } from "@/lib/withdraw/flow"
 import { useSignAndConfirm, useWallet } from "@/lib/wallet/context"
 import { invalidateBalances } from "./invalidate"
-import { queryKeys, type ViewerScope } from "./keys"
-
-// The signed-in recipient's own balance. Shares its key with the sidebar, so one
-// answer serves both.
-export function useMyBalance(viewer: ViewerScope) {
-  return useQuery({
-    queryKey: queryKeys.balance.me(viewer),
-    queryFn: ({ signal }) => api.me.balance({ signal }),
-  })
-}
 
 const withdrawKey = ["withdraw"] as const
 

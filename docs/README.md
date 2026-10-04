@@ -28,6 +28,8 @@ repo's paths instead of these.
 
 - [Authenticated transfer API](plans/2026-10-03-054-transfer-api.md) — 2026-10-03, #54. Supabase login and wallet association; verified locally and on devnet through a browser-driven Turnkey test adapter. [API contract](dev/TRANSFER_API.md).
 
+- [Confidential payment runs](plans/2026-10-03-055-runs.md) — 2026-10-03, #55. Ordered batches with independent receipts and safe retries; three live devnet payments executed from one approval through a browser-driven Turnkey test adapter. [API contract](dev/RUNS_API.md).
+
 ## Contracts
 
 - [API contract for the web app](dev/API_CONTRACT.md) — #63. What the web app builds and mocks against: authentication, the prepare-sign-confirm pattern, errors that never carry an amount, and every route, marked implemented or proposed, plus the design review findings to resolve before building. Status: draft, open questions for the backend owner.

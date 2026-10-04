@@ -13,8 +13,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import { isApiError, messageFor } from "@/lib/api"
 import type { ViewerScope } from "@/lib/queries/keys"
+import { useMyBalance } from "@/lib/queries/balance"
 import {
-  useMyBalance,
   useSentWithdrawal,
   useWithdraw,
   useWithdrawInFlight,

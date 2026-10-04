@@ -16,7 +16,8 @@ export const EXPIRY_MS = 90_000
 
 type Input = {
   record: Submission
-  api: Pick<ApiClient, "wrap">
+  // Only the confirm call is used, so another transaction's confirm can stand in.
+  api: { wrap: Pick<ApiClient["wrap"], "confirm"> }
   signal?: AbortSignal
   now?: () => number
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>

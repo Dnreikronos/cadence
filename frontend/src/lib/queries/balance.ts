@@ -28,3 +28,12 @@ export function useShellBalance(
   })
   return role === "auditor" ? undefined : shellBalanceOf(query)
 }
+
+// The signed-in recipient's own balance. Shares its key with the sidebar, so one
+// answer serves both.
+export function useMyBalance(viewer: ViewerScope) {
+  return useQuery({
+    queryKey: queryKeys.balance.me(viewer),
+    queryFn: ({ signal }) => api.me.balance({ signal }),
+  })
+}
