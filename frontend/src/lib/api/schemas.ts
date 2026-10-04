@@ -105,7 +105,8 @@ export const runRequestSchema = z.strictObject({
   payments: z
     .array(z.strictObject({ person_id: id, amount: unitsSchema }))
     .min(1)
-    .max(200),
+    // Each entry is about 80 bytes of JSON, and the service takes 8 KiB bodies.
+    .max(100),
   idempotency_key: id,
 })
 export type RunRequest = z.infer<typeof runRequestSchema>

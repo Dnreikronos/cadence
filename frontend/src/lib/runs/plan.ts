@@ -1,5 +1,10 @@
-import { runRequestSchema, type RunRequest } from "@/lib/api/schemas"
-import { formatUnits, sumUnits } from "@/lib/money"
+import {
+  runRequestSchema,
+  type PaymentItem,
+  type RunCreated,
+  type RunRequest,
+} from "@/lib/api/schemas"
+import { formatBaseUnits, formatUnits, sumUnits } from "@/lib/money"
 
 // Who a payroll run can pay, and what it would cost. All amounts are base-unit strings.
 
@@ -40,8 +45,9 @@ export type ExcludedReason = "not-activated" | "no-amount"
 
 export type Excluded = { person: PayrollPerson; reason: ExcludedReason }
 
-// The service takes at most this many payments in one run (runRequestSchema).
-export const maxRunPayments = 200
+// The service takes at most this many payments in one run (runRequestSchema): its body
+// limit is 8 KiB and an entry is about 80 bytes of JSON.
+export const maxRunPayments = 100
 
 // Only an activated person with an amount can be paid: the service rejects anyone else
 // with `recipient_not_activated`, so they are listed apart before a call is made.
@@ -73,12 +79,64 @@ export function excludedNote({ person, reason }: Excluded) {
     : activationNotes[person.activation]
 }
 
-// Everyone is paid unless unticked, so a person who shows up later is included by default.
+// Someone paid inside this window is not ticked by default: running the roster again
+// right after a run would pay them twice. Nothing in the service answers "was this
+// person paid today", so the company's own payments are the record.
+export const recentWindowMs = 24 * 60 * 60 * 1000
+
+// Ids of the people with a confirmed payment inside the window.
+export function recentlyPaidIds(
+  payments: readonly Pick<PaymentItem, "status" | "paid_at" | "counterparty">[],
+  now: number,
+  windowMs = recentWindowMs,
+) {
+  const paid = new Set<string>()
+  for (const payment of payments) {
+    if (payment.status !== "confirmed") continue
+    const at = Date.parse(payment.paid_at)
+    if (Number.isFinite(at) && at >= now - windowMs) {
+      paid.add(payment.counterparty.id)
+    }
+  }
+  return paid
+}
+
+// What the admin chose by hand: true ticks, false unticks. Without a choice a person is
+// ticked unless they were paid recently.
+export type Choices = Readonly<Record<string, boolean>>
+
+export const isTicked = (
+  id: string,
+  recentlyPaid: ReadonlySet<string>,
+  choices: Choices,
+) => choices[id] ?? !recentlyPaid.has(id)
+
 export function selectRecipients(
   payable: readonly PayrollPerson[],
-  unticked: ReadonlySet<string>,
+  recentlyPaid: ReadonlySet<string>,
+  choices: Choices,
 ) {
-  return payable.filter((person) => !unticked.has(person.id))
+  return payable.filter((person) => isTicked(person.id, recentlyPaid, choices))
+}
+
+// Ticked despite a payment in the last 24 hours.
+export const repaid = (
+  recipients: readonly PayrollPerson[],
+  recentlyPaid: ReadonlySet<string>,
+) => recipients.filter((person) => recentlyPaid.has(person.id))
+
+// "Select everyone" ticks whoever was not paid recently; clearing unticks all.
+export function allChoices(
+  payable: readonly PayrollPerson[],
+  recentlyPaid: ReadonlySet<string>,
+  selectAll: boolean,
+): Choices {
+  return Object.fromEntries(
+    payable.map((person) => [
+      person.id,
+      selectAll && !recentlyPaid.has(person.id),
+    ]),
+  )
 }
 
 export function runTotal(recipients: readonly PayrollPerson[]) {
@@ -89,6 +147,15 @@ export function runTotal(recipients: readonly PayrollPerson[]) {
 export function shortfall(total: string, available: string) {
   const missing = BigInt(total) - BigInt(available)
   return missing > 0n ? missing.toString() : null
+}
+
+// An amount in dollars, exact: whole cents as usual, anything finer in full, since a
+// deposit rounded down to the cent would still leave the run short.
+export function formatExact(units: string) {
+  const value = BigInt(units)
+  return value % 10_000n === 0n
+    ? formatUnits(units)
+    : `${formatBaseUnits(value)} USDC`
 }
 
 export const peopleCount = (count: number) =>
@@ -111,6 +178,20 @@ export function buildRunRequest(
     })),
     idempotency_key: idempotencyKey,
   })
+}
+
+// What `POST /runs` answered must be what was asked: the same people, once each. Anything
+// else is not signed, since the payments it prepared are not the ones that were approved.
+export function createdMatches(request: RunRequest, created: RunCreated) {
+  const asked = request.payments.map((payment) => payment.person_id).sort()
+  const got = created.payments.map((payment) => payment.person_id).sort()
+  const paymentIds = new Set(created.payments.map((p) => p.payment_id))
+  return (
+    asked.length === got.length &&
+    asked.every((id, index) => id === got[index]) &&
+    new Set(got).size === got.length &&
+    paymentIds.size === created.payments.length
+  )
 }
 
 // One key per attempt. The same payment list keeps its key, so a double click or a

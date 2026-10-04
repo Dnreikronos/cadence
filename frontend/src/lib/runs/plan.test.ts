@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest"
 import { runRequestSchema } from "@/lib/api/schemas"
 import {
+  allChoices,
   attemptKey,
   buildRunRequest,
+  createdMatches,
   excludedNote,
   fingerprintOf,
+  formatExact,
+  isTicked,
   maxRunPayments,
   payLabel,
+  recentWindowMs,
+  recentlyPaidIds,
+  repaid,
   runTotal,
   selectRecipients,
   shortfall,
@@ -95,15 +102,49 @@ describe("selection and totals", () => {
     person(3, { amount: "4300000000" }),
   ]
 
+  const nobody = new Set<string>()
+
   it("pays everyone until they are unticked", () => {
-    expect(selectRecipients(payable, new Set()).length).toBe(3)
+    expect(selectRecipients(payable, nobody, {}).length).toBe(3)
     expect(
-      selectRecipients(payable, new Set([guid(2)])).map((p) => p.id),
+      selectRecipients(payable, nobody, { [guid(2)]: false }).map((p) => p.id),
     ).toEqual([guid(1), guid(3)])
   })
 
-  it("ignores an unticked id that is not payable", () => {
-    expect(selectRecipients(payable, new Set([guid(99)])).length).toBe(3)
+  it("ignores a choice about someone who is not payable", () => {
+    expect(
+      selectRecipients(payable, nobody, { [guid(99)]: false }).length,
+    ).toBe(3)
+  })
+
+  it("does not tick someone paid recently, until they are ticked by hand", () => {
+    const recent = new Set([guid(1)])
+    expect(selectRecipients(payable, recent, {}).map((p) => p.id)).toEqual([
+      guid(2),
+      guid(3),
+    ])
+    expect(
+      selectRecipients(payable, recent, { [guid(1)]: true }).map((p) => p.id),
+    ).toEqual([guid(1), guid(2), guid(3)])
+    expect(isTicked(guid(1), recent, { [guid(1)]: false })).toBe(false)
+  })
+
+  it("names who is ticked despite a recent payment", () => {
+    const recent = new Set([guid(1), guid(3)])
+    const recipients = selectRecipients(payable, recent, { [guid(1)]: true })
+    expect(repaid(recipients, recent).map((p) => p.id)).toEqual([guid(1)])
+    expect(repaid(selectRecipients(payable, recent, {}), recent)).toEqual([])
+  })
+
+  it("selects everyone except the recently paid, and clears to nobody", () => {
+    const recent = new Set([guid(2)])
+    const all = allChoices(payable, recent, true)
+    expect(selectRecipients(payable, recent, all).map((p) => p.id)).toEqual([
+      guid(1),
+      guid(3),
+    ])
+    const none = allChoices(payable, recent, false)
+    expect(selectRecipients(payable, recent, none)).toEqual([])
   })
 
   it("sums exactly, in base units", () => {
@@ -130,6 +171,122 @@ describe("selection and totals", () => {
   it("labels the confirmation with the count and the total", () => {
     expect(payLabel(3, "12300000000")).toBe("Pay 3 people · $12,300.00")
     expect(payLabel(1, "9500000000")).toBe("Pay 1 person · $9,500.00")
+  })
+})
+
+describe("recentlyPaidIds", () => {
+  const now = Date.parse("2026-10-04T12:00:00Z")
+  const payment = (
+    counterparty: number,
+    status: "pending" | "confirmed" | "failed",
+    hoursAgo: number,
+  ) => ({
+    status,
+    paid_at: new Date(now - hoursAgo * 3_600_000).toISOString(),
+    counterparty: { id: guid(counterparty), name: `Person ${counterparty}` },
+  })
+
+  it("takes confirmed payments inside the window, by the counterparty's id", () => {
+    const ids = recentlyPaidIds(
+      [payment(1, "confirmed", 1), payment(2, "confirmed", 23.9)],
+      now,
+    )
+    expect([...ids].sort()).toEqual([guid(1), guid(2)])
+  })
+
+  it("leaves out older payments, and ones that did not land", () => {
+    const ids = recentlyPaidIds(
+      [
+        payment(1, "confirmed", 24.1),
+        payment(2, "failed", 1),
+        payment(3, "pending", 1),
+        payment(4, "confirmed", 24 * 30),
+      ],
+      now,
+    )
+    expect(ids.size).toBe(0)
+  })
+
+  it("counts the person once however many payments they got", () => {
+    const ids = recentlyPaidIds(
+      [payment(1, "confirmed", 1), payment(1, "confirmed", 2)],
+      now,
+    )
+    expect(ids.size).toBe(1)
+  })
+
+  it("holds the window to 24 hours, to the millisecond", () => {
+    const at = (offset: number) => ({
+      status: "confirmed" as const,
+      paid_at: new Date(now - recentWindowMs + offset).toISOString(),
+      counterparty: { id: guid(1), name: "x" },
+    })
+    expect(recentlyPaidIds([at(0)], now).size).toBe(1)
+    expect(recentlyPaidIds([at(-1)], now).size).toBe(0)
+  })
+
+  it("ignores a payment whose date it cannot read", () => {
+    expect(
+      recentlyPaidIds(
+        [
+          {
+            status: "confirmed",
+            paid_at: "not a date",
+            counterparty: { id: guid(1), name: "x" },
+          },
+        ],
+        now,
+      ).size,
+    ).toBe(0)
+  })
+})
+
+describe("formatExact", () => {
+  it("shows whole cents as dollars", () => {
+    expect(formatExact("12300000000")).toBe("$12,300.00")
+    expect(formatExact("10000")).toBe("$0.01")
+  })
+
+  it("shows anything finer than a cent in full instead of rounding it away", () => {
+    expect(formatExact("10001")).toBe("0.010001 USDC")
+    expect(formatExact("1")).toBe("0.000001 USDC")
+  })
+})
+
+describe("createdMatches", () => {
+  const request = (...people: number[]) =>
+    buildRunRequest(
+      WALLET,
+      people.map((n) => person(n)),
+      "d0000000-0000-4000-8000-000000000009",
+    )
+  const created = (people: number[], paymentIds = people) => ({
+    run_id: "c0000000-0000-4000-8000-000000000001",
+    payments: people.map((n, i) => ({
+      payment_id: guid(500 + paymentIds[i]),
+      person_id: guid(n),
+      request_id: "a".repeat(64),
+      transaction: "AQID",
+      transaction_version: 1 as const,
+      required_signers: ["w"],
+      recent_blockhash: "h",
+      last_valid_block_height: 1,
+    })),
+  })
+
+  it("accepts the same people, in any order", () => {
+    expect(createdMatches(request(1, 2, 3), created([3, 1, 2]))).toBe(true)
+  })
+
+  it("refuses a different person, a missing one, an extra one and a duplicate", () => {
+    expect(createdMatches(request(1, 2), created([1, 9]))).toBe(false)
+    expect(createdMatches(request(1, 2), created([1]))).toBe(false)
+    expect(createdMatches(request(1, 2), created([1, 2, 3]))).toBe(false)
+    expect(createdMatches(request(1, 2), created([1, 1]))).toBe(false)
+  })
+
+  it("refuses two payments with the same id", () => {
+    expect(createdMatches(request(1, 2), created([1, 2], [7, 7]))).toBe(false)
   })
 })
 
@@ -171,6 +328,7 @@ describe("buildRunRequest", () => {
   it("refuses an empty run and one past the service's limit", () => {
     const key = "d0000000-0000-4000-8000-000000000009"
     expect(() => buildRunRequest(WALLET, [], key)).toThrow()
+    expect(maxRunPayments).toBe(100)
     const many = Array.from({ length: maxRunPayments + 1 }, (_, i) =>
       person(i + 1),
     )

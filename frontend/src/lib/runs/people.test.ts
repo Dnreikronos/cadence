@@ -13,11 +13,17 @@ describe("nameLookup", () => {
   const people = [{ id: "a", name: "Bruno Costa" }]
 
   it("finds a person by id", () => {
-    expect(nameLookup(people)("a")).toBe("Bruno Costa")
+    expect(nameLookup(people, true)("a")).toBe("Bruno Costa")
   })
 
-  it("does not name someone it cannot find, or before the list loads", () => {
-    expect(nameLookup(people)("gone")).toBe(unknownPerson)
-    expect(nameLookup(undefined)("a")).toBe(unknownPerson)
+  it("does not name someone the answered list does not have", () => {
+    expect(nameLookup(people, true)("gone")).toBe(unknownPerson)
+    // The list failed to load: still an answer, with no name for anyone.
+    expect(nameLookup(undefined, true)("a")).toBe(unknownPerson)
+  })
+
+  it("has no name at all until the list has answered", () => {
+    expect(nameLookup(undefined, false)("a")).toBeUndefined()
+    expect(nameLookup(people, false)("a")).toBeUndefined()
   })
 })

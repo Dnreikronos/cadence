@@ -7,7 +7,12 @@ import type { RunRequest } from "@/lib/api/schemas"
 import { listPeople } from "@/lib/people/mock"
 import { inviteMessage } from "@/lib/runs/messages"
 import { collectPages } from "@/lib/runs/pages"
-import { withAmounts, type PayrollPerson } from "@/lib/runs/plan"
+import {
+  recentWindowMs,
+  recentlyPaidIds,
+  withAmounts,
+  type PayrollPerson,
+} from "@/lib/runs/plan"
 import { isApiError } from "@/lib/api/errors"
 import { queryKeys, type ViewerScope } from "./keys"
 
@@ -69,6 +74,30 @@ export function useRecentPayments(limit: number) {
   return useQuery({
     queryKey: queryKeys.payments.company({ limit }),
     queryFn: ({ signal }) => api.company.payments({ limit }, { signal }),
+  })
+}
+
+const recentPages = 5
+
+// Who was paid in the last 24 hours, from the company's payments (newest first), read
+// fresh each time the new-run page opens: it is what keeps a second run from paying the
+// same people twice. Under the `payments` prefix, so a confirmed payment refreshes it.
+export function useRecentlyPaid() {
+  return useQuery({
+    queryKey: [...queryKeys.payments.all, "recently-paid"],
+    refetchOnMount: "always",
+    queryFn: async ({ signal }) => {
+      const now = Date.now()
+      const payments = await collectPages(
+        (cursor) => api.company.payments({ limit: 100, cursor }, { signal }),
+        recentPages,
+        // Newest first: a page that ends before the window has nothing more to add.
+        (page) =>
+          page.length > 0 &&
+          Date.parse(page[page.length - 1].paid_at) < now - recentWindowMs,
+      )
+      return recentlyPaidIds(payments, now)
+    },
   })
 }
 

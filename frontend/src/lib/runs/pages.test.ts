@@ -41,4 +41,24 @@ describe("collectPages", () => {
       }),
     ).rejects.toThrow("down")
   })
+
+  it("stops when the page just read is far enough, without asking for more", async () => {
+    const fetchPage = vi.fn(async () => ({
+      items: [1, 2],
+      next_cursor: "more",
+    }))
+    expect(
+      await collectPages(fetchPage, 5, (page) => page.includes(2)),
+    ).toEqual([1, 2])
+    expect(fetchPage).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps reading while it is not far enough", async () => {
+    const fetchPage = vi.fn(async (cursor: string | undefined) =>
+      cursor === "b"
+        ? { items: [3], next_cursor: null }
+        : { items: [cursor === "a" ? 2 : 1], next_cursor: cursor ? "b" : "a" },
+    )
+    expect(await collectPages(fetchPage, 5, () => false)).toEqual([1, 2, 3])
+  })
 })
