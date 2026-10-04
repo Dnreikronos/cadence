@@ -76,6 +76,12 @@ to `mock`. In every other environment (build, preview, production) the variable
 must be set, so a deploy that forgets it fails instead of running on fake data.
 Mock mode is refused on mainnet. `/dev/api` runs the flows and the switches.
 
+The `/dev/*` pages (component showcase, screen previews, `/dev/api`) show fake data and
+need no session, so they are served by `next dev` and answer 404 in a production build
+(every deploy) unless `NEXT_PUBLIC_DEV_TOOLS=1` is set at build time, and always on
+mainnet. They may frame each other (`frame-ancestors 'self'`); every other path still
+refuses framing.
+
 The mock answers only on its own origin (`http://mock.cadence.test`), so it never
 shadows a Next route. In the browser, `window.cadenceMock` controls it:
 
