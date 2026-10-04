@@ -43,7 +43,7 @@ importers:
         version: 1.48.0(react@19.1.0)
       next:
         specifier: 15.5.26
-        version: 15.5.26(@babel/core@7.29.7)(@types/node@22.20.4)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+        version: 15.5.26(@babel/core@7.29.7)(@playwright/test@1.63.0)(@types/node@22.20.4)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       qrcode.react:
         specifier: ^4.2.0
         version: 4.2.0(react@19.1.0)
@@ -69,9 +69,15 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@axe-core/playwright':
+        specifier: ^4.13.0
+        version: 4.13.0(playwright-core@1.63.0)
       '@eslint/eslintrc':
         specifier: ^3
         version: 3.3.7
+      '@playwright/test':
+        specifier: ^1.63.0
+        version: 1.63.0
       '@tailwindcss/postcss':
         specifier: ^4
         version: 4.3.3
@@ -129,6 +135,11 @@ packages:
   '@alloc/quick-lru@5.3.0':
     resolution: {integrity: sha512-U4+70Pc5ZS9osnCBCE5Jha/ciHM+Yp+CNMNC/7HvYbNRk1Ldd+f7qO65W5qfhu/TCv+/ozljlXXe9Nj8419DMA==}
     engines: {node: '>=10'}
+
+  '@axe-core/playwright@4.13.0':
+    resolution: {integrity: sha512-6YLx+kxXu5GJceG4ozFg+33a2EMTdjYwWGloJ3sb9Kta5pp+ZNS53uxGVog5JetIY8s++P5UrtX+cri+u0VAVg==}
+    peerDependencies:
+      playwright-core: '>= 1.0.0'
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -727,6 +738,11 @@ packages:
   '@pkgr/core@0.3.6':
     resolution: {integrity: sha512-SEeaJLb3qBNF/OaXnaR1NmmBbFYk1zC0ZH/52fATcRPLFg/p791YrcyFFy44Bo9sLaGuSuLp5Q6axbb/O+v/RA==}
     engines: {node: ^14.18.0 || >=16.0.0}
+
+  '@playwright/test@1.63.0':
+    resolution: {integrity: sha512-oxMK4vllB9RK5NQ2l1pq1IfOf2AvnEuj/vYGDj0H2nMtmtZpKtCwt/l00GEO6xjGfpBNAvjovvYdCm50dRQkpQ==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   '@react-three/drei@10.7.9':
     resolution: {integrity: sha512-wP4Y6o58KFi+hT1zCfjJarRtPCT6WW/lo53WMiA/aCORuUvBzW916XsCtadnIB1KB+3IQNcDU5JeVh/gYb8MYw==}
@@ -3482,6 +3498,16 @@ packages:
     resolution: {integrity: sha512-nDywThFk1i4BQK4twPQ6TA4RT8bDY96yeuCVBWL3ePARCiEKDRSrNGbFIgUJpLp+XeIR65v8ra7WuJOFUBtkMA==}
     engines: {node: '>=8'}
 
+  playwright-core@1.63.0:
+    resolution: {integrity: sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.63.0:
+    resolution: {integrity: sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   possible-typed-array-names@1.1.0:
     resolution: {integrity: sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg==}
     engines: {node: '>= 0.4'}
@@ -4393,6 +4419,11 @@ snapshots:
 
   '@alloc/quick-lru@5.3.0': {}
 
+  '@axe-core/playwright@4.13.0(playwright-core@1.63.0)':
+    dependencies:
+      axe-core: 4.13.0
+      playwright-core: 1.63.0
+
   '@babel/code-frame@7.29.7':
     dependencies:
       '@babel/helper-validator-identifier': 7.29.7
@@ -4990,6 +5021,10 @@ snapshots:
   '@oxc-project/types@0.151.0': {}
 
   '@pkgr/core@0.3.6': {}
+
+  '@playwright/test@1.63.0':
+    dependencies:
+      playwright: 1.63.0
 
   '@react-three/drei@10.7.9(@react-three/fiber@9.8.1(@types/react@19.3.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(three@0.186.1))(@types/react@19.3.0)(@types/three@0.186.0)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(three@0.186.1)':
     dependencies:
@@ -7608,7 +7643,7 @@ snapshots:
     dependencies:
       content-type: 2.1.0
 
-  next@15.5.26(@babel/core@7.29.7)(@types/node@22.20.4)(react-dom@19.1.0(react@19.1.0))(react@19.1.0):
+  next@15.5.26(@babel/core@7.29.7)(@playwright/test@1.63.0)(@types/node@22.20.4)(react-dom@19.1.0(react@19.1.0))(react@19.1.0):
     dependencies:
       '@next/env': 15.5.26
       '@swc/helpers': 0.5.15
@@ -7626,6 +7661,7 @@ snapshots:
       '@next/swc-linux-x64-musl': 15.5.26
       '@next/swc-win32-arm64-msvc': 15.5.26
       '@next/swc-win32-x64-msvc': 15.5.26
+      '@playwright/test': 1.63.0
       sharp: 0.35.5(@types/node@22.20.4)
     transitivePeerDependencies:
       - '@babel/core'
@@ -7815,6 +7851,12 @@ snapshots:
   pkg-up@3.1.0:
     dependencies:
       find-up: 3.0.0
+
+  playwright-core@1.63.0: {}
+
+  playwright@1.63.0:
+    dependencies:
+      playwright-core: 1.63.0
 
   possible-typed-array-names@1.1.0: {}
 
