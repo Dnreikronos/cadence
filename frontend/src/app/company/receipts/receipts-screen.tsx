@@ -11,9 +11,14 @@ import {
 import { isApiError, messageFor } from "@/lib/api"
 import type { PaymentItem } from "@/lib/api/schemas"
 import { unitsToUsd } from "@/lib/money"
-import { useCompanyExport, useCompanyPayments } from "@/lib/queries/payments"
+import {
+  useCompanyExport,
+  useCompanyPayments,
+  useHasAuditor,
+} from "@/lib/queries/payments"
 import {
   filterPayments,
+  flattenPayments,
   isFiltering,
   noFilters,
   statusFilters,
@@ -52,12 +57,19 @@ export function ReceiptsScreen() {
   const payments = useCompanyPayments()
   const exporter = useCompanyExport()
   const [filters, setFilters] = useState<PaymentFilters>(noFilters)
-  const [selected, setSelected] = useState<PaymentItem | null>(null)
+  const hasAuditor = useHasAuditor()
+  // The id, not the payment: a refetch that confirms a pending payment updates the open receipt.
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
 
   const loaded = useMemo(
-    () => payments.data?.pages.flatMap((page) => page.items) ?? [],
+    () => flattenPayments(payments.data?.pages ?? []),
     [payments.data],
+  )
+  const selected = useMemo(
+    () => loaded.find((payment) => payment.payment_id === selectedId) ?? null,
+    [loaded, selectedId],
   )
   const visible = useMemo(
     () => filterPayments(loaded, filters),
@@ -114,6 +126,7 @@ export function ReceiptsScreen() {
               />
               <input
                 id="receipts-search"
+                ref={searchRef}
                 type="search"
                 autoComplete="off"
                 value={filters.search}
@@ -212,7 +225,11 @@ export function ReceiptsScreen() {
           action={
             <button
               type="button"
-              onClick={() => setFilters(noFilters)}
+              onClick={() => {
+                setFilters(noFilters)
+                // The button that was pressed is about to go.
+                searchRef.current?.focus()
+              }}
               className={buttonVariants({ variant: "secondary" })}
             >
               Clear filters
@@ -225,27 +242,35 @@ export function ReceiptsScreen() {
           tabIndex={-1}
           className="overflow-hidden rounded-xl border border-line bg-surface outline-none"
         >
-          <div
-            className={`hidden border-b border-line bg-surface-subtle px-4 py-2 text-label text-ink-muted uppercase md:grid ${rowColumns}`}
-          >
-            <span>Paid to</span>
-            <span>Date</span>
-            <span className="flex items-center gap-1">
-              Amount
-              <WhoCanSee viewerRole="admin" hasAuditor={false} />
-            </span>
-            <span>Status</span>
-            <span className="sr-only">Receipt</span>
-          </div>
-          <ul>
+          <div role="table" aria-label="Payments">
+            {/* The header stays in the accessibility tree on a phone, where it is not drawn. */}
+            <div
+              role="row"
+              className={`sr-only border-b border-line bg-surface-subtle px-4 py-2 text-label text-ink-muted uppercase md:not-sr-only md:grid ${rowColumns}`}
+            >
+              <span role="columnheader">Paid to</span>
+              <span role="columnheader">Date</span>
+              <span role="columnheader" className="flex items-center gap-1">
+                Amount
+                <WhoCanSee
+                  viewerRole="admin"
+                  hasAuditor={hasAuditor}
+                  note="Payments marked Transparent were sent as ordinary transfers: their amount is public on-chain."
+                />
+              </span>
+              <span role="columnheader">Status</span>
+              <span role="columnheader">
+                <span className="sr-only">Receipt</span>
+              </span>
+            </div>
             {visible.map((payment) => (
               <PaymentRow
                 key={payment.payment_id}
                 payment={payment}
-                onOpen={() => setSelected(payment)}
+                onOpen={() => setSelectedId(payment.payment_id)}
               />
             ))}
-          </ul>
+          </div>
         </div>
       )}
 
@@ -277,7 +302,8 @@ export function ReceiptsScreen() {
       <ReceiptDialog
         role="admin"
         payment={selected}
-        onClose={() => setSelected(null)}
+        hasAuditor={hasAuditor}
+        onClose={() => setSelectedId(null)}
       />
     </section>
   )
@@ -292,10 +318,13 @@ function PaymentRow({
 }) {
   const day = formatPaidDay(payment.paid_at)
   return (
-    <li
-      className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 border-b border-line px-4 py-3 last:border-0 ${rowColumns}`}
+    <div
+      role="row"
+      className={`flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-line px-4 py-3 last:border-0 md:grid ${rowColumns}`}
     >
-      <div className="min-w-0">
+      {/* The cells are in reading order, which is also the visual order: on a
+          phone the name takes a line and the rest follow it. */}
+      <div role="cell" className="min-w-0 basis-full md:basis-auto">
         <p className="text-ui font-medium wrap-break-word text-ink">
           {payment.counterparty.name}
         </p>
@@ -303,38 +332,33 @@ function PaymentRow({
           <p className="text-caption text-ink-muted">Payroll run</p>
         )}
       </div>
-      {/* On a phone the facts sit on their own line under the name; from md up
-          the wrapper disappears and each one is a column. */}
-      <div className="col-span-2 row-start-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 md:contents">
-        <time
-          dateTime={payment.paid_at}
-          className="order-3 text-ui text-ink-muted md:order-0"
-        >
+      <div role="cell">
+        <time dateTime={payment.paid_at} className="text-ui text-ink-muted">
           {day}
         </time>
+      </div>
+      <div role="cell">
         <AmountDisplay
           amount={unitsToUsd(payment.amount)}
-          className="order-1 text-ui md:order-0"
+          className="text-ui"
         />
-        <span className="order-2 flex flex-wrap items-center gap-1.5 md:order-0">
-          <StatusPill status={payment.status} />
-          {payment.transparent && <TransparentBadge />}
-        </span>
       </div>
-      <button
-        type="button"
-        onClick={onOpen}
-        aria-label={`Receipt for ${payment.counterparty.name}, ${day}`}
-        className={buttonVariants({
-          variant: "secondary",
-          size: "sm",
-          className: "col-start-2 row-start-1 md:col-auto md:row-auto",
-        })}
-      >
-        <ReceiptText className="size-3.5" />
-        Receipt
-      </button>
-    </li>
+      <div role="cell" className="flex flex-wrap items-center gap-1.5">
+        <StatusPill status={payment.status} />
+        {payment.transparent && <TransparentBadge />}
+      </div>
+      <div role="cell" className="ml-auto md:ml-0">
+        <button
+          type="button"
+          onClick={onOpen}
+          aria-label={`Receipt for ${payment.counterparty.name}, ${day}`}
+          className={buttonVariants({ variant: "secondary", size: "sm" })}
+        >
+          <ReceiptText className="size-3.5" />
+          Receipt
+        </button>
+      </div>
+    </div>
   )
 }
 

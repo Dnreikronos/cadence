@@ -23,8 +23,12 @@ vi.mock("@/lib/api", () => ({
   }),
 }))
 
-const { companyExportOptions, companyPaymentsOptions, nextCursor } =
-  await import("./payments")
+const {
+  companyExportOptions,
+  companyPaymentsOptions,
+  hasActiveAuditor,
+  nextCursor,
+} = await import("./payments")
 
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }))
 afterEach(() => {
@@ -87,10 +91,10 @@ describe("companyExportOptions", () => {
     const [blob, filename] = save.mock.calls[0]
     expect(filename).toMatch(/^cadence-payments-\d{4}-\d{2}-\d{2}\.csv$/)
     const text = await (blob as Blob).text()
-    expect(text.split("\n")[0]).toBe(
+    expect(text.split(/\r?\n/)[0]).toBe(
       "date,counterparty,amount,status,signature",
     )
-    expect(text.split("\n")).toHaveLength(1 + db.payments.length)
+    expect(text.split(/\r?\n/)).toHaveLength(1 + db.payments.length)
     expect(notify).toHaveBeenCalledWith(`Saved ${filename}`)
   })
 
@@ -106,5 +110,21 @@ describe("companyExportOptions", () => {
     await expect(mutation.mutate()).rejects.toBeInstanceOf(ApiError)
     expect(save).not.toHaveBeenCalled()
     expect(notify).not.toHaveBeenCalled()
+  })
+})
+
+describe("hasActiveAuditor", () => {
+  it("is true only when someone can already read", () => {
+    expect(hasActiveAuditor([])).toBe(false)
+    expect(
+      hasActiveAuditor([{ status: "invited" }, { status: "invite-expired" }]),
+    ).toBe(false)
+    expect(
+      hasActiveAuditor([{ status: "invited" }, { status: "active" }]),
+    ).toBe(true)
+  })
+
+  it("counts a status it does not know, rather than leave a reader out", () => {
+    expect(hasActiveAuditor([{ status: "suspended" }])).toBe(true)
   })
 })
