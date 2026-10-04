@@ -68,6 +68,23 @@ describe("an unknown level from the service", () => {
     }
   })
 
+  it("covers the level only: a malformed matches list still fails the schema", () => {
+    const bad = response("exact")
+    for (const matches of [
+      undefined,
+      "none",
+      [{ payment_id: "not-a-guid", paid_at: "2026-10-03T19:00:00Z" }],
+      [{ payment_id: "b0000000-0000-4000-8000-000000000001" }],
+    ]) {
+      const body = { ...bad, reveal_risk: { level: "exact", matches } }
+      expect(unwrapPreparedSchema.safeParse(body).success).toBe(false)
+    }
+    expect(
+      unwrapPreparedSchema.safeParse({ ...bad, reveal_risk: undefined })
+        .success,
+    ).toBe(false)
+  })
+
   it("leaves the known levels alone", () => {
     for (const level of revealRiskLevels) {
       expect(
