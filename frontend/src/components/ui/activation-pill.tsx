@@ -1,5 +1,8 @@
 import { cn } from "@/lib/utils"
-import type { Activation } from "@/lib/people/types"
+
+// Whether someone can be paid, or what is still pending: a person's activation
+// and an auditor's invite share these four states.
+type Activation = "active" | "invited" | "invite-expired" | "not-invited"
 
 const pills: Record<
   Activation,
