@@ -10,17 +10,14 @@ export const kindLabels: Record<PersonKind, string> = {
 // Derived from person.status plus the pending invite row, if any.
 export type Activation = "active" | "invited" | "invite-expired" | "not-invited"
 
-export type Person = {
+// What the people table holds. The monthly amount is not here: it lives with the
+// proof service, encrypted (B2), and is joined in by person id.
+export type PersonRecord = {
   id: string
   name: string
   email: string
   kind: PersonKind
   activation: Activation
-  // Lives with the proof service, encrypted (B2). Never a Supabase column.
-  monthlyAmount: number
 }
 
-export type PersonInput = Pick<
-  Person,
-  "name" | "email" | "kind" | "monthlyAmount"
->
+export type PersonInput = Pick<PersonRecord, "name" | "email" | "kind">

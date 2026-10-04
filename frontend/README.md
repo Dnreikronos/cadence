@@ -102,6 +102,12 @@ that configuration, with the explicit `mock` mode as the opt-in, so a typo in a
 Supabase variable also turns it on: check the env before sharing a deploy. Sign-out
 clears the cookie. A reload resets the mock data.
 
+The company people list follows the API mode, not whether Supabase is configured
+(`src/lib/people/repository.ts`): in mock mode the people are an in-memory list with
+the mock service's ids, even with Supabase configured, because the amounts and invites
+go to the mock service, which only knows those ids; in real mode they are the Supabase
+`people` rows, and real mode without Supabase shows "Sign-in is not configured".
+
 ## Wallet
 
 Screens sign through `useWallet()` (`src/lib/wallet`): `{ status, address, signer,
