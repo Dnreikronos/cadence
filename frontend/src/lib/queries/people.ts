@@ -45,8 +45,10 @@ export function usePersonAmounts() {
 
 // Waits for the list but not the amounts: a failing proof service must not keep
 // a dialog open (the mutation's own callbacks, which close it, run after this).
-function refreshPeople(queryClient: QueryClient) {
-  void queryClient.invalidateQueries({ queryKey: queryKeys.people.amounts() })
+function refreshPeople(queryClient: QueryClient, amountsChanged = false) {
+  if (amountsChanged) {
+    void queryClient.invalidateQueries({ queryKey: queryKeys.people.amounts() })
+  }
   return queryClient.invalidateQueries({ queryKey: queryKeys.people.list() })
 }
 
@@ -83,7 +85,7 @@ export function useSavePerson() {
       }
     },
     // Settled, not success: a person saved without an amount is on the list now.
-    onSettled: () => refreshPeople(queryClient),
+    onSettled: () => refreshPeople(queryClient, true),
   })
 }
 

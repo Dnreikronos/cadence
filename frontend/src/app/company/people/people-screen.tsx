@@ -40,7 +40,8 @@ export function PeopleScreen() {
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const close = () => setDialog(null)
 
-  const amounts: Amounts = amountsQuery.isSuccess
+  // Amounts already read stay on screen when a refresh fails.
+  const amounts: Amounts = amountsQuery.data
     ? { state: "ready", byPerson: amountsQuery.data }
     : amountsQuery.isError
       ? { state: "error" }
