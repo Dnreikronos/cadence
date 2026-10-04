@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { focusTarget, isFocusLost } from "./restore-focus"
+import { finalFocusFor, focusTarget, isFocusLost } from "./restore-focus"
 
 const el = (isConnected: boolean) => ({ isConnected, name: "el" })
 
@@ -25,6 +25,17 @@ describe("focusTarget", () => {
 
   it("is null when there is no fallback either, so the caller can leave it to the browser", () => {
     expect(focusTarget(null, true, null)).toBeNull()
+  })
+})
+
+describe("finalFocusFor", () => {
+  it("hands over the element, and leaves it to the library when there is none", () => {
+    const origin = el(true)
+    const fallback = el(true)
+    expect(finalFocusFor(origin, false, fallback)).toBe(origin)
+    expect(finalFocusFor(origin, true, fallback)).toBe(fallback)
+    expect(finalFocusFor(null, false, null)).toBe(true)
+    expect(finalFocusFor(el(false), false, null)).toBe(true)
   })
 })
 

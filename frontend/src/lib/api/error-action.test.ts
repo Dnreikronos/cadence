@@ -54,6 +54,14 @@ describe("signInHref", () => {
     )
   })
 
+  it("encodes what would end the value early, so the path comes back whole", () => {
+    const href = signInHref("/company/receipts", "?q=a%26b&name=Ana Lima")
+    const next = new URL(href, "http://x").searchParams.get("next")
+    expect(next).toBe("/company/receipts?q=a%26b&name=Ana Lima")
+    expect(href.startsWith("/sign-in?next=%2Fcompany")).toBe(true)
+    expect(href).not.toMatch(/[&# ]/)
+  })
+
   it("drops Next's own params and an empty query", () => {
     expect(signInHref("/me", "?_rsc=abc")).toBe("/sign-in?next=%2Fme")
     expect(signInHref("/company")).toBe("/sign-in?next=%2Fcompany")

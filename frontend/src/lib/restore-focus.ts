@@ -16,6 +16,16 @@ export function focusTarget<T extends Connectable>(
   return fallback
 }
 
+// What Base UI's `finalFocus` is given: the element to focus, or `true` to leave it to
+// the library when there is nothing better (no opener and no fallback).
+export function finalFocusFor<T extends Connectable>(
+  origin: T | null,
+  originGone: boolean,
+  fallback: T | null,
+): T | true {
+  return focusTarget(origin, originGone, fallback) ?? true
+}
+
 // Focus is lost when the control that had it is disabled or removed: the browser
 // moves it to `<body>`. Anything else is a user who went on, and is left alone.
 export function isFocusLost(
@@ -61,6 +71,6 @@ export function useRestoreFocus(getFallback: () => HTMLElement | null) {
       gone.current = true
     },
     finalFocus: () =>
-      focusTarget(origin.current, gone.current, fallback.current()) ?? true,
+      finalFocusFor(origin.current, gone.current, fallback.current()),
   }
 }
