@@ -1,9 +1,16 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { guard, requiredRole, type Role } from "@/lib/auth/guard"
+import { isDemoEnabled } from "@/lib/demo/mode"
+import { DEMO_COOKIE, parseDemoRole } from "@/lib/demo/viewer"
 import { membershipOf } from "@/lib/supabase/membership"
 import { createMiddlewareClient } from "@/lib/supabase/middleware"
 
 export async function middleware(request: NextRequest) {
+  // Demo configuration has no Supabase to ask: the cookie is the session.
+  if (isDemoEnabled()) {
+    const role = parseDemoRole(request.cookies.get(DEMO_COOKIE)?.value)
+    return decide(request, role, NextResponse.next())
+  }
   const guarded = requiredRole(request.nextUrl.pathname) !== null
   let session: ReturnType<typeof createMiddlewareClient>
   try {
