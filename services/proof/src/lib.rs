@@ -8,6 +8,7 @@ pub mod database;
 pub mod error;
 pub mod run_store;
 pub mod transfer_store;
+pub mod unwrap_store;
 pub mod wrap_store;
 pub mod keys {
     pub mod elgamal;

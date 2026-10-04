@@ -3,6 +3,10 @@ use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    #[error("unwrap request not found")]
+    UnwrapNotFound,
+    #[error("{0}")]
+    UnwrapUnavailable(&'static str),
     #[error("reveal risk requires acknowledgement")]
     RevealRisk(crate::solana::reveal_risk::RevealRisk),
     #[error("run not found")]
@@ -42,6 +46,8 @@ pub enum AppError {
 impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
+            Self::UnwrapNotFound => StatusCode::NOT_FOUND,
+            Self::UnwrapUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::RevealRisk(_) => StatusCode::CONFLICT,
             Self::RunNotFound => StatusCode::NOT_FOUND,
             Self::RunUnavailable => StatusCode::SERVICE_UNAVAILABLE,
@@ -83,6 +89,8 @@ impl IntoResponse for AppError {
                 .into_response();
         }
         let code = match self {
+            Self::UnwrapNotFound => "unwrap_not_found",
+            Self::UnwrapUnavailable(code) => code,
             Self::RunNotFound => "run_not_found",
             Self::RunUnavailable => "run_storage_unavailable",
             Self::Unauthorized => "authentication_required",
