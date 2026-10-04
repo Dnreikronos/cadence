@@ -141,7 +141,7 @@ describe("applyPendingMutation", () => {
     db.me.pending = 2_000_000n
     const { queryClient, onApplied, options } = setup()
     queryClient.setQueryData(queryKeys.balance.me(viewer), { old: true })
-    queryClient.setQueryData(queryKeys.status.me(), { old: true })
+    queryClient.setQueryData(queryKeys.status.me(viewer), { old: true })
     queryClient.setQueryData(queryKeys.people.list(), [])
 
     await new MutationObserver(queryClient, options).mutate()
@@ -151,7 +151,7 @@ describe("applyPendingMutation", () => {
       queryClient.getQueryState(queryKeys.balance.me(viewer))?.isInvalidated,
     ).toBe(true)
     expect(
-      queryClient.getQueryState(queryKeys.status.me())?.isInvalidated,
+      queryClient.getQueryState(queryKeys.status.me(viewer))?.isInvalidated,
     ).toBe(true)
     expect(
       queryClient.getQueryState(queryKeys.people.list())?.isInvalidated,

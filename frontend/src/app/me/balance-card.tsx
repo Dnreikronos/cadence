@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { ArrowUpFromLine, Loader2 } from "lucide-react"
+import { useViewerScope } from "@/components/app/viewer-scope"
 import { AmountDisplay } from "@/components/ui/amount-display"
 import { buttonVariants } from "@/components/ui/button"
 import { ErrorState } from "@/components/ui/error-state"
@@ -11,7 +12,6 @@ import { applyPendingMessage } from "@/lib/me/apply-pending"
 import { unitsToUsd } from "@/lib/money"
 import { useApplyPending } from "@/lib/queries/me"
 import { useMyBalance } from "@/lib/queries/withdraw"
-import type { ViewerScope } from "@/lib/queries/keys"
 import { useWallet } from "@/lib/wallet/context"
 import type { SignStep } from "@/lib/api/sign"
 
@@ -21,8 +21,8 @@ const stepLabels: Record<SignStep, string> = {
   confirming: "Confirming…",
 }
 
-export function BalanceCard({ viewer }: { viewer: ViewerScope }) {
-  const balance = useMyBalance(viewer)
+export function BalanceCard() {
+  const balance = useMyBalance(useViewerScope())
 
   if (!balance.data && !balance.isError) {
     return (

@@ -20,8 +20,6 @@ import {
 
 const queries = meQueries(api)
 
-export const useMyStatus = () => useQuery(queries.status())
-
 export const useRecentPayments = () => useQuery(queries.recent())
 
 export const usePaymentHistory = () => useInfiniteQuery(queries.history())

@@ -19,11 +19,6 @@ type MeClient = Pick<ApiClient, "me">
 
 export function meQueries(client: MeClient) {
   return {
-    status: () =>
-      queryOptions({
-        queryKey: queryKeys.status.me(),
-        queryFn: ({ signal }) => client.me.status({ signal }),
-      }),
     // The home page and the history page differ by `limit`, so they never share a
     // cache entry even though one is a list and the other pages.
     recent: () =>

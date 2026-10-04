@@ -1,54 +1,19 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowRight, UserCheck, Wallet } from "lucide-react"
-import { buttonVariants } from "@/components/ui/button"
+import { ArrowRight, Wallet } from "lucide-react"
 import { EmptyState } from "@/components/ui/empty-state"
 import { ErrorState } from "@/components/ui/error-state"
-import type { ViewerScope } from "@/lib/queries/keys"
 import { RECENT_PAYMENTS } from "@/lib/queries/me-options"
-import { useMyStatus, useRecentPayments } from "@/lib/queries/me"
+import { useRecentPayments } from "@/lib/queries/me"
 import { BalanceCard } from "./balance-card"
 import { PaymentList, PaymentListSkeleton } from "./payment-list"
 
-export function MeScreen({ viewer }: { viewer: ViewerScope }) {
+export function MeScreen() {
   return (
     <div className="max-w-3xl space-y-6">
-      <SetupBanner />
-      <BalanceCard viewer={viewer} />
+      <BalanceCard />
       <RecentPayments />
-    </div>
-  )
-}
-
-// Shown only when the service says the account is not configured. If the status
-// can't be read there is no banner: the rest of the page doesn't depend on it.
-function SetupBanner() {
-  const status = useMyStatus()
-  if (!status.data || status.data.account_configured) return null
-  return (
-    <div
-      role="status"
-      className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warning-border bg-warning-bg p-4 text-warning-fg"
-    >
-      <p className="flex min-w-0 flex-1 basis-64 gap-2.5 text-ui/normal">
-        <UserCheck aria-hidden className="mt-0.5 size-4 shrink-0" />
-        <span>
-          <span className="font-medium">Finish setting up your account.</span>{" "}
-          Until then you can&apos;t receive private payments.
-        </span>
-      </p>
-      {/* The /activate route is not on main yet, so there is nothing to open. */}
-      <span
-        aria-disabled="true"
-        className={buttonVariants({
-          variant: "secondary",
-          size: "sm",
-          className: "pointer-events-none opacity-60",
-        })}
-      >
-        Set up account (coming soon)
-      </span>
     </div>
   )
 }
