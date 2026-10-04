@@ -1,6 +1,5 @@
-import { Send } from "lucide-react"
 import { PageHeader } from "@/components/app/page-header"
-import { EmptyState } from "@/components/ui/empty-state"
+import { PaymentsHome } from "./payments-home"
 
 export default function CompanyPage() {
   return (
@@ -8,13 +7,9 @@ export default function CompanyPage() {
       <PageHeader
         eyebrow="Company"
         title="Payments"
-        description="Only members with the admin role reach this page."
+        description="Pay your people from your private balance. Amounts are encrypted on-chain; you, the recipient, any auditor and Cadence can read them."
       />
-      <EmptyState
-        icon={Send}
-        title="No payments yet"
-        description="Deposit USDC, then pay your first recipient."
-      />
+      <PaymentsHome />
     </div>
   )
 }
