@@ -6,18 +6,12 @@ import Link from "next/link"
 import { AmountDisplay } from "@/components/ui/amount-display"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
-import { ErrorState } from "@/components/ui/error-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { fieldClass } from "@/components/ui/field"
 import { StatusPill } from "@/components/ui/status-pill"
 import { TransparentBadge } from "@/components/ui/transparent-badge"
 import { WhoCanSee } from "@/components/ui/who-can-see"
-import { messageFor } from "@/lib/api/errors"
-import {
-  canRetry,
-  listState,
-  loadedItems,
-  showFilterNote,
-} from "@/lib/audit/pages"
+import { listState, loadedItems, showFilterNote } from "@/lib/audit/pages"
 import {
   auditRow,
   filterPayments,
@@ -91,12 +85,10 @@ export function AuditScreen({
       )}
 
       {state === "error" && (
-        <ErrorState
+        <ApiErrorState
+          error={payments.error}
           title="Couldn't load the payments"
-          description={messageFor(payments.error)}
-          onRetry={
-            canRetry(payments.error) ? () => payments.refetch() : undefined
-          }
+          onRetry={() => payments.refetch()}
         />
       )}
 

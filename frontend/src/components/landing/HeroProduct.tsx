@@ -50,13 +50,13 @@ export function HeroProduct() {
         <div className="grid lg:grid-cols-[208px_1fr]">
           <Sidebar balance={isDone ? treasury - total : treasury} />
           <div className="grid min-w-0 xl:grid-cols-[1fr_300px]">
-            <main className="min-w-0 p-4 sm:p-6">
+            <div className="min-w-0 p-4 sm:p-6">
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div>
                   <p className="font-mono text-[11px] text-ink-muted">
                     Payments / Runs
                   </p>
-                  <h3 className="mt-1 text-title text-ink">March run</h3>
+                  <p className="mt-1 text-title text-ink">March run</p>
                   <p className="mt-1 text-ui text-ink-muted">
                     {payments.length} payments · {formatUsd(total)} · one
                     approval
@@ -129,7 +129,7 @@ export function HeroProduct() {
                 Readable by each recipient, Solaris, Carla Reis (auditor) and
                 Cadence.
               </p>
-            </main>
+            </div>
             <PanelPublic sealedCount={sealedCount} />
           </div>
         </div>
@@ -182,8 +182,8 @@ function BarTop() {
 
 function Sidebar({ balance }: { balance: number }) {
   return (
-    <aside className="hidden flex-col justify-between border-r border-line bg-canvas/40 p-3 lg:flex">
-      <nav className="space-y-0.5">
+    <div className="hidden flex-col justify-between border-r border-line bg-canvas/40 p-3 lg:flex">
+      <div className="space-y-0.5">
         {nav.map((item) => (
           <span
             key={item.label}
@@ -198,7 +198,7 @@ function Sidebar({ balance }: { balance: number }) {
             {item.label}
           </span>
         ))}
-      </nav>
+      </div>
       <div className="mt-10 rounded-xl border border-line bg-surface p-3">
         <p className="flex items-center gap-1.5 text-label text-ink-muted">
           <Lock className="size-3" /> Private balance
@@ -213,7 +213,7 @@ function Sidebar({ balance }: { balance: number }) {
           Only Solaris, Carla and Cadence can read this.
         </p>
       </div>
-    </aside>
+    </div>
   )
 }
 
@@ -302,15 +302,17 @@ function ChipStatus({ state }: { state: "ready" | "sealing" | "sealed" }) {
 function PanelPublic({ sealedCount }: { sealedCount: number }) {
   const landed = payments.slice(0, sealedCount).reverse()
   return (
-    <aside className="border-t border-line bg-ink p-4 text-white sm:p-5 xl:border-t-0 xl:border-l">
+    <div className="border-t border-line bg-ink p-4 text-white sm:p-5 xl:border-t-0 xl:border-l">
       <div className="flex items-center justify-between">
         <p className="flex items-center gap-2 text-ui font-medium">
           <Globe className="size-3.5 text-white/60" strokeWidth={1.75} /> Public
           view
         </p>
-        <span className="text-label text-white/40">what the chain shows</span>
+        <span className="text-label text-night-muted">
+          what the chain shows
+        </span>
       </div>
-      <p className="mt-1 text-caption/normal text-white/45">
+      <p className="mt-1 text-caption/normal text-night-muted">
         Any explorer or RPC sees this, and nothing more.
       </p>
       <ul className="mt-4 space-y-2">
@@ -319,7 +321,7 @@ function PanelPublic({ sealedCount }: { sealedCount: number }) {
             key={payment.id}
             className="animate-[fade-in_450ms_var(--ease-out)] rounded-lg border border-white/10 bg-white/3 px-3 py-2.5 font-mono text-[11.5px]"
           >
-            <div className="flex items-center justify-between text-white/45">
+            <div className="flex items-center justify-between text-night-muted">
               <span>ConfidentialTransfer</span>
               <span>just now</span>
             </div>
@@ -335,12 +337,12 @@ function PanelPublic({ sealedCount }: { sealedCount: number }) {
           </li>
         ))}
         {landed.length === 0 && (
-          <li className="rounded-lg border border-dashed border-white/15 px-3 py-6 text-center font-mono text-[11.5px] text-white/35">
+          <li className="rounded-lg border border-dashed border-white/15 px-3 py-6 text-center font-mono text-[11.5px] text-night-muted">
             Waiting for the run
           </li>
         )}
       </ul>
-    </aside>
+    </div>
   )
 }
 

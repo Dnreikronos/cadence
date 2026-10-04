@@ -137,14 +137,41 @@ describe("authentication and errors", () => {
     const error = (await caught(api.me.balance())) as ApiError
     expect(error).toMatchObject({
       status: 429,
-      code: "transfer_rate_limited",
+      code: "rate_limited",
       retryAfter: 60,
     })
     expect(error.isRetryable).toBe(true)
   })
 
-  it("treats auth_unavailable as retryable, not as signed out", async () => {
+  it("keeps the limiter's own code on the routes that prepare a payment", async () => {
+    scenarios.set("rate-limited")
+    expect(
+      await caught(
+        api.wrap.prepare({ company_wallet: COMPANY_WALLET, amount: "1000000" }),
+      ),
+    ).toMatchObject({ status: 429, code: "wrap_rate_limited" })
+    expect(
+      await caught(
+        api.transfer.prepare({
+          company_wallet: COMPANY_WALLET,
+          sender: COMPANY_WALLET,
+          recipient: ME_WALLET,
+          amount: "1000000",
+          aes_key: "AAAAAAAAAAAAAAAAAAAAAA==",
+        }),
+      ),
+    ).toMatchObject({ status: 429, code: "transfer_rate_limited" })
+  })
+
+  it("answers a service-down read with a generic, retryable 503", async () => {
     scenarios.set("service-down")
+    const error = (await caught(api.me.balance())) as ApiError
+    expect(error).toMatchObject({ status: 503, code: "service_unavailable" })
+    expect(error.isRetryable).toBe(true)
+  })
+
+  it("treats auth_unavailable as retryable, not as signed out", async () => {
+    scenarios.set("auth-down")
     const error = (await caught(api.me.balance())) as ApiError
     expect(error).toMatchObject({ status: 503, code: "auth_unavailable" })
     expect(error.isRetryable).toBe(true)
@@ -192,7 +219,7 @@ describe("authentication and errors", () => {
     const error = (await caught(
       api.wrap.confirm({ request_id: prepared.request_id, signature: SIG }),
     )) as ApiError
-    expect(error).toMatchObject({ status: 503, code: "auth_unavailable" })
+    expect(error).toMatchObject({ status: 503, code: "service_unavailable" })
     expect(error.isRetryable).toBe(true)
     expect(db.company.pending).toBe(0n)
 
@@ -820,7 +847,7 @@ describe("auditors", () => {
       ],
       [
         "service-down",
-        { status: 503, code: "auth_unavailable", isRetryable: true },
+        { status: 503, code: "service_unavailable", isRetryable: true },
       ],
     ] as const) {
       scenarios.set(scenario)
@@ -907,7 +934,7 @@ describe("access log", () => {
       ],
       [
         "service-down",
-        { status: 503, code: "auth_unavailable", isRetryable: true },
+        { status: 503, code: "service_unavailable", isRetryable: true },
       ],
     ] as const) {
       scenarios.set(scenario)
@@ -1165,7 +1192,7 @@ describe("account status", () => {
       ],
       [
         "service-down",
-        { status: 503, code: "auth_unavailable", isRetryable: true },
+        { status: 503, code: "service_unavailable", isRetryable: true },
       ],
     ] as const) {
       scenarios.set(scenario)

@@ -8,19 +8,25 @@ export function Modal({
   onOpenChange,
   title,
   description,
+  finalFocus,
   children,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   title: React.ReactNode
   description?: React.ReactNode
+  // Where focus goes on close (see `useRestoreFocus`). Without it, Base UI decides.
+  finalFocus?: () => HTMLElement | boolean
   children: React.ReactNode
 }) {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-ink/30 transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0" />
-        <Dialog.Popup className="fixed top-1/2 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-1/2 rounded-xl border border-line bg-surface p-5 shadow-frame transition-[opacity,transform] duration-200 ease-out outline-none data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0">
+        <Dialog.Popup
+          finalFocus={finalFocus}
+          className="fixed top-1/2 left-1/2 z-50 w-[calc(100vw-2rem)] max-w-md -translate-1/2 rounded-xl border border-line bg-surface p-5 shadow-frame transition-[opacity,transform] duration-200 ease-out outline-none data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0"
+        >
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <Dialog.Title className="text-lead font-medium text-ink">

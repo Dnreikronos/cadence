@@ -19,6 +19,9 @@ import { useSignAndConfirm } from "@/lib/wallet/context"
 import { invalidateBalances } from "./invalidate"
 import { queryKeys } from "./keys"
 
+// How old a balance may be and still say what was pending when a deposit started.
+const PENDING_FRESH_MS = 60_000
+
 export type { MakePrivateState } from "@/lib/deposit/controller"
 
 // The company's USDC that anyone can see on-chain, in base units. Money arrives
@@ -56,6 +59,13 @@ export function useMakePrivate(wallet: string) {
     refresh: () => {
       void invalidateBalances(queryClient)
       void queryClient.invalidateQueries({ queryKey: queryKeys.deposit.all })
+    },
+    // Unknown unless the balance was read lately: an old reading may predate a deposit.
+    pendingUnits: () => {
+      const key = queryKeys.balance.companyWallet(wallet)
+      const state = queryClient.getQueryState<{ pending: string }>(key)
+      const fresh = Date.now() - (state?.dataUpdatedAt ?? 0) < PENDING_FRESH_MS
+      return fresh && !state?.isInvalidated ? state?.data?.pending : undefined
     },
     toast: (message) => toast.success(message),
     store: {

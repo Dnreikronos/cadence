@@ -89,7 +89,7 @@ describe("when the status cannot be read", () => {
     expect(canRetryStatus(error)).toBe(true)
     expect(canRetryStatus(new Error("offline"))).toBe(true)
     expect(statusMessage(error)).toBe(
-      "Sign-in is unavailable right now. Try again shortly.",
+      "Cadence can't check your session right now. Try again shortly.",
     )
   })
 })

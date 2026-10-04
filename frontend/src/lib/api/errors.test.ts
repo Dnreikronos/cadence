@@ -30,6 +30,15 @@ describe("isRetryable", () => {
 })
 
 describe("messageFor", () => {
+  it("says what is true on a data screen when the session check or the service is down", () => {
+    expect(messageFor(new ApiError(503, "auth_unavailable"))).toBe(
+      "Cadence can't check your session right now. Try again shortly.",
+    )
+    expect(messageFor(new ApiError(503, "service_unavailable"))).toBe(
+      "Cadence is unavailable right now. Try again shortly.",
+    )
+  })
+
   const newCodes = [
     "insufficient_usdc",
     "wrap_already_confirmed",

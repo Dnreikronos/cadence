@@ -4,7 +4,7 @@ import { useRef, useState } from "react"
 import { Download, Loader2, Wallet } from "lucide-react"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
-import { ErrorState } from "@/components/ui/error-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import { messageFor } from "@/lib/api/errors"
 import { exportReaders } from "@/lib/me/copy"
@@ -29,9 +29,9 @@ function HistoryBody() {
   if (view.kind === "loading") return <PaymentListSkeleton rows={5} />
   if (view.kind === "error") {
     return (
-      <ErrorState
+      <ApiErrorState
+        error={history.error}
         title="Couldn't load your payments"
-        description={messageFor(history.error)}
         onRetry={() => history.refetch()}
       />
     )
@@ -74,9 +74,9 @@ function HistoryBody() {
         {announcement}
       </p>
       {history.isFetchNextPageError && (
-        <ErrorState
+        <ApiErrorState
+          error={history.error}
           title="Couldn't load more payments"
-          description={messageFor(history.error)}
           onRetry={() => void loadMore()}
         />
       )}

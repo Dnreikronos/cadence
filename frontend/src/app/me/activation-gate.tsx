@@ -3,9 +3,9 @@
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useViewerScope } from "@/components/app/viewer-scope"
-import { ErrorState } from "@/components/ui/error-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { Skeleton } from "@/components/ui/skeleton"
-import { canRetryStatus, statusMessage } from "@/lib/activation/errors"
+import { statusMessage } from "@/lib/activation/errors"
 import { gateView } from "@/lib/activation/gate"
 import { useAccountStatus } from "@/lib/queries/status"
 
@@ -24,12 +24,11 @@ export function ActivationGate({ children }: { children: React.ReactNode }) {
   if (view === "ready") return children
   if (view === "error") {
     return (
-      <ErrorState
+      <ApiErrorState
+        error={status.error}
         title="Couldn't check your account"
-        description={statusMessage(status.error)}
-        onRetry={
-          canRetryStatus(status.error) ? () => status.refetch() : undefined
-        }
+        describe={statusMessage}
+        onRetry={() => status.refetch()}
       />
     )
   }

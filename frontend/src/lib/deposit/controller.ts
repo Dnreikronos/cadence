@@ -1,5 +1,4 @@
 import type { ApiClient } from "@/lib/api/client"
-import { formatBaseUnits } from "@/lib/deposit/schema"
 import type { Submission } from "@/lib/submissions"
 import {
   canRetry,
@@ -9,6 +8,13 @@ import {
   runMakePrivate,
   type Resume,
 } from "./make-private"
+import {
+  doneToast,
+  earlierFromBalance,
+  earlierFromRecord,
+  earlierToRecord,
+  type EarlierPending,
+} from "./message"
 import { reconcileWrap, type Reconciled } from "./reconcile"
 import type { MakePrivateStep } from "./types"
 
@@ -28,14 +34,21 @@ export type MakePrivateState =
       retryable: boolean
     }
   // `amount` is absent when only a pending credit was made available.
-  | { status: "done"; amount?: string }
+  | { status: "done"; amount?: string; earlierPending?: EarlierPending }
   // What the check of an earlier wrap found. Informational: the form is free.
-  | { status: "resolved"; outcome: Reconciled }
+  | {
+      status: "resolved"
+      outcome: Reconciled
+      earlierPending?: EarlierPending
+    }
 
 export type Deps = {
   wallet: string
   api: Pick<ApiClient, "wrap" | "accounts">
   signAndConfirm: Parameters<typeof runMakePrivate>[0]["signAndConfirm"]
+  // The private balance's pending credit right now, in base units, read when a deposit
+  // starts: what applying the credit will make available besides the new amount.
+  pendingUnits?: () => string | undefined
   // Balances changed (a transaction confirmed, or a check ended).
   refresh: () => void
   toast: (message: string) => void
@@ -48,9 +61,7 @@ export type Deps = {
   sleep?: Parameters<typeof reconcileWrap>[0]["sleep"]
 }
 
-// "2500 USDC", exact: a sub-cent amount must not read as $0.00.
-export const describeUsdc = (units: string) =>
-  `${formatBaseUnits(BigInt(units))} USDC`
+export { describeUsdc } from "./message"
 
 // The make-private flow as a small state machine, with no React in it so its
 // ordering and its failures can be tested. `useMakePrivate` wraps it.
@@ -61,6 +72,8 @@ export class MakePrivateController {
   private abort: AbortController | null = null
   // The amount of the deposit in flight, for a retry of its wrap step.
   private amount = ""
+  // What was already pending when that deposit started.
+  private earlierPending: EarlierPending = null
   private record: Submission | null = null
   // Whatever is running now; a stale run never touches the state or the flag.
   private generation = 0
@@ -106,11 +119,13 @@ export class MakePrivateController {
 
   deposit(units: string) {
     this.amount = units
+    this.earlierPending = earlierFromBalance(this.getDeps().pendingUnits?.())
     return this.begin("wrap")
   }
 
   applyPending() {
     this.amount = ""
+    this.earlierPending = undefined
     return this.begin("apply")
   }
 
@@ -197,6 +212,7 @@ export class MakePrivateController {
             signature: null,
             last_valid_block_height: wrap.last_valid_block_height,
             wallet: deps.wallet,
+            earlier_pending: earlierToRecord(this.earlierPending),
             at: (deps.now ?? Date.now)(),
           })
         },
@@ -215,13 +231,12 @@ export class MakePrivateController {
         },
       })
       if (!this.live(generation)) return
-      const done = this.amount || undefined
-      deps.toast(
-        done
-          ? `${describeUsdc(done)} is now private`
-          : "Your pending USDC is now available",
-      )
-      this.set({ status: "done", amount: done })
+      const done = {
+        amount: this.amount || undefined,
+        earlierPending: this.amount ? this.earlierPending : undefined,
+      }
+      deps.toast(doneToast(done))
+      this.set({ status: "done", ...done })
     } catch (error) {
       if (!this.live(generation) || abort.signal.aborted) return
       const failure =
@@ -267,7 +282,11 @@ export class MakePrivateController {
       if (!this.live(generation)) return
       deps.store.clear()
       deps.refresh()
-      this.set({ status: "resolved", outcome })
+      this.set({
+        status: "resolved",
+        outcome,
+        earlierPending: earlierFromRecord(record.earlier_pending),
+      })
     } catch {
       if (!this.live(generation) || abort.signal.aborted) return
       // The service could not be asked. Keep the record and the lock, and let

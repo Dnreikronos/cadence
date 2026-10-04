@@ -101,7 +101,9 @@ const messages: Record<string, string> = {
   transaction_mismatch: "The transaction changed after it was prepared.",
   transfer_already_confirmed: "This payment was already confirmed.",
   transfer_requires_devnet: "Payments only work on devnet for now.",
-  auth_unavailable: "Sign-in is unavailable right now. Try again shortly.",
+  auth_unavailable:
+    "Cadence can't check your session right now. Try again shortly.",
+  service_unavailable: "Cadence is unavailable right now. Try again shortly.",
   rpc_unavailable: "The network is busy. Try again shortly.",
   transfer_timeout: "That took too long. Try again.",
   network_error: "Can't reach Cadence. Check your connection.",

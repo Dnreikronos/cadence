@@ -1,8 +1,11 @@
 import { notFound } from "next/navigation"
-import { cluster } from "@/lib/solana/cluster"
+import { devToolsEnabled } from "@/lib/dev-tools"
+import { devToolsEnv } from "@/lib/dev-tools-env"
 
-// Dev tooling renders fake data; it never ships to mainnet.
+// Dev tooling renders fake data and is reachable without a session: a 404 on mainnet and,
+// in a production build, unless NEXT_PUBLIC_DEV_TOOLS=1 (see `devToolsEnabled`). The
+// middleware answers first; this is the second guard, for a request that reaches here.
 export default function DevLayout({ children }: { children: React.ReactNode }) {
-  if (cluster.isMainnet) notFound()
+  if (!devToolsEnabled(devToolsEnv())) notFound()
   return children
 }

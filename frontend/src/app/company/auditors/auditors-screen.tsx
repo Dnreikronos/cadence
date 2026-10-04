@@ -1,12 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState, type RefObject } from "react"
 import { Plus, RotateCw, ShieldCheck, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { ActivationPill } from "@/components/ui/activation-pill"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
-import { ErrorState } from "@/components/ui/error-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { Modal } from "@/components/ui/modal"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
@@ -19,6 +19,7 @@ import {
   useRevokeAuditor,
   type AuditorRow,
 } from "@/lib/queries/auditors"
+import { focusIfLost, useRestoreFocus } from "@/lib/restore-focus"
 import { InviteAuditorModal } from "./invite-form"
 
 const rowColumns =
@@ -30,14 +31,28 @@ export function AuditorsScreen() {
   const [removeOpen, setRemoveOpen] = useState(false)
   const [inviting, setInviting] = useState(false)
   const auditors = useAuditors()
+  const inviteRef = useRef<HTMLButtonElement>(null)
+  // Closing a dialog returns focus to the button that opened it, or to "Invite
+  // auditor" when that row is gone (a revoked auditor, a first invite).
+  const restore = useRestoreFocus(() => inviteRef.current)
+  // The email of a row whose "Invite again" just succeeded. A re-invite comes back
+  // as a new row, so the row that replaces the old one takes focus when it mounts.
+  const refocus = useRef<string | null>(null)
+  useEffect(() => {
+    if (!auditors.isFetching) refocus.current = null
+  }, [auditors.isFetching, auditors.dataUpdatedAt])
 
   const hasAuditor =
     auditors.data?.rows.some((a) => a.status === "active") ?? false
 
   const inviteButton = (
     <button
+      ref={inviteRef}
       type="button"
-      onClick={() => setInviting(true)}
+      onClick={() => {
+        restore.remember()
+        setInviting(true)
+      }}
       className={buttonVariants()}
     >
       <Plus className="size-4" />
@@ -59,17 +74,25 @@ export function AuditorsScreen() {
       <AuditorsBody
         auditors={auditors}
         inviteButton={inviteButton}
+        refocus={refocus}
         onRemove={(auditor) => {
+          restore.remember()
           setRemoving(auditor)
           setRemoveOpen(true)
         }}
       />
 
-      <InviteAuditorModal open={inviting} onOpenChange={setInviting} />
+      <InviteAuditorModal
+        open={inviting}
+        onOpenChange={setInviting}
+        finalFocus={restore.finalFocus}
+      />
       <RemoveModal
         auditor={removing}
         open={removeOpen}
         onOpenChange={setRemoveOpen}
+        onRevoked={restore.originRemoved}
+        finalFocus={restore.finalFocus}
       />
     </div>
   )
@@ -78,21 +101,21 @@ export function AuditorsScreen() {
 function AuditorsBody({
   auditors,
   inviteButton,
+  refocus,
   onRemove,
 }: {
   auditors: ReturnType<typeof useAuditors>
   inviteButton: React.ReactNode
+  refocus: RefObject<string | null>
   onRemove: (auditor: AuditorRow) => void
 }) {
   if (auditors.isPending) return <AuditorsSkeleton />
   if (auditors.isError) {
     return (
-      <ErrorState
+      <ApiErrorState
+        error={auditors.error}
         title="Couldn't load your auditors"
-        description={messageFor(auditors.error)}
-        onRetry={
-          canRetry(auditors.error) ? () => auditors.refetch() : undefined
-        }
+        onRetry={() => auditors.refetch()}
       />
     )
   }
@@ -149,6 +172,7 @@ function AuditorsBody({
             <AuditorListRow
               key={auditor.id}
               auditor={auditor}
+              refocus={refocus}
               onRemove={() => onRemove(auditor)}
             />
           ))}
@@ -160,18 +184,29 @@ function AuditorsBody({
 
 function AuditorListRow({
   auditor,
+  refocus,
   onRemove,
 }: {
   auditor: AuditorRow
+  refocus: RefObject<string | null>
   onRemove: () => void
 }) {
   const invite = useInviteAuditor()
   const copy = removalCopy(auditor.status)
+  const rowRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (refocus.current !== auditor.email) return
+    refocus.current = null
+    focusIfLost(rowRef.current)
+  }, [refocus, auditor.email])
 
   return (
     <div
+      ref={rowRef}
       role="row"
-      className={`flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-3 last:border-0 md:grid ${rowColumns}`}
+      // Focusable so focus has somewhere to go when "Invite again" goes away.
+      tabIndex={-1}
+      className={`flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-3 outline-none last:border-0 md:grid ${rowColumns}`}
     >
       <span
         role="cell"
@@ -192,13 +227,26 @@ function AuditorListRow({
         {auditor.status === "invite-expired" && (
           <button
             type="button"
-            disabled={invite.isPending}
-            onClick={() =>
+            // Not `disabled`: that would drop focus to the page while it sends.
+            aria-disabled={invite.isPending}
+            onClick={(event) => {
+              if (invite.isPending) return
+              const button = event.currentTarget
               invite.mutate(auditor.email, {
+                // The invite is pending now, so this button is about to be replaced.
+                onSuccess: () => {
+                  refocus.current = auditor.email
+                  focusIfLost(rowRef.current, button)
+                },
                 onError: (error) => toast.error(messageFor(error)),
               })
-            }
-            className={buttonVariants({ variant: "secondary", size: "sm" })}
+            }}
+            className={buttonVariants({
+              variant: "secondary",
+              size: "sm",
+              className:
+                "aria-disabled:pointer-events-none aria-disabled:opacity-50",
+            })}
           >
             <RotateCw className="size-3.5" aria-hidden />
             {invite.isPending ? "Inviting…" : "Invite again"}
@@ -250,10 +298,15 @@ function RemoveModal({
   auditor,
   open,
   onOpenChange,
+  onRevoked,
+  finalFocus,
 }: {
   auditor: AuditorRow | null
   open: boolean
   onOpenChange: (open: boolean) => void
+  // The row that opened the dialog is gone.
+  onRevoked: () => void
+  finalFocus: () => HTMLElement | boolean
 }) {
   const revoke = useRevokeAuditor()
   if (!auditor) return null
@@ -273,6 +326,7 @@ function RemoveModal({
     <Modal
       open={open}
       onOpenChange={change}
+      finalFocus={finalFocus}
       title={
         <>
           {copy.action}{" "}
@@ -300,10 +354,14 @@ function RemoveModal({
           disabled={revoke.isPending}
           onClick={() =>
             revoke.mutate(auditor, {
-              onSuccess: () => change(false),
+              onSuccess: () => {
+                onRevoked()
+                change(false)
+              },
               // Already gone: nothing is left to confirm, and the hook says so.
               onError: (error) => {
                 if (isApiError(error) && error.code === "auditor_not_found") {
+                  onRevoked()
                   change(false)
                 }
               },

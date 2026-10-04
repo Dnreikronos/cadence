@@ -19,13 +19,26 @@ export function parseAmount(input: string): string | undefined {
   return undefined
 }
 
+// What to say to someone who typed a decimal comma ("1,5", "4200,50"). The parser stays
+// strict, since a comma is only a thousands separator here, so this says how to type it
+// instead of the bare "Enter an amount". One wording for every amount field.
+export const DECIMAL_HINT = "Use digits and a dot for decimals, like 1.50"
+
+// A comma that reads as a decimal point: digits, then a comma and the rest ("1,5",
+// "4200,50", "4.200,50"). Whatever parses as grouped thousands ("1,500") never gets here.
+export function isCommaDecimal(input: string): boolean {
+  return /^\d[\d.]*,\d*$/.test(input.trim())
+}
+
 export type AmountResult =
   { ok: true; units: bigint } | { ok: false; message: string }
 
 // Reads a typed amount into integer base units. Zero is a valid reading; limits are the caller's.
 export function parseUnits(input: string): AmountResult {
   const amount = parseAmount(input)
-  if (amount === undefined) return fail("Enter an amount")
+  if (amount === undefined) {
+    return fail(isCommaDecimal(input) ? DECIMAL_HINT : "Enter an amount")
+  }
   const [whole, fraction = ""] = amount.split(".")
   if (fraction.length > decimals) return fail("Use at most six decimal places")
   return {

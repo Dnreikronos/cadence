@@ -5,6 +5,7 @@ import { Modal } from "@/components/ui/modal"
 import { buttonVariants } from "@/components/ui/button"
 import { fieldClass } from "@/components/ui/field"
 import { WhoCanSee } from "@/components/ui/who-can-see"
+import { DECIMAL_HINT, isCommaDecimal } from "@/lib/deposit/schema"
 import { formatBaseUnits } from "@/lib/money"
 import { shortName } from "@/lib/people/display"
 import {
@@ -35,6 +36,7 @@ export function PersonFormModal({
   hasAuditor,
   open,
   onOpenChange,
+  finalFocus,
 }: {
   // Absent when adding.
   person?: PersonRecord
@@ -42,6 +44,7 @@ export function PersonFormModal({
   hasAuditor: boolean | undefined
   open: boolean
   onOpenChange: (open: boolean) => void
+  finalFocus?: () => HTMLElement | boolean
 }) {
   const save = useSavePerson()
   const [blocked, setBlocked] = useState(false)
@@ -62,6 +65,7 @@ export function PersonFormModal({
     <Modal
       open={open}
       onOpenChange={handleOpenChange}
+      finalFocus={finalFocus}
       title={person ? `Edit ${shortName(person.name)}` : "Add a person"}
       description={
         person
@@ -146,7 +150,9 @@ function PersonForm({
         }
       }
       if (monthly && !monthly.success) {
-        next.monthlyAmount = monthly.error.issues[0].message
+        next.monthlyAmount = isCommaDecimal(amount)
+          ? DECIMAL_HINT
+          : monthly.error.issues[0].message
       }
       setErrors(next)
       return

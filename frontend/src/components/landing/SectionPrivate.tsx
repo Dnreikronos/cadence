@@ -63,7 +63,7 @@ export function SectionPrivate() {
                 </span>
               </div>
               <p className="mt-1.5 font-mono text-[19px] font-medium tracking-[-0.02em] text-ink tabular-nums">
-                <span className="inline-block opacity-55 blur-[6px] transition-[filter,opacity] duration-500 ease-out select-none group-hover/case:opacity-100 group-hover/case:blur-none group-focus-visible/case:opacity-100 group-focus-visible/case:blur-none">
+                <span className="inline-block opacity-60 blur-[6px] transition-[filter,opacity] duration-500 ease-out select-none group-hover/case:opacity-100 group-hover/case:blur-none group-focus-visible/case:opacity-100 group-focus-visible/case:blur-none">
                   {formatUsd(item.amount)}
                 </span>
               </p>

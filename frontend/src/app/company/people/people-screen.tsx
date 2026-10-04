@@ -7,6 +7,7 @@ import { AmountDisplay } from "@/components/ui/amount-display"
 import { AvatarPerson } from "@/components/ui/avatar-person"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { ErrorState } from "@/components/ui/error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
@@ -28,6 +29,7 @@ import {
   usePersonAmounts,
   useSendInvite,
 } from "@/lib/queries/people"
+import { useRestoreFocus } from "@/lib/restore-focus"
 import { PersonFormModal } from "./person-form"
 import { RemovePersonModal } from "./remove-person"
 
@@ -46,7 +48,14 @@ export function PeopleScreen() {
   const auditors = useAuditors()
   const [dialog, setDialog] = useState<Dialog | null>(null)
   const addRef = useRef<HTMLButtonElement>(null)
+  // Closing returns focus to the button that opened the dialog, or to "Add person"
+  // when that row or button is gone.
+  const restore = useRestoreFocus(() => addRef.current)
   const close = () => setDialog(null)
+  const openDialog = (next: Dialog) => {
+    restore.remember()
+    setDialog(next)
+  }
 
   // Amounts already read stay on screen when a refresh fails, marked as stale.
   const amounts = amountsView(amountsQuery)
@@ -57,7 +66,7 @@ export function PeopleScreen() {
     <button
       ref={addRef}
       type="button"
-      onClick={() => setDialog({ kind: "add" })}
+      onClick={() => openDialog({ kind: "add" })}
       className={buttonVariants()}
     >
       <Plus className="size-4" />
@@ -132,16 +141,18 @@ export function PeopleScreen() {
           )}
 
           {amounts.state === "error" && (
-            <ErrorState
+            <ApiErrorState
+              error={amountsQuery.error}
               title="Couldn't load the monthly amounts"
-              description="Your people are shown below. Try again to see what each is paid."
+              context="Your people are shown below."
               onRetry={() => amountsQuery.refetch()}
             />
           )}
           {amounts.state === "stale" && (
-            <ErrorState
+            <ApiErrorState
+              error={amountsQuery.error}
               title="Couldn't refresh the monthly amounts"
-              description="The amounts below may be out of date. Try again to refresh them."
+              context="The amounts below may be out of date."
               onRetry={() => amountsQuery.refetch()}
             />
           )}
@@ -169,8 +180,8 @@ export function PeopleScreen() {
                   key={person.id}
                   person={person}
                   amounts={amounts}
-                  onEdit={() => setDialog({ kind: "edit", person })}
-                  onRemove={() => setDialog({ kind: "remove", person })}
+                  onEdit={() => openDialog({ kind: "edit", person })}
+                  onRemove={() => openDialog({ kind: "remove", person })}
                 />
               ))}
             </ul>
@@ -196,14 +207,14 @@ export function PeopleScreen() {
         hasAuditor={hasAuditor}
         open={dialog?.kind === "add" || dialog?.kind === "edit"}
         onOpenChange={(open) => !open && close()}
+        finalFocus={restore.finalFocus}
       />
       <RemovePersonModal
         person={dialog?.kind === "remove" ? dialog.person : null}
         onClose={close}
-        onRemoved={() => {
-          // The row that opened the dialog is gone: put focus somewhere real.
-          setTimeout(() => addRef.current?.focus(), 0)
-        }}
+        // The row that opened the dialog is gone: focus goes to "Add person".
+        onRemoved={restore.originRemoved}
+        finalFocus={restore.finalFocus}
       />
     </>
   )
@@ -284,11 +295,17 @@ function PersonRow({
         {!isActive && (
           <button
             type="button"
-            onClick={() => invite.mutate(person)}
-            disabled={invite.isPending}
+            // Not `disabled`: that would drop focus to the page while the invite goes out.
+            aria-disabled={invite.isPending}
+            onClick={() => !invite.isPending && invite.mutate(person)}
             // Starts with the visible text, so voice control can say it (WCAG 2.5.3).
             aria-label={`${inviteText}, ${person.name}`}
-            className={buttonVariants({ variant: "secondary", size: "sm" })}
+            className={buttonVariants({
+              variant: "secondary",
+              size: "sm",
+              className:
+                "aria-disabled:pointer-events-none aria-disabled:opacity-50",
+            })}
           >
             <Mail className="size-3.5" />
             {inviteText}

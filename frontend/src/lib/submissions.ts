@@ -13,6 +13,13 @@ export const submissionSchema = z.object({
   wallet: z.string().min(1),
   // Epoch milliseconds when it was sent, for deciding it can no longer land.
   at: z.number().int().nonnegative(),
+  // Deposits only: base units that were already pending when it started ("0" for none),
+  // so a deposit picked up after a reload can still say what applying the credit covers.
+  // Absent in a record written before this existed, or when it was not known.
+  earlier_pending: z
+    .string()
+    .regex(/^\d{1,20}$/)
+    .optional(),
 })
 export type Submission = z.infer<typeof submissionSchema>
 

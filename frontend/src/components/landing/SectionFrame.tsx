@@ -47,7 +47,7 @@ export function SectionHeading({
         <p
           className={cn(
             "flex items-center gap-3 text-eyebrow tracking-[0.14em]",
-            isDark ? "text-white/45" : "text-ink-muted",
+            isDark ? "text-night-muted" : "text-ink-muted",
           )}
         >
           <span
@@ -64,7 +64,9 @@ export function SectionHeading({
           <SplitWords className={isDark ? "text-white" : "text-ink"}>
             {title}
           </SplitWords>
-          <SplitWords className={isDark ? "text-white/45" : "text-ink-muted"}>
+          <SplitWords
+            className={isDark ? "text-night-muted" : "text-ink-muted"}
+          >
             {muted}
           </SplitWords>
         </h2>

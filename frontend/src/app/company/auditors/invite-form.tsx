@@ -12,9 +12,11 @@ import { cn } from "@/lib/utils"
 export function InviteAuditorModal({
   open,
   onOpenChange,
+  finalFocus,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  finalFocus?: () => HTMLElement | boolean
 }) {
   const invite = useInviteAuditor()
   const [email, setEmail] = useState("")
@@ -51,6 +53,7 @@ export function InviteAuditorModal({
     <Modal
       open={open}
       onOpenChange={change}
+      finalFocus={finalFocus}
       title="Invite an auditor"
       description="They will read every payment amount of your company. They need no wallet."
     >

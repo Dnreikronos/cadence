@@ -6,7 +6,7 @@ import { AmountDisplay } from "@/components/ui/amount-display"
 import { AvatarPerson } from "@/components/ui/avatar-person"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
-import { ErrorState } from "@/components/ui/error-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { StatusPill } from "@/components/ui/status-pill"
 import { TransparentBadge } from "@/components/ui/transparent-badge"
@@ -67,9 +67,10 @@ export function PaymentsHome() {
 
         {!payments.data ? (
           payments.isError ? (
-            <ErrorState
+            <ApiErrorState
+              error={payments.error}
               title="Couldn't load your payments"
-              description={runMessage(payments.error)}
+              describe={runMessage}
               onRetry={() => payments.refetch()}
             />
           ) : (

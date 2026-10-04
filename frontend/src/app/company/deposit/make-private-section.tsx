@@ -8,6 +8,7 @@ import { fieldClass } from "@/components/ui/field"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import { describeUsdc } from "@/lib/deposit/controller"
+import { confirmedMessage, doneMessage } from "@/lib/deposit/message"
 import { formatBaseUnits, toBaseUnits } from "@/lib/deposit/schema"
 import { makePrivateSteps, stepLabels } from "@/lib/deposit/types"
 import { hasActiveAuditor } from "@/lib/people/view"
@@ -186,7 +187,7 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
               }
               className={cn(
                 fieldClass,
-                "h-10 pr-14 font-mono tabular-nums read-only:opacity-50 disabled:opacity-50",
+                "h-10 pr-14 font-mono tabular-nums read-only:bg-surface-subtle read-only:text-ink-muted disabled:opacity-50",
               )}
             />
             <button
@@ -412,9 +413,7 @@ function Done({
   return (
     <p className="mt-4 flex items-start gap-2 text-ui/normal text-ink">
       <Check aria-hidden className="mt-0.5 size-4 shrink-0 text-success-dot" />
-      {state.amount
-        ? `${describeUsdc(state.amount)} is now in your private balance. The move itself is public on-chain.`
-        : "Your pending USDC is now available to pay people."}
+      {doneMessage(state)}
     </p>
   )
 }
@@ -436,7 +435,11 @@ function Resolved({
 }) {
   return (
     <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-ui/normal text-ink">
-      <p className="min-w-0">{resolvedText[state.outcome]}</p>
+      <p className="min-w-0">
+        {state.outcome === "confirmed"
+          ? confirmedMessage(state.earlierPending)
+          : resolvedText[state.outcome]}
+      </p>
       <button
         type="button"
         onClick={onDismiss}

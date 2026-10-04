@@ -7,6 +7,7 @@
   --color-ink-muted: var(--ink-muted);
   --color-night: var(--night);
   --color-night-raised: var(--night-raised);
+  --color-night-muted: var(--night-muted);
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
   --color-surface-subtle: var(--surface-subtle);
@@ -110,6 +111,8 @@
   --ink-muted: #6a6b63;
   --night: #0b0c09;
   --night-raised: #121310;
+  /* Secondary text on night: 5.7:1 on --night, where white/40 gave 3.8:1. */
+  --night-muted: #8c8d8a;
   --canvas: #f2f2ef;
   --surface: #fff;
   --surface-subtle: #fafaf9;

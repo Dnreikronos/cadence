@@ -26,16 +26,16 @@ export function SectionAudit() {
             {facts.map((fact) => (
               <div
                 key={fact.label}
-                className="flex gap-3 border-line px-6 py-7 not-last:border-r sm:px-12"
+                className="border-line px-6 py-7 not-last:border-r sm:px-12"
               >
-                <fact.icon
-                  className="mt-0.5 size-4 shrink-0 text-ink"
-                  strokeWidth={1.75}
-                />
-                <div>
-                  <dt className="text-ui text-ink-muted">{fact.label}</dt>
-                  <dd className="mt-1 text-[15px] text-ink">{fact.value}</dd>
-                </div>
+                <dt className="flex gap-3 text-ui text-ink-muted">
+                  <fact.icon
+                    className="mt-0.5 size-4 shrink-0 text-ink"
+                    strokeWidth={1.75}
+                  />
+                  {fact.label}
+                </dt>
+                <dd className="mt-1 pl-7 text-[15px] text-ink">{fact.value}</dd>
               </div>
             ))}
           </dl>
