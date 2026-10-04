@@ -13,6 +13,7 @@ import {
 } from "./mocks/db"
 import { scenarios, timing } from "./mocks/scenario"
 import { server } from "./mocks/server"
+import { expectNoAmount } from "./no-amount"
 import { accessActions, accessActorKinds } from "./schemas"
 import { UnexpectedSignerError, signAndConfirm, type Signer } from "./sign"
 
@@ -602,15 +603,44 @@ describe("reads and exports", () => {
 })
 
 describe("auditors", () => {
-  it("lists the seeded auditors, newest invite first, without an amount", async () => {
+  const ANA = "ana.ribeiro@northwind-audit.example"
+  const PAULO = "paulo.lima@northwind-audit.example"
+  const RITA = "rita.alves@northwind-audit.example"
+  const ids = {
+    ana: "d0000000-0000-4000-8000-000000000001",
+    paulo: "d0000000-0000-4000-8000-000000000002",
+    rita: "d0000000-0000-4000-8000-000000000003",
+  }
+  const listed = async () => (await api.company.auditors.list()).items
+
+  it("lists the three seeded auditors, newest invite first, without an amount", async () => {
     const page = await api.company.auditors.list()
     expect(page.next_cursor).toBeNull()
-    expect(page.items.map((a) => a.status)).toEqual(["invited", "active"])
-    expect(page.items.map((a) => a.id)).toEqual([
-      "d0000000-0000-4000-8000-000000000002",
-      "d0000000-0000-4000-8000-000000000001",
+    expect(page.items.map((a) => a.status)).toEqual([
+      "invited",
+      "invite-expired",
+      "active",
     ])
-    expect(JSON.stringify(page)).not.toMatch(/amount/i)
+    expect(page.items.map((a) => a.id)).toEqual([ids.paulo, ids.rita, ids.ana])
+    expectNoAmount(page)
+  })
+
+  it("derives the status from the age of a pending invite", async () => {
+    const paulo = db.auditors.find((a) => a.id === ids.paulo)!
+    const week = 7 * 86_400_000
+    paulo.invitedAt = new Date(Date.now() - week + 60_000).toISOString()
+    expect((await listed()).find((a) => a.id === ids.paulo)?.status).toBe(
+      "invited",
+    )
+    paulo.invitedAt = new Date(Date.now() - week - 60_000).toISOString()
+    expect((await listed()).find((a) => a.id === ids.paulo)?.status).toBe(
+      "invite-expired",
+    )
+    // An accepted auditor does not lapse, however old the invite.
+    paulo.accepted = true
+    expect((await listed()).find((a) => a.id === ids.paulo)?.status).toBe(
+      "active",
+    )
   })
 
   it("invites an address, returns the new item and lists it first", async () => {
@@ -620,54 +650,52 @@ describe("auditors", () => {
       status: "invited",
     })
     expect(Date.now() - Date.parse(item.invited_at)).toBeLessThan(5_000)
-    const { items } = await api.company.auditors.list()
-    expect(items).toHaveLength(3)
+    const items = await listed()
+    expect(items).toHaveLength(4)
     expect(items[0]).toEqual(item)
-    expect(new Set(items.map((a) => a.id)).size).toBe(3)
+    expect(new Set(items.map((a) => a.id)).size).toBe(4)
+    expectNoAmount(item)
   })
 
   it("refuses a second invite to a pending address with auditor_already_invited", async () => {
     await api.company.auditors.invite("carla@audit.example")
-    const before = (await api.company.auditors.list()).items
+    const before = await listed()
     // The address just invited, the seeded pending one, and another case.
-    for (const email of [
-      "carla@audit.example",
-      "paulo.lima@northwind-audit.example",
-      "CARLA@audit.example",
-    ]) {
+    for (const email of ["carla@audit.example", PAULO, "CARLA@audit.example"]) {
       expect(await caught(api.company.auditors.invite(email))).toMatchObject({
         status: 409,
         code: "auditor_already_invited",
       })
     }
-    expect((await api.company.auditors.list()).items).toEqual(before)
+    expect(await listed()).toEqual(before)
   })
 
   it("refuses an address that already audits the company with auditor_already_active", async () => {
-    for (const email of [
-      "ana.ribeiro@northwind-audit.example",
-      "Ana.Ribeiro@Northwind-Audit.example",
-    ]) {
+    for (const email of [ANA, "Ana.Ribeiro@Northwind-Audit.example"]) {
       expect(await caught(api.company.auditors.invite(email))).toMatchObject({
         status: 409,
         code: "auditor_already_active",
       })
     }
-    expect((await api.company.auditors.list()).items).toHaveLength(2)
+    expect(await listed()).toHaveLength(3)
   })
 
-  it("replaces an expired invite with a fresh one instead of refusing", async () => {
-    const expired = db.auditors.find((a) => a.status === "invited")!
-    expired.status = "invite-expired"
-    expect((await api.company.auditors.list()).items[0].status).toBe(
-      "invite-expired",
-    )
-    const fresh = await api.company.auditors.invite(expired.email)
+  it("replaces the seeded expired invite with a fresh one instead of refusing", async () => {
+    expect((await listed())[1]).toMatchObject({
+      id: ids.rita,
+      status: "invite-expired",
+    })
+    const fresh = await api.company.auditors.invite(RITA)
     expect(fresh.status).toBe("invited")
-    expect(fresh.id).not.toBe(expired.id)
-    const { items } = await api.company.auditors.list()
-    expect(items).toHaveLength(2)
-    expect(items.some((a) => a.id === expired.id)).toBe(false)
+    expect(fresh.id).not.toBe(ids.rita)
+    const items = await listed()
+    expect(items).toHaveLength(3)
+    expect(items.some((a) => a.id === ids.rita)).toBe(false)
+    // The new one is pending, so the address is taken again.
+    expect(await caught(api.company.auditors.invite(RITA))).toMatchObject({
+      status: 409,
+      code: "auditor_already_invited",
+    })
   })
 
   it("sends nothing for a bad address, and allows exactly 320 characters", async () => {
@@ -695,24 +723,26 @@ describe("auditors", () => {
     expect(requests).toEqual(["POST /company/auditors"])
   })
 
-  it("revokes an auditor and an invite, and a second revoke is a 404", async () => {
-    const [first, second] = (await api.company.auditors.list()).items
-    expect(await api.company.auditors.revoke(first.id)).toEqual({
+  it("revokes an invite, an expired invite and an auditor, and a repeat is a 404", async () => {
+    expect(await api.company.auditors.revoke(ids.paulo)).toEqual({
       status: "revoked",
     })
-    expect((await api.company.auditors.list()).items.map((a) => a.id)).toEqual([
-      second.id,
-    ])
-    expect(await caught(api.company.auditors.revoke(first.id))).toMatchObject({
+    expect((await listed()).map((a) => a.id)).toEqual([ids.rita, ids.ana])
+    expect(await caught(api.company.auditors.revoke(ids.paulo))).toMatchObject({
       status: 404,
       code: "auditor_not_found",
     })
-    await api.company.auditors.revoke(second.id)
-    expect((await api.company.auditors.list()).items).toEqual([])
+    await api.company.auditors.revoke(ids.rita)
+    await api.company.auditors.revoke(ids.ana)
+    expect(await listed()).toEqual([])
+    expect(requests.filter((r) => r.includes("/revoke"))).toEqual([
+      `POST /company/auditors/${ids.paulo}/revoke`,
+      `POST /company/auditors/${ids.paulo}/revoke`,
+      `POST /company/auditors/${ids.rita}/revoke`,
+      `POST /company/auditors/${ids.ana}/revoke`,
+    ])
     // A revoked address can be invited again.
-    expect((await api.company.auditors.invite(second.email)).status).toBe(
-      "invited",
-    )
+    expect((await api.company.auditors.invite(ANA)).status).toBe("invited")
   })
 
   it("answers 404 for an id that is not an auditor of this company", async () => {
@@ -723,7 +753,7 @@ describe("auditors", () => {
     expect(
       await caught(api.company.auditors.revoke(seedPeople[0].id)),
     ).toMatchObject({ status: 404, code: "auditor_not_found" })
-    expect(db.auditors).toHaveLength(2)
+    expect(db.auditors).toHaveLength(3)
   })
 
   it("is for admins only, on all three routes", async () => {
@@ -732,7 +762,7 @@ describe("auditors", () => {
       const calls = [
         () => api.company.auditors.list(),
         () => api.company.auditors.invite("carla@audit.example"),
-        () => api.company.auditors.revoke(db.auditors[0].id),
+        () => api.company.auditors.revoke(ids.ana),
       ]
       for (const call of calls) {
         expect(await caught(call())).toMatchObject({
@@ -742,31 +772,90 @@ describe("auditors", () => {
       }
     }
     // Nothing was added or removed by the refused calls.
-    expect(db.auditors.map((a) => a.id)).toEqual([
-      "d0000000-0000-4000-8000-000000000001",
-      "d0000000-0000-4000-8000-000000000002",
-    ])
+    expect(db.auditors.map((a) => a.id)).toEqual([ids.ana, ids.paulo, ids.rita])
     db.role = "admin"
-    expect((await api.company.auditors.list()).items).toHaveLength(2)
+    expect(await listed()).toHaveLength(3)
   })
 
-  it("stops on the usual failures before touching the list", async () => {
-    scenarios.set("unauthenticated")
-    expect(
-      await caught(api.company.auditors.revoke(db.auditors[0].id)),
-    ).toMatchObject({ status: 401, code: "authentication_required" })
-    scenarios.set("rate-limited")
-    expect(
-      await caught(api.company.auditors.invite("carla@audit.example")),
-    ).toMatchObject({ status: 429 })
-    expect(db.auditors).toHaveLength(2)
-    // Signed out, the client does not even ask.
-    expect(await caught(signedOut.company.auditors.list())).toMatchObject({
-      status: 401,
+  it("answers a call with no role chosen, as the mock only enforces one once set", async () => {
+    expect(db.role).toBeNull()
+    expect(await listed()).toHaveLength(3)
+    const item = await api.company.auditors.invite("carla@audit.example")
+    expect(await api.company.auditors.revoke(item.id)).toEqual({
+      status: "revoked",
     })
-    expect(requests).toEqual([
-      "DELETE /company/auditors/d0000000-0000-4000-8000-000000000001",
-      "POST /company/auditors",
+  })
+
+  it("fails the usual ways before touching the list", async () => {
+    const calls = [
+      () => api.company.auditors.list(),
+      () => api.company.auditors.invite("carla@audit.example"),
+      () => api.company.auditors.revoke(ids.ana),
+    ]
+    for (const [scenario, expected] of [
+      ["unauthenticated", { status: 401, code: "authentication_required" }],
+      [
+        "rate-limited",
+        {
+          status: 429,
+          code: "rate_limited",
+          retryAfter: 60,
+          isRetryable: true,
+        },
+      ],
+      [
+        "service-down",
+        { status: 503, code: "auth_unavailable", isRetryable: true },
+      ],
+    ] as const) {
+      scenarios.set(scenario)
+      for (const call of calls) {
+        expect(await caught(call()), scenario).toMatchObject(expected)
+      }
+    }
+    expect(db.auditors).toHaveLength(3)
+    expect(requests).toHaveLength(9)
+    // Signed out, the client does not even ask.
+    requests.length = 0
+    scenarios.clear()
+    for (const call of [
+      () => signedOut.company.auditors.list(),
+      () => signedOut.company.auditors.invite("carla@audit.example"),
+      () => signedOut.company.auditors.revoke(ids.ana),
+    ]) {
+      expect(await caught(call())).toMatchObject({ status: 401 })
+    }
+    expect(requests).toEqual([])
+  })
+
+  it("pages beyond the seeded rows, newest first, with no gap or repeat", async () => {
+    for (let i = 0; i < 7; i++) {
+      await api.company.auditors.invite(`extra${i}@audit.example`)
+    }
+    const all = (await api.company.auditors.list({ limit: 100 })).items
+    expect(all).toHaveLength(10)
+    const seen: string[] = []
+    const sizes: number[] = []
+    const cursors: (string | null)[] = []
+    let cursor: string | undefined
+    do {
+      const page = await api.company.auditors.list({ limit: 4, cursor })
+      sizes.push(page.items.length)
+      cursors.push(page.next_cursor)
+      seen.push(...page.items.map((a) => a.id))
+      cursor = page.next_cursor ?? undefined
+    } while (cursor)
+    expect(sizes).toEqual([4, 4, 2])
+    expect(cursors).toEqual(["4", "8", null])
+    expect(seen).toEqual(all.map((a) => a.id))
+    expect(new Set(seen).size).toBe(10)
+    const times = all.map((a) => Date.parse(a.invited_at))
+    expect(times).toEqual([...times].sort((a, b) => b - a))
+    // The seeded rows come last, as the oldest invites.
+    expect(all.slice(-3).map((a) => a.id)).toEqual([
+      ids.paulo,
+      ids.rita,
+      ids.ana,
     ])
   })
 })
@@ -784,8 +873,43 @@ describe("access log", () => {
     }
   })
 
+  it("answers with no role chosen, as the mock only enforces one once set", async () => {
+    expect(db.role).toBeNull()
+    expect((await api.audit.accessLog()).items).toHaveLength(25)
+  })
+
+  it("fails the usual ways", async () => {
+    for (const [scenario, expected] of [
+      ["unauthenticated", { status: 401, code: "authentication_required" }],
+      [
+        "rate-limited",
+        {
+          status: 429,
+          code: "rate_limited",
+          retryAfter: 60,
+          isRetryable: true,
+        },
+      ],
+      [
+        "service-down",
+        { status: 503, code: "auth_unavailable", isRetryable: true },
+      ],
+    ] as const) {
+      scenarios.set(scenario)
+      expect(await caught(api.audit.accessLog()), scenario).toMatchObject(
+        expected,
+      )
+    }
+    scenarios.clear()
+    expect(await caught(signedOut.audit.accessLog())).toMatchObject({
+      status: 401,
+    })
+    expect(requests).toHaveLength(3)
+  })
+
   it("holds twenty-five rows, newest first, with who and what but no amount", async () => {
-    const { items } = await api.audit.accessLog({ limit: 100 })
+    const page = await api.audit.accessLog({ limit: 100 })
+    const { items } = page
     expect(items).toHaveLength(25)
     const times = items.map((i) => i.at)
     expect(times).toEqual([...times].sort().reverse())
@@ -807,6 +931,7 @@ describe("access log", () => {
       // A scope is words: no figure, so no amount and no payment id.
       expect(item.scope).not.toMatch(/\d/)
     }
+    expectNoAmount(page)
   })
 
   it("pages with the same cursor rules as the other reads", async () => {
@@ -840,13 +965,23 @@ describe("access log", () => {
 })
 
 describe("account status", () => {
-  it("starts with every step undone", async () => {
-    expect(await api.me.status()).toEqual({
-      wallet_linked: false,
-      key_enrolled: false,
-      account_configured: false,
-      pending_credits: false,
+  const none = {
+    wallet_linked: false,
+    key_enrolled: false,
+    account_configured: false,
+    pending_credits: false,
+  }
+
+  async function configured(wallet: string) {
+    const prepared = await api.accounts.configure(wallet)
+    await api.accounts.confirmConfigure({
+      request_id: prepared.request_id,
+      signature: SIG,
     })
+  }
+
+  it("starts with every step undone", async () => {
+    expect(await api.me.status()).toEqual(none)
   })
 
   it("follows enrollment, configuration and credits, one step at a time", async () => {
@@ -882,6 +1017,30 @@ describe("account status", () => {
     expect((await api.me.status()).pending_credits).toBe(false)
   })
 
+  it("does not let the company's wallet change the recipient's status", async () => {
+    scenarios.set("instant")
+    await api.keys.enroll(COMPANY_WALLET, SIG)
+    await configured(COMPANY_WALLET)
+    expect(await api.me.status()).toEqual(none)
+    // And the company enrolling did not use up the recipient's enrollment.
+    await api.keys.enroll(ME_WALLET, SIG)
+    expect(await api.me.status()).toMatchObject({
+      wallet_linked: true,
+      key_enrolled: true,
+    })
+  })
+
+  it("links the wallet when its account is configured, with no key enrolled", async () => {
+    scenarios.set("instant")
+    await configured(ME_WALLET)
+    expect(await api.me.status()).toEqual({
+      wallet_linked: true,
+      key_enrolled: false,
+      account_configured: true,
+      pending_credits: false,
+    })
+  })
+
   it("does not call a configure done while the network is still confirming it", async () => {
     const prepared = await api.accounts.configure(ME_WALLET)
     expect(
@@ -892,7 +1051,7 @@ describe("account status", () => {
         }),
       ),
     ).toMatchObject({ code: "transaction_not_finalized" })
-    expect((await api.me.status()).account_configured).toBe(false)
+    expect(await api.me.status()).toEqual(none)
   })
 
   it("keeps a refused second enrollment from changing anything", async () => {
@@ -918,21 +1077,34 @@ describe("account status", () => {
     expect((await api.me.status()).pending_credits).toBe(true)
   })
 
-  it("can be reset to a fresh account, leaving the balance alone", async () => {
+  it("resets the steps and nothing else: balances and credits stay", async () => {
     await api.keys.enroll(ME_WALLET, SIG)
     db.accountConfigured = true
     db.me.pending = 1n
     db.me.available = 5n
     resetAccountStatus()
-    expect(await api.me.status()).toEqual({
-      wallet_linked: false,
-      key_enrolled: false,
-      account_configured: false,
-      pending_credits: false,
-    })
-    expect(db.me.available).toBe(5n)
+    expect(await api.me.status()).toEqual({ ...none, pending_credits: true })
+    expect(db.me).toEqual({ available: 5n, pending: 1n })
     // The wallet can enroll again.
     await api.keys.enroll(ME_WALLET, SIG)
+  })
+
+  it("counts a configure that was in flight when the status was reset", async () => {
+    scenarios.set("instant")
+    await api.keys.enroll(ME_WALLET, SIG)
+    const prepared = await api.accounts.configure(ME_WALLET)
+    resetAccountStatus()
+    expect(await api.me.status()).toEqual(none)
+    await api.accounts.confirmConfigure({
+      request_id: prepared.request_id,
+      signature: SIG,
+    })
+    expect(await api.me.status()).toEqual({
+      wallet_linked: true,
+      key_enrolled: false,
+      account_configured: true,
+      pending_credits: false,
+    })
   })
 
   it("is for recipients only", async () => {
@@ -945,6 +1117,37 @@ describe("account status", () => {
     }
     db.role = "recipient"
     expect((await api.me.status()).wallet_linked).toBe(false)
+  })
+
+  it("answers with no role chosen, as the mock only enforces one once set", async () => {
+    expect(db.role).toBeNull()
+    expect(await api.me.status()).toEqual(none)
+  })
+
+  it("fails the usual ways, and carries no amount", async () => {
+    expectNoAmount(await api.me.status())
+    for (const [scenario, expected] of [
+      ["unauthenticated", { status: 401, code: "authentication_required" }],
+      [
+        "rate-limited",
+        {
+          status: 429,
+          code: "rate_limited",
+          retryAfter: 60,
+          isRetryable: true,
+        },
+      ],
+      [
+        "service-down",
+        { status: 503, code: "auth_unavailable", isRetryable: true },
+      ],
+    ] as const) {
+      scenarios.set(scenario)
+      expect(await caught(api.me.status()), scenario).toMatchObject(expected)
+    }
+    scenarios.clear()
+    requests.length = 0
     expect(await caught(signedOut.me.status())).toMatchObject({ status: 401 })
+    expect(requests).toEqual([])
   })
 })

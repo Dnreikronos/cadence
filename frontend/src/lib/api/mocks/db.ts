@@ -49,8 +49,21 @@ export type MockRunPayment = {
 export type MockAuditor = {
   id: string
   email: string
-  status: AuditorStatus
+  // Accepted: an auditor. Otherwise a pending invite, which lapses after a week.
+  accepted: boolean
   invitedAt: string
+}
+
+export const INVITE_TTL_MS = 7 * 86_400_000
+
+export function auditorStatus(
+  auditor: MockAuditor,
+  now = Date.now(),
+): AuditorStatus {
+  if (auditor.accepted) return "active"
+  return now - Date.parse(auditor.invitedAt) > INVITE_TTL_MS
+    ? "invite-expired"
+    : "invited"
 }
 
 export const seedPeople: MockPerson[] = [
@@ -80,20 +93,33 @@ export const ME_PERSON = seedPeople[0].id
 
 type Ledger = { available: bigint; pending: bigint }
 
-export const seedAuditors: MockAuditor[] = [
-  {
-    id: "d0000000-0000-4000-8000-000000000001",
-    email: "ana.ribeiro@northwind-audit.example",
-    status: "active",
-    invitedAt: "2026-09-10T09:00:00Z",
-  },
-  {
-    id: "d0000000-0000-4000-8000-000000000002",
-    email: "paulo.lima@northwind-audit.example",
-    status: "invited",
-    invitedAt: "2026-10-02T09:00:00Z",
-  },
-]
+// Dated from now, so the invite stays pending and the other stays lapsed
+// however long the mock has been around.
+const daysAgo = (days: number) =>
+  new Date(Date.now() - days * 86_400_000).toISOString()
+
+function seedAuditors(): MockAuditor[] {
+  return [
+    {
+      id: "d0000000-0000-4000-8000-000000000001",
+      email: "ana.ribeiro@northwind-audit.example",
+      accepted: true,
+      invitedAt: daysAgo(24),
+    },
+    {
+      id: "d0000000-0000-4000-8000-000000000002",
+      email: "paulo.lima@northwind-audit.example",
+      accepted: false,
+      invitedAt: daysAgo(2),
+    },
+    {
+      id: "d0000000-0000-4000-8000-000000000003",
+      email: "rita.alves@northwind-audit.example",
+      accepted: false,
+      invitedAt: daysAgo(14),
+    },
+  ]
+}
 
 // Twenty-five reads, one an hour, newest first. Who and what, never an amount.
 const accessReads: Pick<AccessLogItem, "actor" | "action" | "scope">[] = [
@@ -192,11 +218,12 @@ function seed() {
     >(),
     runKeys: new Map<string, string>(),
     enrolled: new Set<string>(),
-    // The account steps GET /me/status reports besides `enrolled`. A wallet is
-    // linked by its first enrollment, an account configured by its confirm.
+    // The account steps GET /me/status reports besides `enrolled`. The
+    // recipient's wallet is linked by its enrollment or by its configure
+    // confirm, whichever comes first, and the account configured by the latter.
     walletLinked: false,
     accountConfigured: false,
-    auditors: seedAuditors.map((a) => ({ ...a })),
+    auditors: seedAuditors(),
     accessLog: seedAccessLog(),
   }
 }
@@ -207,14 +234,13 @@ export function resetDb() {
   db = seed()
 }
 
-// Back to a recipient who has done none of the activation steps and has no
-// credits waiting, for a screen that wants to replay the flow. `resetDb`
-// resets everything else too.
+// Back to a recipient who has done none of the activation steps, for a screen
+// that wants to replay the flow. Balances, credits and requests already in
+// flight are left alone: a configure confirmed afterwards still counts.
 export function resetAccountStatus() {
   db.enrolled.clear()
   db.walletLinked = false
   db.accountConfigured = false
-  db.me.pending = 0n
 }
 
 export function nextId() {
