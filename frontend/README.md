@@ -95,9 +95,12 @@ it with `pnpm dlx msw init public/ --no-save` and commit the result.
 With `NEXT_PUBLIC_API_MODE=mock` and Supabase not configured, `/sign-in` offers "Try
 the demo" as company admin, recipient or auditor (`ana@solaris.test`,
 `bruno@solaris.test`, `carla@acme-audit.test`, company Solaris). It sets the httpOnly
-`cadence-demo-role` cookie, which the middleware and `currentViewer()` trust only in
-that exact configuration (`src/lib/demo/allowed.ts`): never with Supabase configured,
-in real mode or on mainnet. Sign-out clears it. A reload resets the mock data.
+`cadence-demo-role` cookie (`secure` only over https), which the middleware and
+`currentViewer()` trust only in that exact configuration (`src/lib/demo/allowed.ts`):
+never with Supabase configured, in real mode or on mainnet. The demo is inferred from
+that configuration, with the explicit `mock` mode as the opt-in, so a typo in a
+Supabase variable also turns it on: check the env before sharing a deploy. Sign-out
+clears the cookie. A reload resets the mock data.
 
 ## Wallet
 
@@ -115,12 +118,15 @@ land. `useSignAndConfirm()` gives `await run(prepared, confirm, onStep)`.
 Server state goes through React Query: the one `QueryClient` and its defaults live
 in `src/lib/queries/client.ts` (30 s stale time, one retry except for a 4xx
 `ApiError`, no refetch on focus), and every key comes from `queryKeys` in
-`src/lib/queries/keys.ts`. The sidebar balance is `useShellBalance(role)`.
+`src/lib/queries/keys.ts`. The sidebar balance is `useShellBalance(role, viewer)`,
+cached per viewer and cleared on sign-out and when a sign-in page mounts. A mutation that
+moves money must call `invalidateBalances(queryClient)` so the sidebar updates.
 
 ## Route guard
 
 `src/middleware.ts` refreshes the Supabase session on every request and guards
-three areas by the viewer's role. A user holds at most one membership, so one
+three areas by the viewer's role (in the demo configuration above there is no
+Supabase session: the demo cookie is the session). A user holds at most one membership, so one
 role:
 
 | Path         | Role        |
