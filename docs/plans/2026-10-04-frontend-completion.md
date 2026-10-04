@@ -126,8 +126,10 @@ that needs a deployed backend.
   written for the deposit's wrap and reused by apply-pending. It is not used by
   withdraw or payroll yet (see the checklist below).
 - **A 100-recipient cap on a run.** A run request takes 1 to 100 payments: each entry
-  is about 80 bytes and the service takes 8 KiB bodies. The client schema enforces it
-  and the new-run screen blocks above it. The plan had no limit.
+  is about 80 bytes, sized for the 8 KiB body of the wrap and transfer routes. The
+  client schema enforces it and the new-run screen blocks above it. The plan had no
+  limit. The backend's `/runs` (#107) later chose the same count, 100, with a 32 KiB
+  body.
 - **The sent-failure rule.** After a transaction may have been broadcast, a screen never
   prepares a replacement; it re-confirms the saved signature, or tells the person to
   check balances. It was added through the review rounds of withdraw, payroll, deposit
@@ -173,8 +175,13 @@ mock signer and a fake submit, and in real mode `useWallet()` is unavailable.
       verdict is conditional on it and it has not been tried.
 - [ ] Set `NEXT_PUBLIC_API_MODE=real` and `NEXT_PUBLIC_PROOF_API_URL` (https) on Vercel
       Production. The build refuses to guess, and mock mode is refused on mainnet.
+- [ ] Reconcile the payroll client and mock with the `/runs` the backend implemented
+      (#107, `docs/dev/RUNS_API.md`): token-account recipients and a sender account,
+      the `aes_key`, `position`-based batch confirm, retry with amounts and the
+      original signatures, no idempotency key, and the `prepared`/`finalized` statuses.
+      Today the client's `POST /runs` body would be refused by the real service.
 - [ ] Get answers to the [open questions](../dev/API_CONTRACT.md#open-questions),
-      especially 26 to 35 and the CORS requests (`PUT`, `Retry-After`), or change the
+      especially 26 to 37 and the CORS requests (`PUT`, `Retry-After`), or change the
       screens to match what the backend decides.
 
 ## Known gaps
@@ -194,6 +201,10 @@ mock signer and a fake submit, and in real mode `useWallet()` is unavailable.
 - **The real-Supabase repository paths are covered by unit tests with fakes** and by the
   auth task against a local Supabase stack. They were not run against a hosted project
   or against the real proof service.
+- **The payroll client does not match the implemented `/runs`.** The backend (#107)
+  built a different shape from the one the client and mock use; see
+  [Payroll run](../dev/API_CONTRACT.md#payroll-run-one-approval-many-recipients-). The
+  run screens work on the mock only.
 - **A reload loses what a payroll run or a withdrawal was doing.** Signatures of sent
   run payments and held withdrawal amounts are in memory; unsigned run payments cannot
   be signed after a reload.

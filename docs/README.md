@@ -36,15 +36,19 @@ repo's paths instead of these.
 
 - [Authenticated transfer API](plans/2026-10-03-054-transfer-api.md) — 2026-10-03, #54. Supabase login and wallet association; verified locally and on devnet through a browser-driven Turnkey test adapter. [API contract](dev/TRANSFER_API.md).
 
+- [Confidential payment runs](plans/2026-10-03-055-runs.md) — 2026-10-03, #55. Ordered batches with independent receipts and safe retries; three live devnet payments executed from one approval through a browser-driven Turnkey test adapter. [API contract](dev/RUNS_API.md).
+
 - [Finish the frontend, against mocks](plans/2026-10-04-frontend-completion.md) — 2026-10-04, #76 and #78 to #88. Complete except task Q (end-to-end tests, accessibility pass, docs; #126, open): every other screen is merged and runs on the mock service. The task table with PR numbers, what changed from the plan, the checklist before real signing, and the known gaps.
 
 ## Contracts
 
-- [API contract for the web app](dev/API_CONTRACT.md) — #63. What the web app builds and mocks against: authentication, the prepare-sign-confirm pattern, errors that never carry an amount, and every route, marked implemented or proposed, plus the design review findings to resolve before building. Synced with the client and the mock on 2026-10-04: it now lists the mock's deviations from a real service and what the screens assume from the backend. Status: working draft, open questions 1 to 35 for the backend owner.
+- [API contract for the web app](dev/API_CONTRACT.md) — #63. What the web app builds and mocks against: authentication, the prepare-sign-confirm pattern, errors that never carry an amount, and every route, marked implemented or proposed (the payroll `/runs` routes are implemented, in a different shape from the one the client uses), plus the design review findings to resolve before building. Synced with the client and the mock on 2026-10-04: it now lists the mock's deviations from a real service and what the screens assume from the backend. Status: working draft, open questions 1 to 37 for the backend owner.
 
 - [Wrap USDC](dev/WRAP_API.md) — #52. The implemented `POST /wrap` and `POST /wrap/confirm`, their configuration, errors and storage.
 
 - [Transfer API](dev/TRANSFER_API.md) — #54. The implemented `POST /transfer` and `POST /transfer/confirm`, their configuration, authentication, errors and storage.
+
+- [Payment runs](dev/RUNS_API.md) — #55. The implemented `POST /runs`, `/runs/:id/confirm`, `/runs/:id/retry` and `GET /runs/:id`: ordered batches of token-account payments, receipts per position, retries that never start a second run. Its shape differs from the one the web app's client and mock use.
 
 ## Web app
 

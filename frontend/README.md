@@ -82,6 +82,12 @@ page also reads the private balance (`GET /company/balance`, `GET /me/balance`),
 | `/audit/access-log`                                    | Who read what                                                               | auditor   | `GET /audit/access-log`                                                                                                                                                                                 | #88    |
 | `/dev/api`, `/dev/components`, `/dev/screens/[screen]` | API playground, component showcase, three company screens without a session | none      | mock only; not found on mainnet                                                                                                                                                                         | n/a    |
 
+The run screens use the `/runs` shape the contract proposed (people, an idempotency
+key, per-payment confirm and retry). The backend has since implemented `/runs` in a
+different shape (`docs/dev/RUNS_API.md`), so they work on the mock only until the
+client is reconciled; see
+[Payroll run](../docs/dev/API_CONTRACT.md#payroll-run-one-approval-many-recipients-).
+
 Nothing calls `GET /health`, and `POST /transfer` has no screen: payroll goes through
 `/runs`. The filters on the receipts and auditor screens narrow only the pages already
 loaded, because no route has filter parameters.
