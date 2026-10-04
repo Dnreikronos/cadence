@@ -206,6 +206,9 @@ function seed() {
       [seedPeople[2].id, 6_300_000_000n],
       [seedPeople[3].id, 9_500_000_000n],
     ]),
+    // Who the service accepts as a person of the company. The real one asks the
+    // people table, which a screen's own mock fills through `registerPerson`.
+    people: new Set<string>(seedPeople.map((person) => person.id)),
     requests: new Map<string, MockRequest>(),
     runs: new Map<
       string,
@@ -241,6 +244,10 @@ export function resetAccountStatus() {
   db.enrolled.clear()
   db.walletLinked = false
   db.accountConfigured = false
+}
+
+export function registerPerson(id: string) {
+  db.people.add(id)
 }
 
 export function nextId() {
