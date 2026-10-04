@@ -1,14 +1,16 @@
 "use client"
 
-import { useId, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { Check, CircleAlert, Eye, Loader2, RotateCw } from "lucide-react"
 import { AmountDisplay } from "@/components/ui/amount-display"
 import { buttonVariants } from "@/components/ui/button"
 import { fieldClass } from "@/components/ui/field"
+import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
+import { describeUsdc } from "@/lib/deposit/controller"
 import { formatBaseUnits, toBaseUnits } from "@/lib/deposit/schema"
 import { makePrivateSteps, stepLabels } from "@/lib/deposit/types"
-import { formatUnits, unitsToUsd } from "@/lib/money"
+import { unitsToUsd } from "@/lib/money"
 import {
   useCompanyBalance,
   useMakePrivate,
@@ -25,19 +27,43 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
   const privateBalance = useCompanyBalance(wallet)
   const [amount, setAmount] = useState("")
   const [error, setError] = useState<string>()
-  // Clear the field once a deposit goes through, during render rather than in an effect.
-  const [seen, setSeen] = useState(flow.state.status)
-  if (seen !== flow.state.status) {
-    setSeen(flow.state.status)
-    if (flow.state.status === "done") setAmount("")
+  const sectionRef = useRef<HTMLElement>(null)
+  const amountRef = useRef<HTMLInputElement>(null)
+  const statusRef = useRef<HTMLDivElement>(null)
+  const alertRef = useRef<HTMLDivElement>(null)
+  const { state } = flow
+
+  // Clear the field once a deposit goes through (not when only a pending credit
+  // was applied: that leaves what the person typed alone), during render rather
+  // than in an effect.
+  const [seen, setSeen] = useState(state.status)
+  if (seen !== state.status) {
+    setSeen(state.status)
+    if (state.status === "done" && state.amount !== undefined) setAmount("")
     // The deposit already went out (or may have): typing it again would repeat it.
-    if (flow.state.status === "failed" && flow.state.resume !== "wrap") {
-      setAmount("")
-    }
+    if (state.status === "failed" && state.resume !== "wrap") setAmount("")
   }
 
-  const { state } = flow
-  const isBusy = state.status === "running"
+  // The buttons that start and end a flow remove themselves, so focus is sent on.
+  const previous = useRef(state.status)
+  useEffect(() => {
+    const was = previous.current
+    previous.current = state.status
+    if (was === state.status) return
+    if (state.status === "failed") {
+      alertRef.current?.focus()
+    } else if (state.status === "running" || state.status === "checking") {
+      if (!sectionRef.current?.contains(document.activeElement)) {
+        statusRef.current?.focus()
+      }
+    } else if (state.status === "resolved") {
+      statusRef.current?.focus()
+    } else if (state.status === "idle") {
+      amountRef.current?.focus()
+    }
+  }, [state.status])
+
+  const isBusy = state.status === "running" || state.status === "checking"
   // A failed attempt is resolved with Try again or Dismiss, not by starting another.
   const locked = isBusy || state.status === "failed"
   const publicUnits = publicUsdc.data ? BigInt(publicUsdc.data) : undefined
@@ -58,6 +84,7 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
 
   return (
     <section
+      ref={sectionRef}
       aria-labelledby="private-heading"
       className="rounded-xl border border-line bg-surface p-5"
     >
@@ -71,31 +98,35 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
           hint="Visible to anyone on-chain"
           units={publicUsdc.data}
           isPending={publicUsdc.isPending}
-          isError={publicUsdc.isError && !publicUsdc.data}
+          isError={publicUsdc.isError}
           errorText="Couldn't read the network."
+          staleText="Couldn't refresh. Max may be out of date."
           onRetry={() => publicUsdc.refetch()}
         />
         <Balance
           label="Private USDC"
           hint={
             pending > 0n
-              ? `${formatUnits(pending)} still becoming available`
+              ? `${describeUsdc(pending.toString())} still becoming available`
               : "Available to pay people"
           }
           units={privateBalance.data?.available}
           isPending={privateBalance.isPending}
-          isError={privateBalance.isError && !privateBalance.data}
+          isError={privateBalance.isError}
           errorText="Couldn't load this balance."
+          staleText="Couldn't refresh. This may be out of date."
           onRetry={() => privateBalance.refetch()}
-          adornment={<WhoCanSee viewerRole="admin" hasAuditor={false} />}
+          adornment={
+            <WhoCanSee viewerRole="admin" hasAuditor={false} scope="balance" />
+          }
         />
       </dl>
 
       {pending > 0n && !locked && (
         <div className="mt-4 flex flex-col gap-3 rounded-lg border border-line bg-surface-subtle p-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-ui/normal text-ink-muted">
-            {formatUnits(pending)} from an earlier deposit is waiting to become
-            available. You can&apos;t pay with it until then.
+            {describeUsdc(pending.toString())} from an earlier deposit is
+            waiting to become available. You can&apos;t pay with it until then.
           </p>
           <button
             type="button"
@@ -107,6 +138,18 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
         </div>
       )}
 
+      <p
+        id={`${id}-public`}
+        className="mt-5 flex gap-2 rounded-lg border border-warning-border bg-warning-bg p-3 text-ui/normal text-warning-fg"
+      >
+        <Eye aria-hidden className="mt-0.5 size-4 shrink-0" />
+        <span>
+          This step is public. The amount you move to private USDC is visible
+          on-chain. What you pay out afterwards is encrypted on-chain; Cadence
+          and your auditors can read it.
+        </span>
+      </p>
+
       <form onSubmit={submit} noValidate className="mt-5 space-y-3">
         <label htmlFor={`${id}-amount`} className="text-ui font-medium">
           Amount to make private (USDC)
@@ -114,6 +157,7 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
         <div className="flex gap-2">
           <div className="relative min-w-0 flex-1">
             <input
+              ref={amountRef}
               id={`${id}-amount`}
               inputMode="decimal"
               autoComplete="off"
@@ -126,7 +170,11 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
                 setError(undefined)
               }}
               aria-invalid={!!error}
-              aria-describedby={error ? `${id}-error` : undefined}
+              aria-describedby={
+                [error ? `${id}-error` : "", `${id}-public`]
+                  .filter(Boolean)
+                  .join(" ") || undefined
+              }
               className={cn(
                 fieldClass,
                 "h-10 pr-14 font-mono tabular-nums read-only:opacity-50 disabled:opacity-50",
@@ -150,6 +198,7 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
             type="submit"
             disabled={!hasFunds}
             aria-disabled={locked || undefined}
+            aria-describedby={`${id}-public`}
             className={cn(
               buttonVariants({ size: "lg" }),
               "aria-disabled:opacity-50",
@@ -182,27 +231,30 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
         )}
       </form>
 
-      <div role="status" aria-live="polite">
-        {(state.status === "running" || state.status === "failed") && (
-          <Progress
-            step={state.step}
-            failed={state.status === "failed"}
-            className="mt-4"
-          />
+      {/* Announced politely and once: a failure is the alert below, not this. */}
+      <div
+        ref={statusRef}
+        role="status"
+        aria-live="polite"
+        tabIndex={-1}
+        className="outline-none"
+      >
+        {state.status === "running" && (
+          <Progress step={state.step} className="mt-4" />
         )}
+        {state.status === "checking" && <Checking />}
         {state.status === "done" && <Done state={state} />}
+        {state.status === "resolved" && (
+          <Resolved state={state} onDismiss={flow.dismiss} />
+        )}
       </div>
 
-      {state.status === "failed" && <Failure flow={flow} state={state} />}
-
-      <p className="mt-5 flex gap-2 rounded-lg border border-warning-border bg-warning-bg p-3 text-ui/normal text-warning-fg">
-        <Eye aria-hidden className="mt-0.5 size-4 shrink-0" />
-        <span>
-          This step is public. The amount you move to private USDC is visible
-          on-chain. What you pay out from your private balance afterwards stays
-          encrypted.
-        </span>
-      </p>
+      {state.status === "failed" && (
+        <>
+          <Progress step={state.step} failed className="mt-4" />
+          <Failure ref={alertRef} flow={flow} state={state} />
+        </>
+      )}
     </section>
   )
 }
@@ -214,6 +266,7 @@ function Balance({
   isPending,
   isError,
   errorText,
+  staleText,
   onRetry,
   adornment,
 }: {
@@ -224,9 +277,20 @@ function Balance({
   isPending: boolean
   isError: boolean
   errorText: string
+  // Shown when a refresh failed but an earlier answer is still on screen.
+  staleText: string
   onRetry: () => void
   adornment?: React.ReactNode
 }) {
+  const retry = (
+    <button
+      type="button"
+      onClick={onRetry}
+      className="font-medium underline underline-offset-2"
+    >
+      Try again
+    </button>
+  )
   return (
     <div className="bg-surface-subtle p-4">
       <dt className="flex items-center justify-between text-label text-ink-muted uppercase">
@@ -234,27 +298,29 @@ function Balance({
         {adornment}
       </dt>
       <dd className="mt-1.5">
-        <AmountDisplay
-          amount={units === undefined ? undefined : unitsToUsd(units)}
-          state={
-            units !== undefined ? "revealed" : isPending ? "loading" : "hidden"
-          }
-          className="text-amount"
-        />
-        {isError ? (
-          <p role="alert" className="mt-1 text-caption text-danger-fg">
-            {errorText}{" "}
-            <button
-              type="button"
-              onClick={onRetry}
-              className="font-medium underline underline-offset-2"
-            >
-              Try again
-            </button>
-          </p>
+        {units !== undefined ? (
+          <AmountDisplay amount={unitsToUsd(units)} className="text-amount" />
+        ) : isPending ? (
+          <span aria-busy>
+            <Skeleton className="h-7 w-32" />
+            <span className="sr-only">Loading {label}</span>
+          </span>
         ) : (
-          <p className="mt-1 text-caption text-ink-muted">{hint}</p>
+          <span className="font-mono text-amount text-ink-muted">
+            Unavailable
+          </span>
         )}
+        {isError && units === undefined && (
+          <p role="alert" className="mt-1 text-caption text-danger-fg">
+            {errorText} {retry}
+          </p>
+        )}
+        {isError && units !== undefined && (
+          <p role="status" className="mt-1 text-caption text-warning-fg">
+            {staleText} {retry}
+          </p>
+        )}
+        {!isError && <p className="mt-1 text-caption text-ink-muted">{hint}</p>}
       </dd>
     </div>
   )
@@ -262,11 +328,11 @@ function Balance({
 
 function Progress({
   step,
-  failed,
+  failed = false,
   className,
 }: {
   step: (typeof makePrivateSteps)[number]
-  failed: boolean
+  failed?: boolean
   className?: string
 }) {
   const current = makePrivateSteps.indexOf(step)
@@ -284,6 +350,7 @@ function Progress({
         return (
           <li
             key={name}
+            aria-current={state === "active" ? "step" : undefined}
             className={cn(
               "flex items-center gap-2 text-ui",
               state === "todo" ? "text-ink-muted" : "text-ink",
@@ -313,6 +380,21 @@ function Progress({
   )
 }
 
+function Checking() {
+  return (
+    <p className="mt-4 flex items-start gap-2 text-ui/normal text-ink">
+      <Loader2
+        aria-hidden
+        className="mt-0.5 size-4 shrink-0 animate-spin motion-reduce:animate-none"
+      />
+      <span>
+        Checking your last deposit. It was sent a moment ago, and a new one
+        waits until we know what became of it. This can take a minute or two.
+      </span>
+    </p>
+  )
+}
+
 function Done({
   state,
 }: {
@@ -322,23 +404,56 @@ function Done({
     <p className="mt-4 flex items-start gap-2 text-ui/normal text-ink">
       <Check aria-hidden className="mt-0.5 size-4 shrink-0 text-success-dot" />
       {state.amount
-        ? `${formatUnits(state.amount)} is now in your private balance. The move itself is public on-chain.`
+        ? `${describeUsdc(state.amount)} is now in your private balance. The move itself is public on-chain.`
         : "Your pending USDC is now available to pay people."}
     </p>
   )
 }
 
+const resolvedText = {
+  confirmed:
+    "Your last deposit went through. If it is still pending, make it available above.",
+  failed: "Your last deposit didn't go through, and nothing left your wallet.",
+  unknown:
+    "We couldn't tell whether your last deposit went through. Check both balances above before you deposit again.",
+} as const
+
+function Resolved({
+  state,
+  onDismiss,
+}: {
+  state: Extract<MakePrivateState, { status: "resolved" }>
+  onDismiss: () => void
+}) {
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-ui/normal text-ink">
+      <p className="min-w-0">{resolvedText[state.outcome]}</p>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className={buttonVariants({ variant: "secondary", size: "sm" })}
+      >
+        Dismiss
+      </button>
+    </div>
+  )
+}
+
 function Failure({
+  ref,
   flow,
   state,
 }: {
+  ref: React.Ref<HTMLDivElement>
   flow: ReturnType<typeof useMakePrivate>
   state: Extract<MakePrivateState, { status: "failed" }>
 }) {
   return (
     <div
+      ref={ref}
       role="alert"
-      className="mt-4 flex gap-3 rounded-lg border border-danger-border bg-danger-bg p-3 text-danger-fg"
+      tabIndex={-1}
+      className="mt-4 flex gap-3 rounded-lg border border-danger-border bg-danger-bg p-3 text-danger-fg outline-none"
     >
       <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
       <div className="min-w-0 space-y-2 text-ui/normal">
@@ -354,10 +469,12 @@ function Failure({
         ) : (
           <p>{state.message}</p>
         )}
-        {state.resume === "apply" && (
+        {state.step === "applying" && state.resume !== "wrap" && (
           <p>
-            The deposit went through. It is waiting to become available, and
-            trying again only finishes that.
+            The deposit went through.{" "}
+            {state.resume === "apply"
+              ? "It is waiting to become available, and trying again only finishes that."
+              : "Making it available isn't confirmed yet."}
           </p>
         )}
         <div className="flex flex-wrap gap-2">
@@ -373,19 +490,21 @@ function Failure({
           {state.resume === "check" && (
             <button
               type="button"
-              onClick={flow.check}
+              onClick={() => void flow.check()}
               className={buttonVariants({ variant: "secondary", size: "sm" })}
             >
               <RotateCw className="size-3.5" /> Check my balances
             </button>
           )}
-          <button
-            type="button"
-            onClick={flow.dismiss}
-            className={buttonVariants({ variant: "secondary", size: "sm" })}
-          >
-            Dismiss
-          </button>
+          {state.resume !== "check" && (
+            <button
+              type="button"
+              onClick={flow.dismiss}
+              className={buttonVariants({ variant: "secondary", size: "sm" })}
+            >
+              Dismiss
+            </button>
+          )}
         </div>
       </div>
     </div>
