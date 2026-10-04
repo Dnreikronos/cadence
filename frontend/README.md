@@ -24,24 +24,74 @@ pnpm dev
 http://127.0.0.1:54324, not a real inbox. `supabase db reset` reapplies the
 migrations from scratch; `supabase stop` shuts the stack down.
 
+Neither Docker nor Supabase is needed to see the screens: under `pnpm dev`, with the
+two `NEXT_PUBLIC_SUPABASE_*` variables unset, the app runs on the mock service and
+`/sign-in` offers the [demo viewer](#demo-viewer).
+
 ## Checks
 
 ```sh
 pnpm typecheck
 pnpm lint
+pnpm format:check
 pnpm test
 pnpm build
 ```
 
+CI (`.github/workflows/frontend.yml`) runs these five, with `NEXT_PUBLIC_API_MODE=mock`
+for the build. A pre-commit hook (husky and lint-staged) formats and lints staged files.
+There is no end-to-end suite on `main` yet.
+
 ## Layout
 
 ```
-src/app/            App Router. (auth)/sign-in, sign-up; auth/confirm; company/, me/, audit/ per role
-src/components/     app/ (signed-in shell)
-src/lib/            auth/ (guard, sign-in, invites), demo/, wallet/, queries/, money.ts, supabase/, solana/
+src/app/            App Router. (auth)/sign-in, sign-up; auth/confirm; activate; company/, me/, audit/ per role; dev/ tools
+src/components/     app/ (signed-in shell), ui/ (shared pieces), landing/
+src/lib/            api/ (client, schemas, mocks), queries/, wallet/, auth/, demo/, supabase/, solana/,
+                    money.ts, submissions.ts, and a folder per feature: activation, deposit, me, withdraw,
+                    runs, people, auditors, audit, receipts
 src/middleware.ts   role-based route guard
 e2e/                Playwright tests (specs) and e2e/support/ (helpers)
 ```
+
+## Screens
+
+Every screen below runs end to end on the mock service. A route's data sources are
+routes of [`docs/dev/API_CONTRACT.md`](../docs/dev/API_CONTRACT.md); most of them are
+proposals that the real service does not have yet. The shell of an admin or recipient
+page also reads the private balance (`GET /company/balance`, `GET /me/balance`), and
+`WalletProvider` is mounted by the shell. The issue is the one in
+[`docs/plans/2026-10-04-frontend-completion.md`](../docs/plans/2026-10-04-frontend-completion.md).
+
+| Route                                                  | Screen                                                                      | Role      | Data sources                                                                                                                                                                                            | Issue  |
+| ------------------------------------------------------ | --------------------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `/`                                                    | Landing page                                                                | public    | none                                                                                                                                                                                                    | PR #99 |
+| `/sign-in`, `/sign-up`                                 | Email-code sign-in, company sign-up, the demo panel                         | public    | Supabase Auth (`signInWithOtp`, `verifyOtp`), then `create_company` or `accept_invite`                                                                                                                  | #76    |
+| `/auth/confirm`                                        | The page behind the emailed link                                            | public    | Supabase Auth, through a POST to `/auth/confirm/verify`                                                                                                                                                 | #76    |
+| `/activate`                                            | Account setup in three steps                                                | recipient | `GET /me/status`, `POST /keys/enroll`, `POST /accounts/configure` and `/confirm`                                                                                                                        | #80    |
+| `/company`                                             | Payments home: recent payments, shortcuts to a run and a deposit            | admin     | `GET /company/payments`, `GET /company/auditors`                                                                                                                                                        | #83    |
+| `/company/runs/new`                                    | New payroll run                                                             | admin     | people, `GET /company/people/amounts`, `GET /company/balance`, `GET /company/payments`, `GET /company/auditors`, `POST /company/people/:id/invite`, `POST /runs`, the per-payment `confirm` and `retry` | #83    |
+| `/company/runs/[id]`                                   | Run progress, retry, check again                                            | admin     | `GET /runs/:id` (polled every 5 s while a payment is open), people for names, the per-payment `confirm` and `retry`                                                                                     | #83    |
+| `/company/people`                                      | People: list, add, edit, remove, invite                                     | admin     | people (Supabase `people` table, or in memory in mock mode), `GET /company/people/amounts`, `PUT /company/people/:id/amount`, `POST /company/people/:id/invite`, `GET /company/auditors`                | #81    |
+| `/company/deposit`                                     | Receive USDC and make it private                                            | admin     | a chain read of the wallet's plain USDC, `GET /company/balance`, `POST /wrap` and `/confirm`, `POST /accounts/apply-pending` and `/confirm`, `GET /company/auditors`                                    | #82    |
+| `/company/receipts`                                    | Payments, printable receipts, CSV                                           | admin     | `GET /company/payments`, `GET /company/export.csv`, `GET /company/auditors`                                                                                                                             | #84    |
+| `/company/auditors`                                    | Auditors: list, invite, revoke                                              | admin     | `GET /company/auditors`, `POST /company/auditors`, `POST /company/auditors/:id/revoke`                                                                                                                  | #85    |
+| `/me`                                                  | Balance, apply pending, recent payments                                     | recipient | `GET /me/status` (the gate), `GET /me/balance`, `GET /me/payments`, `POST /accounts/apply-pending` and `/confirm`                                                                                       | #86    |
+| `/me/history`                                          | Payment history, CSV                                                        | recipient | `GET /me/payments`, `GET /me/export.csv`                                                                                                                                                                | #86    |
+| `/me/withdraw`                                         | Withdraw, with the reveal-risk warning                                      | recipient | `GET /me/balance`, `POST /unwrap` and `/unwrap/confirm`                                                                                                                                                 | #87    |
+| `/audit`                                               | The company's payments, receipts, CSV                                       | auditor   | `GET /audit/:company_id/payments`, `GET /audit/:company_id/export.csv`                                                                                                                                  | #88    |
+| `/audit/access-log`                                    | Who read what                                                               | auditor   | `GET /audit/access-log`                                                                                                                                                                                 | #88    |
+| `/dev/api`, `/dev/components`, `/dev/screens/[screen]` | API playground, component showcase, three company screens without a session | none      | mock only; not found on mainnet                                                                                                                                                                         | n/a    |
+
+The run screens use the `/runs` shape the contract proposed (people, an idempotency
+key, per-payment confirm and retry). The backend has since implemented `/runs` in a
+different shape (`docs/dev/RUNS_API.md`), so they work on the mock only until the
+client is reconciled; see
+[Payroll run](../docs/dev/API_CONTRACT.md#payroll-run-one-approval-many-recipients-).
+
+Nothing calls `GET /health`, and `POST /transfer` has no screen: payroll goes through
+`/runs`. The filters on the receipts and auditor screens narrow only the pages already
+loaded, because no route has filter parameters.
 
 ## API client and mocks
 
@@ -66,7 +116,20 @@ const receipt = await signAndConfirm(prepared, {
 ```
 
 Amounts are integer base-unit strings (`"1000000"` is 1 USDC). Errors are
-`ApiError` with a stable `code`; `messageFor(error)` gives the copy to show.
+`ApiError` with a stable `code`, the HTTP `status`, a `retryAfter` and an
+`isRetryable` flag (`transaction_not_finalized`, any 429, 502 to 504 and a dropped
+connection); `messageFor(error)` gives the copy to show. A 429 whose `Retry-After`
+cannot be read, which is every cross-origin one until the backend exposes the header,
+waits 60 s. A response that does not match its schema is a `ContractError`.
+
+Every request body is checked by a strict schema before it is sent (an unknown field
+or a malformed amount, key, signature or `aes_key` throws in the browser), and every
+request goes out with `cache: "no-store"`. `signAndConfirm` fails with
+`UnexpectedSignerError` if the service asks for a signature from a key that is not the
+signer's, and polls confirm for up to 60 s, with `onSubmitted` to keep the signature
+if the page is left. The conventions are in the contract; the rule for what a screen
+does after a transaction may have been sent is
+[below](#when-a-transaction-may-have-been-sent).
 
 `NEXT_PUBLIC_API_MODE` picks the service. `mock` answers from an in-browser
 [MSW](https://mswjs.io) handler for every route, including the failures that
@@ -81,12 +144,21 @@ The mock answers only on its own origin (`http://mock.cadence.test`), so it neve
 shadows a Next route. In the browser, `window.cadenceMock` controls it:
 
 - `set("slow", "partial-failure")`, `clear()` and `active()` flip the failure
-  scenarios (`slow`, `rate-limited`, `service-down`, `partial-failure`, ...).
-  `?mock=slow` in the page URL turns scenarios on, and is read once, when the
-  worker starts (at the first API call).
+  scenarios, and `scenarios` lists them: `instant`, `slow`, `unauthenticated`,
+  `rate-limited`, `service-down`, `setup-required`, `tx-failed`, `partial-failure`,
+  `credit-mismatch` and `rpc-down` (the chain read behind the public USDC balance).
+  `?mock=slow,partial-failure` in the page URL turns scenarios on, and is read once,
+  when the worker starts (at the first API call).
 - `setRole("admin" | "recipient" | "auditor" | null)` makes routes enforce a role
   and answer 403 `forbidden_role` otherwise. The default `null` is permissive.
-- `reset()` restores the seed data (balances, payments, runs).
+- `reset()` restores the seed data (balances, payments, runs, people, auditors, the
+  access log). `resetAccountStatus()` only makes the recipient one who has done none of
+  the activation steps. The mock lives in the page, so a reload resets everything.
+
+The mock is not the real service: its CSV, a few error codes, its paging and its
+roles differ. Those are listed in the contract under
+[Mock deviations](../docs/dev/API_CONTRACT.md#mock-deviations), and nothing should be
+built on them.
 
 `public/mockServiceWorker.js` is generated by MSW. After upgrading `msw`, refresh
 it with `pnpm dlx msw init public/ --no-save` and commit the result.
@@ -95,13 +167,14 @@ it with `pnpm dlx msw init public/ --no-save` and commit the result.
 
 With `NEXT_PUBLIC_API_MODE=mock` and Supabase not configured, `/sign-in` offers "Try
 the demo" as company admin, recipient or auditor (`ana@solaris.test`,
-`bruno@solaris.test`, `carla@acme-audit.test`, company Solaris). It sets the httpOnly
-`cadence-demo-role` cookie (`secure` only over https), which the middleware and
-`currentViewer()` trust only in that exact configuration (`src/lib/demo/allowed.ts`):
-never with Supabase configured, in real mode or on mainnet. The demo is inferred from
-that configuration, with the explicit `mock` mode as the opt-in, so a typo in a
-Supabase variable also turns it on: check the env before sharing a deploy. Sign-out
-clears the cookie. A reload resets the mock data.
+`bruno@solaris.test`, `carla@acme-audit.test`, company Solaris), and as a new
+recipient who has done no activation step (it opens `/activate?fresh=1`). It sets the
+httpOnly `cadence-demo-role` session cookie (`secure` only over https), which the
+middleware and `currentViewer()` trust only in that exact configuration
+(`src/lib/demo/allowed.ts`): never with Supabase configured, in real mode or on
+mainnet. The demo is inferred from that configuration, with the explicit `mock` mode
+as the opt-in, so a typo in a Supabase variable also turns it on: check the env before
+sharing a deploy. Sign-out clears the cookie. A reload resets the mock data.
 
 The company people list follows the API mode, not whether Supabase is configured
 (`src/lib/people/repository.ts`): in mock mode the people are an in-memory list with
@@ -112,34 +185,70 @@ go to the mock service, which only knows those ids; in real mode they are the Su
 ## Wallet
 
 Screens sign through `useWallet()` (`src/lib/wallet`): `{ status, address, signer,
-submit }`, plus `loading` while the mock wallet loads. The signed-in shell mounts
-`WalletProvider` with the viewer's role. Mock mode gives the admin and recipient a mock
-wallet and the auditor none; those mocks are imported dynamically, so a real-mode build
-has none of them. Real mode is `unavailable` and throws naming #78 and #80, until they
-land. `useSignAndConfirm()` gives `await run(prepared, confirm, onStep)`.
+submit }`, plus `loading` while the mock wallet loads and a `reason` when it is
+unavailable. The signed-in shell mounts `WalletProvider` with the viewer's role. Mock
+mode gives the admin and recipient a mock wallet and the auditor none; those mocks are
+imported dynamically, so a real-mode build has none of them. Real mode is
+`unavailable` and throws naming #78 and #80, until they land, so in real mode nothing
+can be signed yet. The `Signer` has `signTransaction` and an optional `signMessage`
+(used only for the key-derivation message). `useSignAndConfirm()` gives
+`await run(prepared, confirm, onStep, extra)`, where `extra` takes `signal` and
+`onSubmitted`.
 
 ## Money and queries
 
 `src/lib/money.ts` converts between base-unit strings and dollars (`unitsToUsd`,
-`usdToUnits`, `formatUnits`, `sumUnits`); parsing is strict and never rounds.
+`usdToUnits`, `formatUnits`, `formatBaseUnits`, `sumUnits`); parsing is strict and
+never rounds, and `formatUnits` rounds to cents for display only (`formatBaseUnits` is
+exact). Amounts live in React Query's memory cache only.
 Server state goes through React Query: the one `QueryClient` and its defaults live
 in `src/lib/queries/client.ts` (30 s stale time, one retry except for a 4xx
 `ApiError`, no refetch on focus), and every key comes from `queryKeys` in
 `src/lib/queries/keys.ts`. The sidebar balance is `useShellBalance(role, viewer)`,
-cached per viewer and cleared on sign-out and when a sign-in page mounts. A mutation that
-moves money must call `invalidateBalances(queryClient)` so the sidebar updates.
+cached per viewer and cleared on sign-out and when a sign-in page mounts (clearing also
+empties the mutation cache). A mutation that moves money must call
+`invalidateBalances(queryClient)` so the sidebar updates. Two things poll: the run
+screen reads `GET /runs/:id` every 5 s while a payment is open, and `/me` reads the
+balance every 3 s for up to 30 s after a confirmed apply.
+
+### When a transaction may have been sent
+
+From the moment signing hands over to submitting, a transaction may be on the network,
+even if the send throws. After that a screen never prepares a replacement: it
+re-confirms with the saved signature, or tells the person to check their balances. The
+exception is `transaction_failed`, which means the network refused it. Deposit,
+withdraw, apply-pending, payroll payments and the activation account step all follow
+this. The evidence is kept unevenly:
+
+- `src/lib/submissions.ts` keeps one record per kind of flow in `sessionStorage`
+  (`request_id`, signature, block height, wallet, time; nothing secret). **Deposit (the
+  wrap step) and apply-pending use it**, so a reload finds out what became of the
+  transaction before anything else is sent.
+- **Withdraw and payroll do not use it yet.** Withdraw holds the amounts in memory
+  (the mutation cache) and payroll holds signatures in component state, so a reload, or
+  for withdraw a sign-out, forgets a transaction that may have landed. A payroll
+  payment also can only be signed in the session that created its run. Persisting
+  both is a prerequisite for real signing.
+
+The details, and the table of flows, are in the contract under
+[The sent-failure rule](../docs/dev/API_CONTRACT.md#the-sent-failure-rule).
 
 ## Activation
 
 `/activate` (recipient) is one progress screen: create the wallet, sign the
-key-derivation message and `api.keys.enroll` it (`key_already_enrolled` counts as
-done), then `api.accounts.configure` and sign it. The steps are the three flags of
-`api.me.status()`, so it resumes where it stopped, and "Try again" re-reads the status
-and runs only what is not done. `/me` shows its content only once the status is
+key-derivation message and `api.keys.enroll` it (`key_already_enrolled` counts as done
+only if `api.me.status()` then reports the key as enrolled; otherwise the screen says
+the wallet was set up elsewhere), then `api.accounts.configure` and sign it. The steps
+are the three flags `wallet_linked`, `key_enrolled` and `account_configured` of
+`api.me.status()` (`pending_credits` is not read), so it resumes where it stopped, and
+"Try again" re-reads the status and runs only what is not done. A configure that
+reached the network is settled on the next try, never prepared twice. `/me` shows its content only once the status is
 complete and sends the rest to `/activate`. The key-derivation signature is
 secret: it lives in one local variable for the enroll call, never in state, a
-mutation, a log, a URL or an error. Wallet creation in real mode waits for #78;
-the screen says so. Code: `src/lib/activation/` (state machine, steps) and
+mutation, a log, a URL or an error. Wallet creation in real mode waits for #78; the
+screen says so. The message that is signed is a mock placeholder
+(`src/lib/activation/message.ts`) and building it throws outside mock mode, until #80
+provides the canonical one. Code: `src/lib/activation/` (state machine, steps) and
 `src/lib/queries/activation.ts`.
 
 ## Route guard
@@ -153,6 +262,7 @@ role:
 | ------------ | ----------- |
 | `/company/*` | `admin`     |
 | `/me/*`      | `recipient` |
+| `/activate`  | `recipient` |
 | `/audit/*`   | `auditor`   |
 
 Every session belongs to a company: the middleware signs out a session that has
@@ -163,8 +273,10 @@ goes to their own area. If Supabase is unreachable or unconfigured, or the
 membership lookup fails, guarded areas are treated as signed out (nobody is
 signed out over a failed lookup). The rules live in `src/lib/auth/guard.ts`.
 
-Row-level security is still the authorization boundary: the middleware only
-decides which page to show.
+Row-level security is still the authorization boundary for the tables the browser
+reads, and the proof service's own role checks are for its routes: the middleware only
+decides which page to show. `/dev/*` is not guarded by role; it answers not found on
+mainnet.
 
 ## Sign-in and sign-up
 
@@ -301,10 +413,20 @@ sets `maxSupportedTransactionVersion: 1` on every call that can return a
 transaction, overriding whatever the caller passed.
 
 `NEXT_PUBLIC_SOLANA_CLUSTER` selects `devnet` (local and previews) or `mainnet`
-(production). Anything but mainnet shows a DEVNET badge.
+(production). Anything but mainnet shows a DEVNET badge. `NEXT_PUBLIC_SOLANA_RPC_URL`
+optionally replaces the cluster's public RPC. The Deposit screen reads the company
+wallet's plain USDC from the chain (its associated token account, the one a wrap
+debits) with `src/lib/solana/balances.ts`; mock mode answers that read from the mock.
 
 ## Deploys
 
 Vercel builds this directory (project root directory `frontend/`), with a
 preview for every pull request. Set the variables from `.env.example` per
 environment: Production gets `mainnet`, Preview and Development get `devnet`.
+
+`NEXT_PUBLIC_API_MODE` must be set outside `next dev`, or the build fails. A Preview
+can run `mock` (with the Supabase variables unset, the demo viewer is on). Production must
+be `real` with `NEXT_PUBLIC_PROOF_API_URL` set to an https URL, because mock mode is
+refused on mainnet. Most routes the screens call do not exist on the proof service
+yet, and in real mode nothing can be signed until #78 and #80, so a `real` deploy does
+not work end to end today.
