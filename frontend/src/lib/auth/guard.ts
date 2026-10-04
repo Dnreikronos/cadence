@@ -13,6 +13,20 @@ export function homeFor(role: Role): string {
   return homes[role]
 }
 
+// Next adds `_rsc` (and `__next*` in places) to its own navigations: they mean nothing to
+// the person and must not come back after sign-in. The rest of the query string goes into
+// `next`, in the address bar and in logs, so guarded routes must never carry a secret in it.
+export function cleanSearch(search: string) {
+  const kept = search
+    .replace(/^\?/, "")
+    .split("&")
+    .filter((pair) => {
+      const key = pair.split("=")[0]
+      return pair !== "" && key !== "_rsc" && !key.startsWith("__next")
+    })
+  return kept.length ? `?${kept.join("&")}` : ""
+}
+
 // Pages outside a role's home prefix that still belong to that role.
 const rolePages: Record<Role, string[]> = {
   admin: [],
@@ -36,13 +50,18 @@ export function requiredRole(pathname: string): Role | null {
 }
 
 // `viewer` is the signed-in member's role, or null when signed out: every session has a membership.
-export function guard(pathname: string, viewer: Role | null): Decision {
+// `search` (with its "?") rides along in `next`, so a filtered page survives the sign-in.
+export function guard(
+  pathname: string,
+  viewer: Role | null,
+  search = "",
+): Decision {
   const role = requiredRole(pathname)
   if (!role) return { kind: "next" }
   if (!viewer) {
     return {
       kind: "redirect",
-      to: `/sign-in?next=${encodeURIComponent(pathname)}`,
+      to: `/sign-in?next=${encodeURIComponent(pathname + search)}`,
     }
   }
   if (viewer !== role) return { kind: "redirect", to: homeFor(viewer) }

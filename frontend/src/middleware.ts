@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server"
-import { guard, requiredRole, type Role } from "@/lib/auth/guard"
+import { cleanSearch, guard, requiredRole, type Role } from "@/lib/auth/guard"
 import { isDemoEnabled } from "@/lib/demo/mode"
 import { DEMO_COOKIE, parseDemoRole } from "@/lib/demo/viewer"
 import { membershipOf } from "@/lib/supabase/membership"
@@ -31,8 +31,15 @@ export async function middleware(request: NextRequest) {
   try {
     const membership = await membershipOf(session.supabase, data.user.id)
     if (!membership) {
+      // Already where the redirect leads: ending the session again, or redirecting to
+      // here once more, could loop if the logout keeps failing while getUser works.
+      const { pathname, searchParams } = request.nextUrl
+      if (pathname === "/sign-in" && searchParams.get("error") === "no_company")
+        return session.response()
       // Every session belongs to a company; one without (e.g. removed) is ended here.
-      await session.supabase.auth.signOut()
+      // This device only: other sessions of the same user are not ours to end.
+      const { error } = await session.supabase.auth.signOut({ scope: "local" })
+      if (error) console.error("signOut failed", error.message)
       return redirect(
         request,
         "/sign-in?error=no_company",
@@ -54,7 +61,11 @@ function decide(
   response: NextResponse,
   cacheHeaders: Record<string, string> = {},
 ) {
-  const decision = guard(request.nextUrl.pathname, role)
+  const decision = guard(
+    request.nextUrl.pathname,
+    role,
+    cleanSearch(request.nextUrl.search),
+  )
   if (decision.kind === "next") return response
   return redirect(request, decision.to, response, cacheHeaders)
 }
