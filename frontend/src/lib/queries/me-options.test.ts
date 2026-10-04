@@ -18,7 +18,11 @@ import { ApiError } from "@/lib/api/errors"
 import { ME_PERSON, db, resetDb } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
+import { ApplyInProgressError, SentApplyError } from "@/lib/me/apply-pending"
+import { historyView } from "@/lib/me/history"
+import { memoryStore } from "@/lib/me/memory-store"
 import { mockWalletFor } from "@/lib/wallet/mock"
+import type { Wallet } from "@/lib/wallet/types"
 import { bindSignAndConfirm } from "@/lib/wallet/sign-and-confirm"
 import { queryKeys } from "./keys"
 import {
@@ -31,6 +35,7 @@ import {
 
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }))
 afterEach(() => {
+  vi.restoreAllMocks()
   server.resetHandlers()
   scenarios.clear()
   resetDb()
@@ -109,6 +114,28 @@ describe("meQueries", () => {
     expect(new Set(ids).size).toBe(2 * HISTORY_PAGE_SIZE + 7)
   })
 
+  it("keeps the rows already loaded when the next page does not load", async () => {
+    receiveUpTo(HISTORY_PAGE_SIZE + 5)
+    const observer = new InfiniteQueryObserver(
+      new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+      { ...queries.history() },
+    )
+    await observer.fetchNextPage()
+
+    scenarios.set("service-down")
+    await observer.fetchNextPage()
+
+    const result = observer.getCurrentResult()
+    expect(result.isFetchNextPageError).toBe(true)
+    const view = historyView(result)
+    expect(view.kind === "list" && view.items).toHaveLength(HISTORY_PAGE_SIZE)
+    // And the next page is still there to be asked for.
+    expect(result.hasNextPage).toBe(true)
+    scenarios.clear()
+    await observer.fetchNextPage()
+    expect(observer.getCurrentResult().data?.pages).toHaveLength(2)
+  })
+
   it("has a single page, and no next one, for a short history", async () => {
     const observer = new InfiniteQueryObserver(new QueryClient(), {
       ...queries.history(),
@@ -122,57 +149,159 @@ describe("meQueries", () => {
 })
 
 describe("applyPendingMutation", () => {
-  function setup() {
+  function setup(wallet: Wallet = mockWalletFor("recipient")) {
     const queryClient = new QueryClient()
+    const store = memoryStore()
     const onApplied = vi.fn()
-    const wallet = mockWalletFor("recipient")
+    const onSent = vi.fn()
     const options = applyPendingMutation({
       queryClient,
       accounts: api.accounts,
       wallet,
       run: bindSignAndConfirm(wallet),
+      store,
       onApplied,
+      onSent,
     })
-    return { queryClient, onApplied, options }
+    const watched = [
+      queryKeys.balance.me(viewer),
+      queryKeys.status.me(viewer),
+    ] as const
+    for (const key of watched) queryClient.setQueryData(key, { old: true })
+    queryClient.setQueryData(queryKeys.people.list(), [])
+    const invalidated = () =>
+      [...watched, queryKeys.people.list()].map(
+        (key) => queryClient.getQueryState(key)?.isInvalidated,
+      )
+    return { queryClient, store, onApplied, onSent, options, invalidated }
   }
+  const press = { pendingBefore: "2000000" }
 
   it("announces the result and refreshes balances and status on success", async () => {
     scenarios.set("instant")
     db.me.pending = 2_000_000n
-    const { queryClient, onApplied, options } = setup()
-    queryClient.setQueryData(queryKeys.balance.me(viewer), { old: true })
-    queryClient.setQueryData(queryKeys.status.me(viewer), { old: true })
-    queryClient.setQueryData(queryKeys.people.list(), [])
+    const { queryClient, onApplied, options, invalidated, store } = setup()
 
-    await new MutationObserver(queryClient, options).mutate()
+    const result = await new MutationObserver(queryClient, options).mutate(
+      press,
+    )
 
     expect(onApplied).toHaveBeenCalledTimes(1)
-    expect(
-      queryClient.getQueryState(queryKeys.balance.me(viewer))?.isInvalidated,
-    ).toBe(true)
-    expect(
-      queryClient.getQueryState(queryKeys.status.me(viewer))?.isInvalidated,
-    ).toBe(true)
-    expect(
-      queryClient.getQueryState(queryKeys.people.list())?.isInvalidated,
-    ).toBe(false)
+    expect(invalidated()).toEqual([true, true, false])
+    // What the screen waits on: the amount before, and the slot that confirmed it.
+    expect(result.confirmed).toMatchObject({
+      pendingBefore: "2000000",
+      slot: result.receipt.slot,
+    })
+    expect(store.read()).toBeNull()
   })
 
-  it("announces nothing and refreshes nothing when the credit moved", async () => {
+  it("refreshes the balance and says it may have gone through when the credit counter moved", async () => {
     scenarios.set("instant", "credit-mismatch")
     db.me.pending = 2_000_000n
-    const { queryClient, onApplied, options } = setup()
-    queryClient.setQueryData(queryKeys.balance.me(viewer), { old: true })
+    const { queryClient, onApplied, onSent, options, invalidated, store } =
+      setup()
 
     const failure = await new MutationObserver(queryClient, options)
-      .mutate()
+      .mutate(press)
+      .catch((error) => error)
+
+    expect(failure).toBeInstanceOf(SentApplyError)
+    // The apply landed, so the balance has to be read again, not left as it was.
+    expect(invalidated()).toEqual([true, true, false])
+    expect(onApplied).not.toHaveBeenCalled()
+    expect(onSent).toHaveBeenCalledWith(failure)
+    expect(store.read()).not.toBeNull()
+  })
+
+  it("refreshes after a failure that was sent, whatever it was", async () => {
+    scenarios.set("instant")
+    const { queryClient, onSent, options, invalidated } = setup({
+      ...mockWalletFor("recipient"),
+      submit: async () => {
+        throw new TypeError("Failed to fetch")
+      },
+    })
+
+    const failure = await new MutationObserver(queryClient, options)
+      .mutate(press)
+      .catch((error) => error)
+
+    expect(failure).toBeInstanceOf(SentApplyError)
+    expect(failure.signature).toBeNull()
+    expect(onSent).toHaveBeenCalledTimes(1)
+    expect(invalidated()).toEqual([true, true, false])
+  })
+
+  it("does not call a dropped transaction a sent one", async () => {
+    scenarios.set("instant", "tx-failed")
+    const { queryClient, onSent, options, store } = setup()
+
+    const failure = await new MutationObserver(queryClient, options)
+      .mutate(press)
       .catch((error) => error)
 
     expect(failure).toBeInstanceOf(ApiError)
-    expect(onApplied).not.toHaveBeenCalled()
-    expect(
-      queryClient.getQueryState(queryKeys.balance.me(viewer))?.isInvalidated,
-    ).toBe(false)
+    expect(onSent).not.toHaveBeenCalled()
+    expect(store.read()).toBeNull()
+  })
+
+  it("prepares one transaction when it is pressed twice", async () => {
+    scenarios.set("instant")
+    db.me.pending = 2_000_000n
+    const { queryClient, options } = setup()
+    const prepare = vi.spyOn(api.accounts, "applyPending")
+
+    const [first, second] = await Promise.allSettled([
+      new MutationObserver(queryClient, options).mutate(press),
+      new MutationObserver(queryClient, options).mutate(press),
+    ])
+
+    expect(prepare).toHaveBeenCalledTimes(1)
+    expect(first.status).toBe("fulfilled")
+    expect(second).toMatchObject({
+      status: "rejected",
+      reason: expect.any(ApplyInProgressError),
+    })
+    // The refused press changes nothing on screen: no refresh, no toast.
+    expect(db.me.pending).toBe(0n)
+  })
+
+  it("lets a new apply start once the first has finished", async () => {
+    scenarios.set("instant")
+    db.me.pending = 2_000_000n
+    const { queryClient, options } = setup()
+    await new MutationObserver(queryClient, options).mutate(press)
+    db.me.pending = 1_000_000n
+
+    await expect(
+      new MutationObserver(queryClient, options).mutate({
+        pendingBefore: "1000000",
+      }),
+    ).resolves.toBeDefined()
+  })
+
+  it("prepares nothing while an apply sent earlier is not seen through", async () => {
+    scenarios.set("instant", "credit-mismatch")
+    db.me.pending = 2_000_000n
+    const { queryClient, options } = setup()
+    await new MutationObserver(queryClient, options)
+      .mutate(press)
+      .catch(() => undefined)
+    scenarios.set("instant")
+    const prepare = vi.spyOn(api.accounts, "applyPending")
+
+    const failure = await new MutationObserver(queryClient, options)
+      .mutate(press)
+      .catch((error) => error)
+
+    expect(failure).toBeInstanceOf(ApplyInProgressError)
+    expect(prepare).not.toHaveBeenCalled()
+  })
+
+  it("never retries by itself", () => {
+    expect(setup().options.retry).toBe(false)
+    expect(setup().options.mutationKey).toEqual(["apply-pending"])
   })
 })
 
