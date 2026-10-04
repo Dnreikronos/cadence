@@ -1,0 +1,16 @@
+{
+  "authentication": "local Auth fixture; production token validation covered separately",
+  "confidential_debit_verified": true,
+  "database": "disposable local Supabase Vault",
+  "exact_warning_before_transaction": true,
+  "finalized_http_receipt": true,
+  "incoming_signature": "3y3BKuJCcrEVJ7diR3qJSyKQkM8VfqNKprqvDAhRaP3SJjmdTXXkZWNrSqyzffopD6wNt4mj3QLpacSKNxQin6K7",
+  "independent_rpc_verified": true,
+  "normal_usdc_account": "9gzXqCFoP6KdPGydmSTuakuBc7q15jnxZuTnXCjhmmU5",
+  "normal_usdc_credit_base_units": "42",
+  "phantom_ui_exercised": false,
+  "signature": "4ArfEXW7fRcJ3Fv5EZcHWXC96PwMorue7Sm6ouzyo4HwNdQwvQvdvn8mcHdhBqtXY4A2Ugo7cvGQHWXtDwaRzp4s",
+  "signer": "external disposable SDK wallet",
+  "slot": 507511594,
+  "wire_bytes": 1918
+}

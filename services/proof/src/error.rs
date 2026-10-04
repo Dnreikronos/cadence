@@ -3,6 +3,14 @@ use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    #[error("unwrap request not found")]
+    UnwrapNotFound,
+    #[error("{0}")]
+    UnwrapUnavailable(&'static str),
+    #[error("unwrap rate limit exceeded")]
+    UnwrapRateLimited,
+    #[error("reveal risk requires acknowledgement")]
+    RevealRisk(crate::solana::reveal_risk::RevealRisk),
     #[error("run not found")]
     RunNotFound,
     #[error("run storage is unavailable")]
@@ -40,6 +48,10 @@ pub enum AppError {
 impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
+            Self::UnwrapNotFound => StatusCode::NOT_FOUND,
+            Self::UnwrapUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::UnwrapRateLimited => StatusCode::TOO_MANY_REQUESTS,
+            Self::RevealRisk(_) => StatusCode::CONFLICT,
             Self::RunNotFound => StatusCode::NOT_FOUND,
             Self::RunUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
@@ -59,6 +71,21 @@ impl AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
+        if let Self::RevealRisk(risk) = self {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({"error": "reveal_risk_not_acknowledged", "reveal_risk": risk})),
+            )
+                .into_response();
+        }
+        if matches!(self, Self::UnwrapRateLimited) {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                [("retry-after", "60")],
+                Json(json!({"error": "unwrap_rate_limited"})),
+            )
+                .into_response();
+        }
         if matches!(self, Self::RateLimited | Self::TransferRateLimited) {
             let code = if matches!(self, Self::TransferRateLimited) {
                 "transfer_rate_limited"
@@ -73,6 +100,8 @@ impl IntoResponse for AppError {
                 .into_response();
         }
         let code = match self {
+            Self::UnwrapNotFound => "unwrap_not_found",
+            Self::UnwrapUnavailable(code) => code,
             Self::RunNotFound => "run_not_found",
             Self::RunUnavailable => "run_storage_unavailable",
             Self::Unauthorized => "authentication_required",

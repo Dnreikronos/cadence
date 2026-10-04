@@ -8,6 +8,7 @@ pub mod database;
 pub mod error;
 pub mod run_store;
 pub mod transfer_store;
+pub mod unwrap_store;
 pub mod wrap_store;
 pub mod keys {
     pub mod elgamal;
@@ -19,6 +20,7 @@ pub mod routes {
     mod runs_confirm;
     mod runs_prepare;
     pub mod transfer;
+    pub mod unwrap;
     pub mod wrap;
     mod wrap_limits;
 }
@@ -26,8 +28,10 @@ pub mod solana {
     pub mod batch;
     pub mod client;
     pub mod confidential;
+    pub mod reveal_risk;
     pub mod token_client;
     pub mod token_wrap;
+    pub mod unwrap;
     pub mod v0;
     pub mod v1;
     pub mod wrap;
@@ -58,6 +62,7 @@ pub fn router_with_payments(
 ) -> Router {
     let wrap = routes::wrap::router(state.rpc.clone(), store);
     let runs = routes::runs::router(state.rpc.clone(), transfer.clone());
+    let unwrap = routes::unwrap::router(state.rpc.clone(), transfer.clone());
     let transfer = routes::transfer::router(state.rpc.clone(), transfer);
     Router::new()
         .route("/health", get(routes::health::health))
@@ -65,4 +70,5 @@ pub fn router_with_payments(
         .merge(wrap)
         .merge(transfer)
         .merge(runs)
+        .merge(unwrap)
 }

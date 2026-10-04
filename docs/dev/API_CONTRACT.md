@@ -735,16 +735,21 @@ holds) is laid over the service's status: a payment this browser saw confirmed s
 confirmed, and one that was sent and is not confirmed stays "waiting" however the
 service reports it. The service's `confirmed` always wins.
 
-### Unwrap: private USDC to public, with the reveal-risk flag 🟡
+### Unwrap: private USDC to public, with the reveal-risk flag ✅
 
 `POST /unwrap` then `POST /unwrap/confirm` (#56, #87). Prepare returns the usual
 fields for a withdrawal from the confidential balance followed by the unwrap.
+The implemented backend contract is [UNWRAP_API.md](UNWRAP_API.md). The
+mock-backed frontend must add the transient AES key and first-use wallet link
+signature before switching this request to live mode.
 
 ```json
 {
   "wallet": "<recipient wallet public key>",
   "amount": "4200000000",
-  "acknowledge_reveal_risk": false
+  "aes_key": "<base64 16-byte balance key>",
+  "acknowledge_reveal_risk": false,
+  "wallet_signature": "<first-use wallet association signature>"
 }
 ```
 
@@ -772,9 +777,12 @@ The response carries a **structured flag**, not a rendered message:
 - When `level` is not `none` and `acknowledge_reveal_risk` is not `true`, the
   service returns `409 reveal_risk_not_acknowledged` and builds no transaction. The
   web app shows the warning, and sends the request again with the flag set only
-  after the person confirms. See
-  [finding 6](#design-review-findings-to-resolve-before-building): a 409 carries
-  only a code, so it cannot also carry the `level` the warning is rendered from.
+  after the person confirms. This 409 also carries `reveal_risk`, containing
+  only its level and payment IDs/dates. `POST /unwrap/check` accepts `wallet`,
+  `amount` and optional `wallet_signature`, returning the same flag plus
+  `requires_acknowledgement` without a transaction or an AES key.
+  Near-match tolerance defaults to 1% and is configured with
+  `PROOF_REVEAL_RISK_TOLERANCE_BPS` (0..=10000).
 - The web app renders the warning text itself from `level`. It never shows
   backend-written prose. An unknown `level` parses as `exact`, so the warning is
   shown. It reads `level` only: `matches` is validated (ids and dates, no amount) but
@@ -1314,6 +1322,10 @@ the problem, why it is real, and the suggested change. The backend owner decides
    records the signature.
 
 6. **The reveal-risk warning has nowhere to come from.**
+   _Resolved by #56._ `/unwrap/check` returns the flag before preparation, and
+   a risky unacknowledged `/unwrap` returns it alongside the fixed 409 code.
+   Withdrawal goes to the authenticated wallet's normal-USDC ATA. Arbitrary
+   destination routing remains a separate frontend/backend integration decision.
    _Problem._ The flow says `409 reveal_risk_not_acknowledged` makes the app show a
    warning from `level`, but a 409 carries only a code (`error.rs:80`), not `level`
    or `matches`.

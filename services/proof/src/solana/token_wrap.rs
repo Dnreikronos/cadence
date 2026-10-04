@@ -151,6 +151,33 @@ pub fn wrap(
     }
 }
 
+/// Burns public wrapped tokens and releases the same amount from escrow.
+pub fn unwrap(
+    addresses: &Addresses,
+    wrapped_account: &Address,
+    recipient: &Address,
+    wallet: &Address,
+    amount: u64,
+) -> Instruction {
+    let mut data = vec![2];
+    data.extend_from_slice(&amount.to_le_bytes());
+    Instruction {
+        program_id: addresses.program,
+        accounts: vec![
+            AccountMeta::new(addresses.escrow, false),
+            AccountMeta::new(*recipient, false),
+            AccountMeta::new_readonly(addresses.authority, false),
+            AccountMeta::new_readonly(addresses.unwrapped_mint, false),
+            AccountMeta::new_readonly(TOKEN_2022, false),
+            AccountMeta::new_readonly(addresses.unwrapped_token_program, false),
+            AccountMeta::new(*wrapped_account, false),
+            AccountMeta::new(addresses.wrapped_mint, false),
+            AccountMeta::new_readonly(*wallet, true),
+        ],
+        data,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

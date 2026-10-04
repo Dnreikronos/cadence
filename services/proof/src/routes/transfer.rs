@@ -29,6 +29,8 @@ pub struct Service {
     pub(super) store: TransferStore,
     pub(super) keys: Database,
     pub(super) runs: crate::run_store::RunStore,
+    pub(super) unwrap: crate::unwrap_store::UnwrapStore,
+    pub(super) reveal_tolerance_bps: u16,
     pub(super) proof_slots: Arc<Semaphore>,
 }
 
@@ -39,6 +41,8 @@ impl Service {
             store: TransferStore::new(receipts_url)?,
             keys: Database::new(keys_url, "cadence_key_service")?,
             runs: crate::run_store::RunStore::new(receipts_url)?,
+            unwrap: crate::unwrap_store::UnwrapStore::new(receipts_url)?,
+            reveal_tolerance_bps: 100,
             proof_slots: Arc::new(Semaphore::new(4)),
         })
     }
@@ -59,7 +63,11 @@ impl Service {
                     .ok_or(AppError::Config("transfer requires PROOF_SUPABASE_URL"))?;
                 let api_key = get("PROOF_SUPABASE_API_KEY")
                     .ok_or(AppError::Config("transfer requires PROOF_SUPABASE_API_KEY"))?;
-                Self::new(SupabaseAuth::new(origin, &api_key)?, &receipts, &keys).map(Some)
+                let mut service =
+                    Self::new(SupabaseAuth::new(origin, &api_key)?, &receipts, &keys)?;
+                service.reveal_tolerance_bps =
+                    crate::solana::reveal_risk::tolerance(get("PROOF_REVEAL_RISK_TOLERANCE_BPS"))?;
+                Ok(Some(service))
             }
             _ => Err(AppError::Config(
                 "both proof transfer database settings are required",
