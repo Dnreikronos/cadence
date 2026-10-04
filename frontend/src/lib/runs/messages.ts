@@ -49,6 +49,14 @@ export const sentWithSignatureMessage =
 export const sentWithoutSignatureMessage =
   "This payment may have been sent. Check the company payments and balance before doing anything."
 
+// A cancelled signature sent nothing. These say what to do next without ever suggesting
+// the person was paid.
+export const cancelledGoneMessage =
+  "You cancelled the signature, and this page no longer holds this payment, so this person was not paid. Start a new run for them only. The recently-paid check won't skip them, because nothing was confirmed."
+
+export const cancelledStaleMessage =
+  "Too much time has passed to sign this payment again, and nothing was sent, so this person was not paid. Retry it to prepare a new one; if that isn't allowed, start a new run for them only."
+
 export type Failure = {
   message: string
   // The transaction may have reached the network: never prepare another for it.

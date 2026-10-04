@@ -1,3 +1,4 @@
+import { knownPaymentStatus } from "@/lib/api/schemas"
 import { cn } from "@/lib/utils"
 
 export type PaymentStatus = "pending" | "confirmed" | "failed"
@@ -28,10 +29,11 @@ export function StatusPill({
   status,
   className,
 }: {
-  status: PaymentStatus
+  // Any string: a status the client does not know shows as pending.
+  status: string
   className?: string
 }) {
-  const pill = pills[status]
+  const pill = pills[knownPaymentStatus(status)]
   return (
     <span
       className={cn(

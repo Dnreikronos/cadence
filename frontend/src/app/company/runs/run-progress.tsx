@@ -1,6 +1,6 @@
 "use client"
 
-import { RotateCw } from "lucide-react"
+import { PenLine, RotateCw } from "lucide-react"
 import { AvatarPerson } from "@/components/ui/avatar-person"
 import { buttonVariants } from "@/components/ui/button"
 import { ErrorState } from "@/components/ui/error-state"
@@ -8,11 +8,12 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TransparentBadge } from "@/components/ui/transparent-badge"
 import { useRun } from "@/lib/queries/payroll"
 import type { RunCreated } from "@/lib/api/schemas"
-import { runMessage } from "@/lib/runs/messages"
+import { cancelledGoneMessage, runMessage } from "@/lib/runs/messages"
 import { initialsOf } from "@/lib/runs/people"
 import {
   canRecheck,
   canRetry,
+  canSignAgain,
   mergeRow,
   tally,
   type Row,
@@ -106,6 +107,8 @@ export function RunProgress({
             row={row}
             transparent={entry.transparent === true}
             canSign={canSign}
+            held={signer.canSignAgain(entry.paymentId)}
+            onSignAgain={() => void signer.signAgain(runId, entry.paymentId)}
             onRetry={() => void signer.retry(runId, entry.paymentId)}
             onRecheck={() =>
               row.signature &&
@@ -149,6 +152,8 @@ function PaymentRow({
   row,
   transparent,
   canSign,
+  held,
+  onSignAgain,
   onRetry,
   onRecheck,
 }: {
@@ -156,6 +161,9 @@ function PaymentRow({
   row: Row
   transparent: boolean
   canSign: boolean
+  // This page still holds the transaction of a cancelled signature.
+  held: boolean
+  onSignAgain: () => void
   onRetry: () => void
   onRecheck: () => void
 }) {
@@ -166,6 +174,10 @@ function PaymentRow({
     event.currentTarget.closest("li")?.focus()
     action()
   }
+  // A cancelled signature whose transaction this page no longer holds cannot be signed
+  // again: say plainly that this person was not paid.
+  const message =
+    canSignAgain(row) && !held ? cancelledGoneMessage : row.message
   return (
     <li
       tabIndex={-1}
@@ -190,6 +202,18 @@ function PaymentRow({
         <RunStatusPill status={row.status} />
         {transparent && <TransparentBadge />}
       </span>
+      {canSignAgain(row) && held && (
+        <button
+          type="button"
+          onClick={act(onSignAgain)}
+          disabled={!canSign}
+          aria-label={`Sign again: the payment to ${label}`}
+          className={buttonVariants({ variant: "secondary", size: "sm" })}
+        >
+          <PenLine className="size-3.5" />
+          Sign again
+        </button>
+      )}
       {canRetry(row) && (
         <button
           type="button"
@@ -214,7 +238,7 @@ function PaymentRow({
           Check again
         </button>
       )}
-      {row.message && (
+      {message && (
         <p
           className={cn(
             "basis-full text-caption/normal",
@@ -223,7 +247,7 @@ function PaymentRow({
               : "text-ink-muted",
           )}
         >
-          {row.message}
+          {message}
         </p>
       )}
     </li>
@@ -249,6 +273,18 @@ function Done({
         Don&apos;t pay those people another way until they are.
         {counts.retryable > 0 &&
           " The others that didn't go through can be retried above."}
+      </p>
+    )
+  }
+  if (counts.cancelled > 0) {
+    return (
+      <p className="text-ui/normal text-ink-muted">
+        {counts.cancelled === 1
+          ? "One payment wasn't signed, so nothing was sent for it."
+          : `${counts.cancelled} payments weren't signed, so nothing was sent for them.`}{" "}
+        Sign them again above while this page is open.
+        {counts.retryable > 0 &&
+          " The others that didn't go through can be retried."}
       </p>
     )
   }

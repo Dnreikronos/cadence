@@ -1,4 +1,5 @@
 import {
+  knownPaymentStatus,
   runRequestSchema,
   type PaymentItem,
   type RunCreated,
@@ -92,7 +93,8 @@ export function recentlyPaidIds(
 ) {
   const paid = new Set<string>()
   for (const payment of payments) {
-    if (payment.status !== "confirmed") continue
+    // An unknown status is pending, so it never counts as paid.
+    if (knownPaymentStatus(payment.status) !== "confirmed") continue
     const at = Date.parse(payment.paid_at)
     if (Number.isFinite(at) && at >= now - windowMs) {
       paid.add(payment.counterparty.id)

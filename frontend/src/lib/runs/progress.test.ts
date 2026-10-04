@@ -3,6 +3,7 @@ import { expiredMessage } from "./messages"
 import {
   canRecheck,
   canRetry,
+  canSignAgain,
   holdsUnconfirmed,
   isSettled,
   localReducer,
@@ -249,6 +250,7 @@ describe("what can be done to a row", () => {
     "signing",
     "waiting",
     "unknown",
+    "cancelled",
     "confirmed",
     "failed",
     "expired",
@@ -297,10 +299,132 @@ describe("what can be done to a row", () => {
       total: 8,
       confirmed: 2,
       retryable: 2,
+      cancelled: 0,
       sent: 2,
       attention: 4,
       open: 2,
     })
+  })
+
+  it("counts a cancelled signature as needing attention, not as open or retryable", () => {
+    expect(tally([row("confirmed"), row("cancelled"), row("pending")])).toEqual(
+      {
+        total: 3,
+        confirmed: 1,
+        retryable: 0,
+        cancelled: 1,
+        sent: 0,
+        attention: 1,
+        open: 1,
+      },
+    )
+  })
+
+  it("offers `sign again` only for a cancelled signature, and never a retry with it", () => {
+    expect(all.filter((status) => canSignAgain(row(status)))).toEqual([
+      "cancelled",
+    ])
+    expect(canRetry(row("cancelled"))).toBe(false)
+    expect(canRecheck(row("cancelled"))).toBe(false)
+    expect(isSettled("cancelled")).toBe(false)
+  })
+})
+
+describe("a cancelled signature", () => {
+  const message = "You cancelled the signature. Nothing was sent."
+  const cancelled = play(
+    { type: "signing", id: ID },
+    { type: "failed", id: ID, message, sent: false, cancelled: true },
+  )
+
+  it("is its own row, not a failure", () => {
+    expect(cancelled[ID]).toEqual({ status: "cancelled", message })
+    expect(
+      mergeRow(cancelled[ID], { status: "pending", failure: null }),
+    ).toEqual({ status: "cancelled", message, stalled: false, signature: null })
+  })
+
+  it("is an ordinary failure when it was not a refusal", () => {
+    const failed = play({
+      type: "failed",
+      id: ID,
+      message: "x",
+      sent: false,
+      cancelled: false,
+    })
+    expect(failed[ID].status).toBe("failed")
+  })
+
+  it("never turns a payment that may have been sent into one that can be signed again", () => {
+    const sent = play(
+      { type: "submitted", id: ID, signature: SIGNATURE },
+      { type: "failed", id: ID, message: "x", sent: true, cancelled: true },
+    )
+    expect(sent[ID].status).toBe("waiting")
+    expect(sent[ID].stalled).toBe(true)
+  })
+
+  it("gives way to the server's final answer, and to a confirmation", () => {
+    expect(
+      mergeRow(cancelled[ID], { status: "confirmed", failure: null }).status,
+    ).toBe("confirmed")
+    expect(
+      mergeRow(cancelled[ID], { status: "expired", failure: null }).status,
+    ).toBe("expired")
+    const failed = mergeRow(cancelled[ID], {
+      status: "failed",
+      failure: "transaction_failed",
+    })
+    expect(failed.status).toBe("failed")
+    // The cancelled text is not carried over to a payment that did fail.
+    expect(failed.message).not.toBe(message)
+    // Anything else the server says leaves it cancelled.
+    expect(
+      mergeRow(cancelled[ID], { status: "signed", failure: null }).status,
+    ).toBe("cancelled")
+  })
+
+  it("keeps the leave guard up, because the held transaction dies with the page", () => {
+    expect(holdsUnconfirmed(cancelled)).toBe(true)
+  })
+
+  it("is signing again from the moment it is tried, and confirmed when it lands", () => {
+    const again = localReducer(cancelled, { type: "signing", id: ID })
+    expect(again[ID]).toEqual({ status: "signing" })
+    expect(localReducer(again, { type: "confirmed", id: ID })[ID].status).toBe(
+      "confirmed",
+    )
+  })
+})
+
+describe("an unknown status from the service", () => {
+  it("is pending, whatever the browser has not touched", () => {
+    expect(mergeRow(undefined, { status: "reversed", failure: null })).toEqual({
+      status: "pending",
+      message: null,
+      stalled: false,
+      signature: null,
+    })
+    expect(
+      mergeRow(undefined, { status: "Confirmed", failure: null }).status,
+    ).toBe("pending")
+  })
+
+  it("never offers a retry, and never claims a confirmation", () => {
+    const row = mergeRow(undefined, { status: "reversed", failure: "x" })
+    expect(canRetry(row)).toBe(false)
+    expect(row.status).not.toBe("confirmed")
+  })
+
+  it("does not overwrite what this browser knows", () => {
+    expect(
+      mergeRow({ status: "signing" }, { status: "reversed", failure: null })
+        .status,
+    ).toBe("signing")
+    expect(
+      mergeRow({ status: "confirmed" }, { status: "reversed", failure: null })
+        .status,
+    ).toBe("confirmed")
   })
 })
 

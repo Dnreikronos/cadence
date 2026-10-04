@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
-import type { RunRequest } from "@/lib/api/schemas"
+import { knownRunPaymentStatus, type RunRequest } from "@/lib/api/schemas"
 import { collectPages } from "@/lib/runs/pages"
 import {
   recentWindowMs,
@@ -109,8 +109,11 @@ export function useRun(runId: string) {
       const run = query.state.data
       if (!run || query.state.status === "error") return false
       const open = run.payments.some(
-        (payment) =>
-          payment.status === "pending" || payment.status === "signed",
+        (payment) => {
+          // An unknown status is read as pending: keep asking.
+          const status = knownRunPaymentStatus(payment.status)
+          return status === "pending" || status === "signed"
+        },
       )
       return open ? runPollMs : false
     },

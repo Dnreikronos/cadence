@@ -1,4 +1,4 @@
-import type { PaymentItem } from "@/lib/api/schemas"
+import { knownPaymentStatus, type PaymentItem } from "@/lib/api/schemas"
 
 export const statusFilters = ["all", "confirmed", "pending", "failed"] as const
 export type StatusFilter = (typeof statusFilters)[number]
@@ -36,7 +36,8 @@ export function filterPayments(
   const needle = filters.search.trim().toLocaleLowerCase()
   return payments.filter(
     (payment) =>
-      (filters.status === "all" || payment.status === filters.status) &&
+      (filters.status === "all" ||
+        knownPaymentStatus(payment.status) === filters.status) &&
       (needle === "" ||
         payment.counterparty.name.toLocaleLowerCase().includes(needle)),
   )
