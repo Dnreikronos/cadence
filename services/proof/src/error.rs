@@ -3,6 +3,8 @@ use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    #[error("reveal risk requires acknowledgement")]
+    RevealRisk(crate::solana::reveal_risk::RevealRisk),
     #[error("run not found")]
     RunNotFound,
     #[error("run storage is unavailable")]
@@ -40,6 +42,7 @@ pub enum AppError {
 impl AppError {
     pub fn status(&self) -> StatusCode {
         match self {
+            Self::RevealRisk(_) => StatusCode::CONFLICT,
             Self::RunNotFound => StatusCode::NOT_FOUND,
             Self::RunUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
@@ -59,6 +62,13 @@ impl AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
+        if let Self::RevealRisk(risk) = self {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({"error": "reveal_risk_not_acknowledged", "reveal_risk": risk})),
+            )
+                .into_response();
+        }
         if matches!(self, Self::RateLimited | Self::TransferRateLimited) {
             let code = if matches!(self, Self::TransferRateLimited) {
                 "transfer_rate_limited"

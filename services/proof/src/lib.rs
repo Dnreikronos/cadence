@@ -26,6 +26,7 @@ pub mod solana {
     pub mod batch;
     pub mod client;
     pub mod confidential;
+    pub mod reveal_risk;
     pub mod token_client;
     pub mod token_wrap;
     pub mod v0;
