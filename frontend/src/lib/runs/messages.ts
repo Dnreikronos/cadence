@@ -1,6 +1,11 @@
 import { ApiError, isApiError, messageFor } from "@/lib/api/errors"
 import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
 import { WalletUnavailableError } from "@/lib/wallet/types"
+import {
+  ResponseMismatchError,
+  SentPaymentError,
+  isSignatureRejection,
+} from "./errors"
 
 // Copy for the run screens, keyed by the contract's codes. Codes the shared catalog
 // does not cover are added here; anything else falls through to `messageFor`. A message
@@ -15,8 +20,10 @@ const overrides: Record<string, string> = {
   person_removed: "That person was removed, so they can't be invited.",
   recipient_not_activated:
     "Someone on this run hasn't set up their account yet. Refresh the list and try again.",
+  // Each payment's proof is built before the one ahead of it lands, so later payments
+  // can find the balance changed. A retry builds a fresh one.
   invalid_confidential_state:
-    "Your private balance is lower than this run needs. Deposit more and try again.",
+    "The balance changed while signing. Retry this payment.",
   transaction_failed: "The network rejected this payment. You can retry it.",
 }
 
@@ -33,40 +40,68 @@ export function failureCodeMessage(code: string | null) {
   return runMessage(new ApiError(409, code))
 }
 
+// `expired` is not defined by the draft contract: it is shown, but a retry is only
+// allowed once the service has confirmed that the payment did not land.
 export const expiredMessage =
-  "This payment expired before the network confirmed it. Retry to prepare a new one."
+  "This payment expired before it was confirmed. You can retry it only if the service confirms it didn't land; if it won't, check your payments and balance first."
+
+export const sentWithSignatureMessage =
+  "This payment was sent but isn't confirmed yet. Check again; don't pay this person another way until it is, or they could be paid twice."
+
+export const sentWithoutSignatureMessage =
+  "This payment may have been sent. Check the company payments and balance before doing anything."
 
 export type Failure = {
   message: string
-  // The transaction reached the network but was not confirmed in time, so a new one
-  // could pay twice. It can only be checked again.
-  stalled: boolean
+  // The transaction may have reached the network: never prepare another for it.
+  sent: boolean
+  // Known once the network took it, so it can be asked about again.
   signature?: string
 }
 
 export function describeFailure(error: unknown): Failure {
-  if (error instanceof ConfirmTimeoutError) {
-    return {
-      message:
-        "The network is taking longer than usual to confirm this payment. Check again in a moment before retrying.",
-      stalled: true,
-      signature: error.signature,
-    }
+  if (
+    error instanceof SentPaymentError ||
+    error instanceof ConfirmTimeoutError
+  ) {
+    const signature =
+      error instanceof SentPaymentError
+        ? (error.signature ??
+          (error.original instanceof ConfirmTimeoutError
+            ? error.original.signature
+            : null))
+        : error.signature
+    return signature
+      ? { message: sentWithSignatureMessage, sent: true, signature }
+      : { message: sentWithoutSignatureMessage, sent: true }
   }
   if (error instanceof WalletUnavailableError) {
     return {
       message: "Signing isn't available in this environment yet.",
-      stalled: false,
+      sent: false,
     }
   }
   if (error instanceof UnexpectedSignerError) {
     return {
       message:
         "This payment needs a different wallet than the one you're signed in with.",
-      stalled: false,
+      sent: false,
     }
   }
-  return { message: runMessage(error), stalled: false }
+  if (error instanceof ResponseMismatchError) {
+    return {
+      message:
+        "Cadence answered for a different payment than this one, so nothing was signed.",
+      sent: false,
+    }
+  }
+  if (isSignatureRejection(error)) {
+    return {
+      message: "You cancelled the signature. Nothing was sent.",
+      sent: false,
+    }
+  }
+  return { message: runMessage(error), sent: false }
 }
 
 export function inviteMessage(error: unknown) {

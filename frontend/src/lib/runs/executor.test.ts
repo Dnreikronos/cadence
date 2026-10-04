@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest"
-import { ApiError } from "@/lib/api/errors"
+import { ApiError, ContractError } from "@/lib/api/errors"
 import type { Receipt, RunCreated, RunPaymentPrepared } from "@/lib/api/schemas"
 import { ConfirmTimeoutError } from "@/lib/api/sign"
+import { ResponseMismatchError, SentPaymentError } from "./errors"
 import {
   payOne,
   paySequence,
@@ -44,13 +45,15 @@ function harness(
     retry?: (paymentId: string) => Promise<RunPaymentPrepared>
     signal?: AbortSignal
     onSign?: () => void
+    // Replaces the wallet, to fail at a chosen step.
+    sign?: RunContext["sign"]
   } = {},
 ) {
   const log: string[] = []
   let active = 0
   let overlap = 0
   let sent = 0
-  const sign: RunContext["sign"] = async (
+  const defaultSign: RunContext["sign"] = async (
     _prepared,
     confirm,
     onStep,
@@ -72,6 +75,8 @@ function harness(
       active -= 1
     }
   }
+  const sign = options.sign ?? defaultSign
+  const failures: unknown[] = []
   const api: RunApi = {
     confirmPayment: vi.fn(async (_run, paymentId, signature) => {
       log.push(`confirm ${numberOf(paymentId)} ${signature}`)
@@ -91,7 +96,10 @@ function harness(
       log.push(`submitted ${numberOf(id)} ${signature}`),
     ),
     confirmed: vi.fn((id: string) => log.push(`confirmed ${numberOf(id)}`)),
-    failed: vi.fn((id: string) => log.push(`failed ${numberOf(id)}`)),
+    failed: vi.fn((id: string, error: unknown) => {
+      log.push(`failed ${numberOf(id)}`)
+      failures.push(error)
+    }),
   }
   const context: RunContext = {
     runId: RUN,
@@ -100,7 +108,7 @@ function harness(
     events,
     signal: options.signal,
   }
-  return { context, api, events, log, maxOverlap: () => overlap }
+  return { context, api, events, log, failures, maxOverlap: () => overlap }
 }
 
 const created = (count: number): RunCreated => ({
@@ -242,23 +250,18 @@ describe("recheckOne", () => {
     expect(events.submitted).not.toHaveBeenCalled()
   })
 
-  it("keeps waiting, with the signature, while the network hasn't finalized", async () => {
-    const { context, events } = harness({
+  it("keeps the payment as sent, with its signature, while the network hasn't finalized", async () => {
+    const { context, failures } = harness({
       confirm: async () => {
         throw new ApiError(409, "transaction_not_finalized")
       },
     })
     await recheckOne(context, guid(1), "sig-kept")
-    const [id, error] = events.failed.mock.calls[0] as unknown as [
-      string,
-      unknown,
-    ]
-    expect(id).toBe(guid(1))
-    expect(error).toBeInstanceOf(ConfirmTimeoutError)
-    expect((error as ConfirmTimeoutError).signature).toBe("sig-kept")
+    expect(failures[0]).toBeInstanceOf(SentPaymentError)
+    expect((failures[0] as SentPaymentError).signature).toBe("sig-kept")
   })
 
-  it("passes a final answer through unchanged", async () => {
+  it("passes the network's own rejection through unchanged", async () => {
     const rejected = new ApiError(409, "transaction_failed")
     const { context, events } = harness({
       confirm: async () => {
@@ -267,5 +270,182 @@ describe("recheckOne", () => {
     })
     await recheckOne(context, guid(1), "sig-kept")
     expect(events.failed).toHaveBeenCalledWith(guid(1), rejected)
+  })
+})
+
+// A wallet that reaches a step and then fails there, as the real `signAndConfirm`
+// reports its steps (signing, submitting, confirming).
+function failingAt(
+  step: "signing" | "submitting" | "confirming",
+  error: unknown,
+  options: { signature?: string } = {},
+): RunContext["sign"] {
+  return async (_prepared, _confirm, onStep, extra = {}) => {
+    onStep?.("signing")
+    if (step === "signing") throw error
+    onStep?.("submitting")
+    if (step === "submitting") throw error
+    if (options.signature) extra.onSubmitted?.(options.signature)
+    onStep?.("confirming")
+    throw error
+  }
+}
+
+describe("a payment that may have been sent is never replaced", () => {
+  it("treats a submit that throws after the broadcast as sent, with nothing to ask about", async () => {
+    const error = new Error("socket closed")
+    const { context, failures, api } = harness({
+      sign: failingAt("submitting", error),
+    })
+    await payOne(context, prepared(1))
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).toBeInstanceOf(SentPaymentError)
+    expect(failures[0]).toMatchObject({ original: error, signature: null })
+    expect(api.retryPayment).not.toHaveBeenCalled()
+  })
+
+  it("treats a confirm that answers 500 as sent, with its signature", async () => {
+    const error = new ApiError(500, "internal_error")
+    const { context, failures } = harness({
+      sign: failingAt("confirming", error, { signature: "sig-9" }),
+    })
+    await payOne(context, prepared(1))
+    expect(failures[0]).toBeInstanceOf(SentPaymentError)
+    expect(failures[0]).toMatchObject({ original: error, signature: "sig-9" })
+  })
+
+  it.each([
+    ["401", new ApiError(401, "authentication_required")],
+    ["400", new ApiError(400, "invalid_request")],
+    ["a transaction mismatch", new ApiError(409, "transaction_mismatch")],
+    ["a contract error", new ContractError("/runs/x/confirm", "drifted")],
+    ["a plain error", new Error("boom")],
+  ])("treats a confirm failing with %s as sent", async (_name, error) => {
+    const { context, failures } = harness({
+      sign: failingAt("confirming", error, { signature: "sig-9" }),
+    })
+    await payOne(context, prepared(1))
+    expect(failures[0]).toBeInstanceOf(SentPaymentError)
+    expect((failures[0] as SentPaymentError).signature).toBe("sig-9")
+  })
+
+  it("treats a confirm timeout as sent and takes the signature from it", async () => {
+    const { context, failures } = harness({
+      sign: failingAt("confirming", new ConfirmTimeoutError("sig-t")),
+    })
+    await payOne(context, prepared(1))
+    expect(failures[0]).toBeInstanceOf(SentPaymentError)
+    expect((failures[0] as SentPaymentError).signature).toBe("sig-t")
+  })
+
+  it("wraps a failure that comes through the real confirm callback", async () => {
+    const { context, failures } = harness({
+      confirm: async () => {
+        throw new ApiError(500, "internal_error")
+      },
+    })
+    await payOne(context, prepared(1))
+    expect(failures[0]).toBeInstanceOf(SentPaymentError)
+    expect((failures[0] as SentPaymentError).signature).toBe("sig-1")
+  })
+
+  it("lets the network's own rejection through as a plain failure: it did not land", async () => {
+    const rejected = new ApiError(409, "transaction_failed")
+    const { context, failures } = harness({
+      sign: failingAt("confirming", rejected, { signature: "sig-9" }),
+    })
+    await payOne(context, prepared(1))
+    expect(failures[0]).toBe(rejected)
+  })
+
+  it.each([
+    [
+      "the person rejecting the signature",
+      Object.assign(new Error("denied"), { name: "UserRejectedRequestError" }),
+    ],
+    ["the wallet failing to sign", new Error("signer crashed")],
+  ])("leaves %s as a plain failure: nothing was sent", async (_name, error) => {
+    const { context, failures, api } = harness({
+      sign: failingAt("signing", error),
+    })
+    await payOne(context, prepared(1))
+    expect(failures[0]).toBe(error)
+    expect(failures[0]).not.toBeInstanceOf(SentPaymentError)
+    expect(api.confirmPayment).not.toHaveBeenCalled()
+  })
+
+  it("says nothing when the page is left in the middle of the confirm", async () => {
+    const stop = new AbortController()
+    const { context, events } = harness({
+      signal: stop.signal,
+      confirm: () =>
+        new Promise<Receipt>((_resolve, reject) => {
+          stop.signal.addEventListener("abort", () =>
+            reject(stop.signal.reason),
+          )
+          stop.abort()
+        }),
+    })
+    await payOne(context, prepared(1))
+    expect(events.failed).not.toHaveBeenCalled()
+    expect(events.confirmed).not.toHaveBeenCalled()
+  })
+
+  it("keeps going with the next payment, and never retries the sent one by itself", async () => {
+    const { context, events, api, failures } = harness({
+      confirm: async (paymentId) => {
+        if (numberOf(paymentId) === 1) throw new ApiError(500, "internal_error")
+        return receipt
+      },
+    })
+    await paySequence(context, created(3).payments)
+    expect(events.confirmed.mock.calls.map(([id]) => numberOf(id))).toEqual([
+      2, 3,
+    ])
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).toBeInstanceOf(SentPaymentError)
+    expect(api.retryPayment).not.toHaveBeenCalled()
+  })
+
+  it("never prepares anything when a sent payment is checked again, whatever the answer", async () => {
+    for (const error of [
+      new ApiError(500, "internal_error"),
+      new ApiError(401, "authentication_required"),
+      new ContractError("/x", "drifted"),
+      new ApiError(409, "transaction_not_finalized"),
+    ]) {
+      const { context, api, failures } = harness({
+        confirm: async () => {
+          throw error
+        },
+      })
+      await recheckOne(context, guid(1), "sig-kept")
+      expect(failures[0]).toBeInstanceOf(SentPaymentError)
+      expect(failures[0]).toMatchObject({ signature: "sig-kept" })
+      expect(api.retryPayment).not.toHaveBeenCalled()
+    }
+  })
+
+  it("lets the network rejecting a rechecked payment end it as failed", async () => {
+    const rejected = new ApiError(409, "transaction_failed")
+    const { context, failures } = harness({
+      confirm: async () => {
+        throw rejected
+      },
+    })
+    await recheckOne(context, guid(1), "sig-kept")
+    expect(failures[0]).toBe(rejected)
+  })
+})
+
+describe("what comes back from a retry", () => {
+  it("is refused, and nothing is signed, when it is for another payment", async () => {
+    const { context, events, api, failures } = harness({
+      retry: async () => prepared(3),
+    })
+    await retryOne(context, guid(2))
+    expect(failures[0]).toBeInstanceOf(ResponseMismatchError)
+    expect(events.submitted).not.toHaveBeenCalled()
+    expect(api.confirmPayment).not.toHaveBeenCalled()
   })
 })
