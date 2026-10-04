@@ -1,12 +1,19 @@
 import { describe, expect, it, vi } from "vitest"
-import { ApiError } from "@/lib/api/errors"
+import { ApiError, ContractError } from "@/lib/api/errors"
 import type { Receipt, UnwrapPrepared } from "@/lib/api/schemas"
-import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import {
+  ConfirmTimeoutError,
+  UnexpectedSignerError,
+  signAndConfirm,
+} from "@/lib/api/sign"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
+  SentWithdrawalError,
   failureOf,
+  heldBy,
   initialWithdraw,
   runWithdraw,
+  sentMessage,
   withdrawReducer,
   type WithdrawDeps,
   type WithdrawEvent,
@@ -34,7 +41,8 @@ const needsAck = () => new ApiError(409, "reveal_risk_not_acknowledged")
 function deps(overrides: Partial<WithdrawDeps> = {}): WithdrawDeps {
   return {
     prepare: vi.fn(async () => prepared("none")),
-    signAndConfirm: vi.fn(async (_p, confirm) => {
+    signAndConfirm: vi.fn(async (_p, confirm, _onStep, onSubmitted) => {
+      onSubmitted("sig")
       return confirm("sig")
     }),
     confirm: vi.fn(async () => receipt),
@@ -111,12 +119,13 @@ describe("runWithdraw", () => {
     expect(d.signAndConfirm).not.toHaveBeenCalled()
   })
 
-  it("forwards signing steps and surfaces a failed confirm", async () => {
+  it("forwards signing steps and passes on a transaction the network rejected as it is", async () => {
     const failure = new ApiError(409, "transaction_failed")
     const d = deps({
       signAndConfirm: vi.fn(async (_p, _c, onStep) => {
         onStep("signing")
         onStep("submitting")
+        onStep("confirming")
         throw failure
       }),
     })
@@ -124,7 +133,122 @@ describe("runWithdraw", () => {
     await expect(
       runWithdraw(d, { ...input, onStep: (step) => steps.push(step) }),
     ).rejects.toBe(failure)
-    expect(steps).toEqual(["signing", "submitting"])
+    expect(steps).toEqual(["signing", "submitting", "confirming"])
+  })
+
+  describe("a failure once the transaction may be on the network", () => {
+    const failingAt = (
+      steps: ("signing" | "submitting" | "confirming")[],
+      error: unknown,
+      submitted?: string,
+    ) =>
+      deps({
+        signAndConfirm: vi.fn(async (_p, _c, onStep, onSubmitted) => {
+          for (const step of steps) onStep(step)
+          if (submitted) onSubmitted(submitted)
+          throw error
+        }),
+      })
+
+    it("is a sent withdrawal when submit throws after the broadcast", async () => {
+      const d = failingAt(
+        ["signing", "submitting"],
+        new Error("socket hang up"),
+      )
+      const thrown = await runWithdraw(d, input).catch((e: unknown) => e)
+      expect(thrown).toBeInstanceOf(SentWithdrawalError)
+      expect(failureOf(thrown)).toMatchObject({
+        sent: true,
+        retryable: false,
+        message: sentMessage,
+        signature: null,
+      })
+    })
+
+    it("is a sent withdrawal when the confirm answer cannot be read, and keeps the signature", async () => {
+      const d = failingAt(
+        ["signing", "submitting", "confirming"],
+        new ContractError("/unwrap/confirm", "bad shape"),
+        "sig",
+      )
+      const thrown = await runWithdraw(d, input).catch((e: unknown) => e)
+      expect(thrown).toBeInstanceOf(SentWithdrawalError)
+      expect(failureOf(thrown)).toMatchObject({
+        sent: true,
+        retryable: false,
+        signature: "sig",
+      })
+    })
+
+    it("is a sent withdrawal on a timeout, with the signature to look up", async () => {
+      const d = failingAt(
+        ["signing", "submitting", "confirming"],
+        new ConfirmTimeoutError("timed-out-sig"),
+        "timed-out-sig",
+      )
+      const thrown = await runWithdraw(d, input).catch((e: unknown) => e)
+      expect(failureOf(thrown)).toMatchObject({
+        sent: true,
+        retryable: false,
+        refreshBalance: true,
+        signature: "timed-out-sig",
+      })
+    })
+
+    it("is a sent withdrawal on a busy service while confirming", async () => {
+      const d = failingAt(
+        ["signing", "submitting", "confirming"],
+        new ApiError(503, "service_unavailable"),
+      )
+      const thrown = await runWithdraw(d, input).catch((e: unknown) => e)
+      // Retryable for any other call, but never for a withdrawal that may be out.
+      expect(failureOf(thrown)).toMatchObject({ sent: true, retryable: false })
+    })
+
+    it("is not sent when it fails while signing", async () => {
+      const error = new Error("signer crashed")
+      const d = failingAt(["signing"], error)
+      await expect(runWithdraw(d, input)).rejects.toBe(error)
+    })
+  })
+
+  it("sends nothing and offers a retry when the person cancels the signature", async () => {
+    const submit = vi.fn(async () => "sig")
+    const confirm = vi.fn(async () => receipt)
+    const rejecting = Object.assign(new Error("User rejected the request"), {
+      name: "UserRejectedRequestError",
+      code: 4001,
+    })
+    const d: WithdrawDeps = {
+      prepare: async () => prepared("none"),
+      confirm,
+      signAndConfirm: (p, c, onStep, onSubmitted) =>
+        signAndConfirm(p, {
+          signer: {
+            address: wallet,
+            signTransaction: async () => {
+              throw rejecting
+            },
+          },
+          submit,
+          confirm: c,
+          onStep,
+          onSubmitted,
+        }),
+    }
+
+    const thrown = await runWithdraw(d, input).catch((e: unknown) => e)
+
+    expect(thrown).toBe(rejecting)
+    expect(failureOf(thrown)).toEqual({
+      message: "You cancelled the signature. Nothing was sent.",
+      retryable: true,
+      refreshBalance: false,
+      sent: false,
+      signature: null,
+    })
+    expect(submit).not.toHaveBeenCalled()
+    expect(confirm).not.toHaveBeenCalled()
   })
 })
 
@@ -149,6 +273,7 @@ describe("withdrawReducer", () => {
       stage: "needs-acknowledgement",
       amount: "100",
       acknowledged: false,
+      held: null,
     })
   })
 
@@ -236,6 +361,7 @@ describe("withdrawReducer", () => {
       amount: "100",
       level: "near",
       signature: "sig",
+      held: null,
     })
   })
 
@@ -246,7 +372,13 @@ describe("withdrawReducer", () => {
     )
   })
 
-  const failure = { message: "no", retryable: true, refreshBalance: false }
+  const failure = {
+    message: "no",
+    retryable: true,
+    refreshBalance: false,
+    sent: false,
+    signature: null,
+  }
 
   it("keeps an agreed amount agreed across a failed attempt, and no other", () => {
     const failed = run(
@@ -275,12 +407,80 @@ describe("withdrawReducer", () => {
     )
   })
 
+  describe("a withdrawal that may already have gone through", () => {
+    const sent = {
+      message: sentMessage,
+      retryable: true, // even if a failure said so, the reducer overrules it
+      refreshBalance: true,
+      sent: true,
+      signature: "sig",
+    }
+    const failedSent = (amount = "100") =>
+      run([{ type: "failed", failure: sent }], submitted(amount))
+
+    it("is never retryable, and holds the amount with its signature", () => {
+      expect(failedSent()).toMatchObject({
+        stage: "failed",
+        failure: { sent: true, retryable: false },
+        held: { amount: "100", signature: "sig" },
+      })
+    })
+
+    it("refuses the same amount again, and allows another", () => {
+      const state = failedSent()
+      expect(withdrawReducer(state, { type: "submit", amount: "100" })).toBe(
+        state,
+      )
+      expect(withdrawReducer(state, { type: "submit", amount: "101" })).toEqual(
+        expect.objectContaining({ stage: "working", amount: "101" }),
+      )
+    })
+
+    it("still refuses it after the field is edited and typed back", () => {
+      const edited = withdrawReducer(failedSent(), { type: "amount-changed" })
+      expect(edited).toMatchObject({
+        stage: "form",
+        held: { amount: "100" },
+      })
+      expect(withdrawReducer(edited, { type: "submit", amount: "100" })).toBe(
+        edited,
+      )
+      expect(
+        withdrawReducer(edited, { type: "submit", amount: "100.5" }),
+      ).toEqual(expect.objectContaining({ stage: "working" }))
+    })
+
+    it("keeps holding it through another amount's withdrawal", () => {
+      const done = run(
+        [
+          { type: "submit", amount: "200" },
+          { type: "succeeded", level: "none", signature: "other" },
+          { type: "reset" },
+        ],
+        failedSent(),
+      )
+      expect(done).toMatchObject({ stage: "form", held: { amount: "100" } })
+      expect(withdrawReducer(done, { type: "submit", amount: "100" })).toBe(
+        done,
+      )
+    })
+
+    it("does not hold anything for an ordinary failure", () => {
+      const state = run([{ type: "failed", failure }], submitted())
+      expect(state.held).toBeNull()
+      expect(withdrawReducer(state, { type: "submit", amount: "100" })).toEqual(
+        expect.objectContaining({ stage: "working" }),
+      )
+    })
+  })
+
   it("ignores late events once the withdrawal is over", () => {
     const done: WithdrawState = {
       stage: "done",
       amount: "100",
       level: "none",
       signature: "sig",
+      held: null,
     }
     for (const event of [
       { type: "step", step: "signing" },
@@ -291,6 +491,34 @@ describe("withdrawReducer", () => {
       expect(withdrawReducer(done, event)).toBe(done)
     }
     expect(withdrawReducer(done, { type: "reset" })).toEqual(initialWithdraw)
+  })
+})
+
+describe("heldBy", () => {
+  it("holds the amount of a withdrawal that may have gone out, with its signature", () => {
+    expect(
+      heldBy(new SentWithdrawalError(new Error("x"), "sig"), "100"),
+    ).toEqual({ amount: "100", signature: "sig" })
+    expect(heldBy(new ConfirmTimeoutError("t"), "5")).toEqual({
+      amount: "5",
+      signature: "t",
+    })
+  })
+
+  it("holds nothing for a failure that sent nothing, or without an amount", () => {
+    expect(heldBy(new ApiError(503, "service_unavailable"), "100")).toBeNull()
+    expect(heldBy(new ApiError(409, "transaction_failed"), "100")).toBeNull()
+    expect(
+      heldBy(new SentWithdrawalError(new Error("x"), null), undefined),
+    ).toBeNull()
+  })
+
+  it("is what a screen opened later is given, so the amount stays blocked", () => {
+    const held = heldBy(new SentWithdrawalError(new Error("x"), "sig"), "100")!
+    const reopened = withdrawReducer(initialWithdraw, { type: "hold", held })
+    expect(withdrawReducer(reopened, { type: "submit", amount: "100" })).toBe(
+      reopened,
+    )
   })
 })
 
@@ -310,6 +538,8 @@ describe("failureOf", () => {
       message: "The account balance changed. Refresh and try again.",
       retryable: false,
       refreshBalance: true,
+      sent: false,
+      signature: null,
     })
   })
 
@@ -321,11 +551,34 @@ describe("failureOf", () => {
   })
 
   it("never offers to withdraw again after the transaction was sent", () => {
-    expect(failureOf(new ConfirmTimeoutError("sig"))).toMatchObject({
+    expect(failureOf(new ConfirmTimeoutError("sig"))).toEqual({
       retryable: false,
       refreshBalance: true,
-      message: expect.stringContaining("hasn't confirmed"),
+      sent: true,
+      signature: "sig",
+      message: expect.stringContaining("may already have gone through"),
     })
+  })
+
+  it("does not offer a retry for an answer it cannot read", () => {
+    expect(failureOf(new ContractError("/unwrap", "bad shape"))).toMatchObject({
+      retryable: false,
+      sent: false,
+    })
+  })
+
+  it("reads a cancelled signature from the usual signs", () => {
+    for (const error of [
+      Object.assign(new Error("x"), { name: "NotAllowedError" }),
+      Object.assign(new Error("x"), { code: 4001 }),
+      Object.assign(new Error("x"), { name: "SignatureRejectedError" }),
+    ]) {
+      expect(failureOf(error)).toMatchObject({
+        message: "You cancelled the signature. Nothing was sent.",
+        retryable: true,
+      })
+    }
+    expect(failureOf(new Error("x")).message).not.toMatch(/cancelled/)
   })
 
   it("does not leak a raw error message", () => {

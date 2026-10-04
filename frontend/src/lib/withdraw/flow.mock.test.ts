@@ -24,12 +24,13 @@ const api = createApiClient({
 
 const deps: WithdrawDeps = {
   prepare: (request) => api.unwrap.prepare(request),
-  signAndConfirm: (prepared, confirm, onStep) =>
+  signAndConfirm: (prepared, confirm, onStep, onSubmitted) =>
     signAndConfirm(prepared, {
       signer: mockSigner(ME_WALLET),
       submit: async () => "TestSignature".padEnd(64, "1"),
       confirm,
       onStep,
+      onSubmitted,
       sleep: async () => {},
     }),
   confirm: (request) => api.unwrap.confirm(request),
