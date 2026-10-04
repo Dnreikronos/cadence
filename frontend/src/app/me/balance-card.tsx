@@ -1,28 +1,33 @@
 "use client"
 
+import { useEffect, useRef } from "react"
 import Link from "next/link"
 import { ArrowUpFromLine, Loader2 } from "lucide-react"
 import { useViewerScope } from "@/components/app/viewer-scope"
-import { AmountDisplay } from "@/components/ui/amount-display"
 import { buttonVariants } from "@/components/ui/button"
 import { ErrorState } from "@/components/ui/error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
+import { balanceReaders } from "@/lib/me/copy"
 import { applyPendingMessage } from "@/lib/me/apply-pending"
-import { unitsToUsd } from "@/lib/money"
+import { lastApplyMessage } from "@/lib/me/last-apply"
+import { useMyBalance } from "@/lib/queries/balance"
 import { useApplyPending } from "@/lib/queries/me"
-import { useMyBalance } from "@/lib/queries/withdraw"
-import { useWallet } from "@/lib/wallet/context"
-import type { SignStep } from "@/lib/api/sign"
-
-const stepLabels: Record<SignStep, string> = {
-  signing: "Signing…",
-  submitting: "Sending…",
-  confirming: "Confirming…",
-}
+import { Units } from "./units"
 
 export function BalanceCard() {
   const balance = useMyBalance(useViewerScope())
+  const apply = useApplyPending(balance.data)
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  const alertRef = useRef<HTMLDivElement>(null)
+
+  // The button that was pressed is disabled or gone by now: keep the keyboard here.
+  useEffect(() => {
+    if (apply.succeeded) headingRef.current?.focus()
+  }, [apply.succeeded])
+  useEffect(() => {
+    if (apply.error) alertRef.current?.focus()
+  }, [apply.error])
 
   if (!balance.data && !balance.isError) {
     return (
@@ -46,6 +51,13 @@ export function BalanceCard() {
 
   const { available, pending } = balance.data
   const hasPending = BigInt(pending) > 0n
+  const { ui } = apply
+  const note =
+    ui.status ??
+    lastApplyMessage(apply.last) ??
+    (apply.settle === "timed-out"
+      ? "Your balance hasn't refreshed yet. If it still shows pending credits, you can apply again."
+      : null)
 
   return (
     <section
@@ -56,21 +68,17 @@ export function BalanceCard() {
         <div className="min-w-0">
           <h2
             id="balance-heading"
-            className="flex items-center gap-1.5 text-label text-ink-muted uppercase"
+            ref={headingRef}
+            tabIndex={-1}
+            className="flex items-center gap-1.5 text-label text-ink-muted uppercase outline-none"
           >
             Available
             <WhoCanSee viewerRole="recipient" hasAuditor={undefined} />
           </h2>
           <p className="mt-1.5">
-            <AmountDisplay
-              amount={unitsToUsd(available)}
-              className="text-amount"
-            />
+            <Units units={available} className="text-amount" />
           </p>
-          <p className="mt-1 text-caption text-ink-muted">
-            Ready to withdraw. It is encrypted on-chain, but the company that
-            paid you and Cadence can read it.
-          </p>
+          <p className="mt-1 text-caption text-ink-muted">{balanceReaders}</p>
         </div>
         <Link
           href="/me/withdraw"
@@ -81,68 +89,100 @@ export function BalanceCard() {
         </Link>
       </div>
 
-      {hasPending ? (
-        <PendingPanel pending={pending} />
+      {ui.visible ? (
+        <div className="mt-5 space-y-3 border-t border-line pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              {hasPending ? (
+                <>
+                  <p className="flex items-center gap-1.5 text-ui font-medium text-ink">
+                    <Units units={pending} />
+                    pending
+                  </p>
+                  <p className="mt-0.5 max-w-prose text-caption/normal text-ink-muted">
+                    Incoming payments wait here until you apply them. Applying
+                    is one transaction your wallet signs, and it adds them to
+                    what you can withdraw.
+                  </p>
+                </>
+              ) : (
+                <p className="text-ui text-ink-muted">Nothing pending.</p>
+              )}
+            </div>
+            {hasPending && (
+              <button
+                type="button"
+                disabled={!ui.canApply}
+                onClick={apply.apply}
+                className={buttonVariants()}
+              >
+                {!ui.canApply && ui.status && (
+                  <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+                )}
+                {ui.label}
+              </button>
+            )}
+          </div>
+
+          <p role="status" className="text-caption text-ink-muted">
+            {note}
+          </p>
+
+          {(ui.sentFailure ||
+            ui.retryable ||
+            apply.lock === "check-failed") && (
+            <div
+              role="alert"
+              ref={alertRef}
+              tabIndex={-1}
+              className="space-y-2 text-ui text-danger-fg outline-none"
+            >
+              <p>
+                {apply.error
+                  ? applyPendingMessage(apply.error)
+                  : "We couldn't check your last update. Try again in a moment."}
+              </p>
+              {(ui.sentFailure || apply.lock === "check-failed") && (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void apply.checkBalance()}
+                    className={buttonVariants({
+                      variant: "secondary",
+                      size: "sm",
+                    })}
+                  >
+                    Check my balance
+                  </button>
+                  {apply.lock === "check-failed" && (
+                    <button
+                      type="button"
+                      onClick={apply.checkAgain}
+                      className={buttonVariants({
+                        variant: "secondary",
+                        size: "sm",
+                      })}
+                    >
+                      Check again
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {!apply.walletReady && !apply.walletLoading && hasPending && (
+            <p className="text-caption/normal text-ink-muted">
+              Your wallet isn&apos;t connected in this version, so pending
+              payments can&apos;t be applied yet.
+            </p>
+          )}
+        </div>
       ) : (
         <p className="mt-5 border-t border-line pt-4 text-ui text-ink-muted">
           Nothing pending. New payments show up here first.
         </p>
       )}
     </section>
-  )
-}
-
-function PendingPanel({ pending }: { pending: string }) {
-  const apply = useApplyPending()
-  const wallet = useWallet()
-  const blocked = wallet.status !== "ready"
-  const busy = apply.isPending
-
-  return (
-    <div className="mt-5 space-y-3 border-t border-line pt-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <p className="flex items-center gap-1.5 text-ui font-medium text-ink">
-            <AmountDisplay amount={unitsToUsd(pending)} />
-            pending
-          </p>
-          <p className="mt-0.5 max-w-prose text-caption/normal text-ink-muted">
-            Incoming payments wait here until you apply them. Applying is one
-            transaction your wallet signs, and it adds them to what you can
-            withdraw.
-          </p>
-        </div>
-        <button
-          type="button"
-          disabled={busy || blocked}
-          onClick={() => apply.mutate()}
-          className={buttonVariants()}
-        >
-          {busy && (
-            <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
-          )}
-          {busy
-            ? apply.step
-              ? stepLabels[apply.step]
-              : "Working…"
-            : wallet.loading
-              ? "Preparing wallet…"
-              : apply.isError
-                ? "Try again"
-                : "Apply pending"}
-        </button>
-      </div>
-      {apply.isError && (
-        <p role="alert" className="text-ui text-danger-fg">
-          {applyPendingMessage(apply.error)}
-        </p>
-      )}
-      {blocked && !wallet.loading && (
-        <p className="text-caption/normal text-ink-muted">
-          Your wallet isn&apos;t connected in this version, so pending payments
-          can&apos;t be applied yet.
-        </p>
-      )}
-    </div>
   )
 }

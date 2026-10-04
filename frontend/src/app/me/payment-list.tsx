@@ -1,8 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { ChevronRight } from "lucide-react"
-import { AmountDisplay } from "@/components/ui/amount-display"
 import { AvatarPerson } from "@/components/ui/avatar-person"
 import { Skeleton } from "@/components/ui/skeleton"
 import { StatusPill } from "@/components/ui/status-pill"
@@ -10,16 +9,33 @@ import { TransparentBadge } from "@/components/ui/transparent-badge"
 import type { PaymentItem } from "@/lib/api/schemas"
 import { initialsOf } from "@/lib/me/payments"
 import { formatPaidDay } from "@/lib/receipts/receipt"
-import { unitsToUsd } from "@/lib/money"
 import { ReceiptDialog } from "@/components/app/receipt-dialog"
+import { Units } from "./units"
 
 // Payments the recipient received, each opening its receipt. Used by the home
 // page (latest few) and the history page (all of them).
-export function PaymentList({ items }: { items: PaymentItem[] }) {
-  const [open, setOpen] = useState<PaymentItem | null>(null)
+export function PaymentList({
+  items,
+  listRef,
+}: {
+  items: PaymentItem[]
+  // For a screen that moves focus to the list, like after the last page loads.
+  listRef?: React.Ref<HTMLUListElement>
+}) {
+  // The id, not the payment: a refetch that confirms a pending payment updates
+  // the receipt that is open.
+  const [openId, setOpenId] = useState<string | null>(null)
+  const open = useMemo(
+    () => items.find((payment) => payment.payment_id === openId) ?? null,
+    [items, openId],
+  )
   return (
     <>
-      <ul className="overflow-hidden rounded-xl border border-line bg-surface">
+      <ul
+        ref={listRef}
+        tabIndex={-1}
+        className="overflow-hidden rounded-xl border border-line bg-surface outline-none"
+      >
         {items.map((payment) => (
           <li
             key={payment.payment_id}
@@ -28,7 +44,7 @@ export function PaymentList({ items }: { items: PaymentItem[] }) {
             <button
               type="button"
               aria-haspopup="dialog"
-              onClick={() => setOpen(payment)}
+              onClick={() => setOpenId(payment.payment_id)}
               className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors duration-150 hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink"
             >
               <AvatarPerson
@@ -47,10 +63,7 @@ export function PaymentList({ items }: { items: PaymentItem[] }) {
                 </time>
               </span>
               <span className="flex shrink-0 flex-col items-end gap-1">
-                <AmountDisplay
-                  amount={unitsToUsd(payment.amount)}
-                  className="text-ui"
-                />
+                <Units units={payment.amount} className="text-ui" />
                 <span className="flex flex-wrap justify-end gap-1">
                   <StatusPill status={payment.status} />
                   {payment.transparent && <TransparentBadge />}
@@ -68,7 +81,7 @@ export function PaymentList({ items }: { items: PaymentItem[] }) {
       <ReceiptDialog
         role="recipient"
         payment={open}
-        onClose={() => setOpen(null)}
+        onClose={() => setOpenId(null)}
       />
     </>
   )

@@ -1,12 +1,15 @@
 "use client"
 
+import { useRef, useState } from "react"
 import { Download, Loader2, Wallet } from "lucide-react"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
 import { ErrorState } from "@/components/ui/error-state"
-import { messageFor } from "@/lib/api/errors"
-import { useExportPayments, usePaymentHistory } from "@/lib/queries/me"
 import { WhoCanSee } from "@/components/ui/who-can-see"
+import { messageFor } from "@/lib/api/errors"
+import { exportReaders } from "@/lib/me/copy"
+import { historyView, loadedMoreMessage } from "@/lib/me/history"
+import { useExportPayments, usePaymentHistory } from "@/lib/queries/me"
 import { PaymentList, PaymentListSkeleton } from "../payment-list"
 
 export function HistoryScreen() {
@@ -19,9 +22,12 @@ export function HistoryScreen() {
 
 function HistoryBody() {
   const history = usePaymentHistory()
+  const listRef = useRef<HTMLUListElement>(null)
+  const [announcement, setAnnouncement] = useState("")
+  const view = historyView(history)
 
-  if (!history.data && !history.isError) return <PaymentListSkeleton rows={5} />
-  if (!history.data) {
+  if (view.kind === "loading") return <PaymentListSkeleton rows={5} />
+  if (view.kind === "error") {
     return (
       <ErrorState
         title="Couldn't load your payments"
@@ -30,9 +36,7 @@ function HistoryBody() {
       />
     )
   }
-
-  const items = history.data.pages.flatMap((page) => page.items)
-  if (items.length === 0) {
+  if (view.kind === "empty") {
     return (
       <EmptyState
         icon={Wallet}
@@ -42,24 +46,52 @@ function HistoryBody() {
     )
   }
 
+  const { items } = view
+
+  async function loadMore() {
+    if (history.isFetchingNextPage) return
+    const before = items.length
+    const result = await history.fetchNextPage()
+    if (result.isError) return
+    const loaded = result.data
+      ? historyView({ data: result.data, isError: false })
+      : null
+    setAnnouncement(
+      loadedMoreMessage(
+        before,
+        loaded?.kind === "list" ? loaded.items.length : before,
+      ),
+    )
+    // The button is about to go: keep the keyboard on the list.
+    if (result.hasNextPage === false) listRef.current?.focus()
+  }
+
   return (
     <div className="space-y-4">
       <ExportBar />
-      <PaymentList items={items} />
+      <PaymentList items={items} listRef={listRef} />
+      <p role="status" className="sr-only">
+        {announcement}
+      </p>
       {history.isFetchNextPageError && (
         <ErrorState
           title="Couldn't load more payments"
           description={messageFor(history.error)}
-          onRetry={() => history.fetchNextPage()}
+          onRetry={() => void loadMore()}
         />
       )}
       {history.hasNextPage && !history.isFetchNextPageError && (
         <div className="flex justify-center">
+          {/* aria-disabled, not disabled: a disabled button drops the keyboard's place. */}
           <button
             type="button"
-            disabled={history.isFetchingNextPage}
-            onClick={() => history.fetchNextPage()}
-            className={buttonVariants({ variant: "secondary" })}
+            aria-disabled={history.isFetchingNextPage || undefined}
+            aria-busy={history.isFetchingNextPage || undefined}
+            onClick={() => void loadMore()}
+            className={buttonVariants({
+              variant: "secondary",
+              className: "aria-disabled:opacity-50",
+            })}
           >
             {history.isFetchingNextPage && (
               <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
@@ -81,6 +113,9 @@ function ExportBar() {
           <WhoCanSee
             viewerRole="recipient"
             hasAuditor={undefined}
+            label="Who can see the amounts in this file"
+            description={exportReaders}
+            note="Keep the file safe: it contains your amounts."
             className="-mt-1"
           />
           <span>
