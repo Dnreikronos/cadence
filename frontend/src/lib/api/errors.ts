@@ -93,6 +93,9 @@ const messages: Record<string, string> = {
   credit_counter_mismatch:
     "A payment arrived while we were updating your balance. Try again.",
   key_already_enrolled: "This wallet is already set up.",
+  auditor_already_invited: "That person already has an invite waiting.",
+  auditor_already_active: "That person is already an auditor.",
+  auditor_not_found: "That auditor is no longer on your list.",
   transaction_not_finalized: "Waiting for the network to confirm.",
   transaction_failed: "The network rejected the transaction.",
   transaction_mismatch: "The transaction changed after it was prepared.",

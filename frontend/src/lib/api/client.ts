@@ -14,7 +14,7 @@ export type ApiClientOptions = {
 export type RequestOptions = { signal?: AbortSignal }
 
 type CallOptions<T extends z.ZodType> = RequestOptions & {
-  method?: "GET" | "POST" | "PUT"
+  method?: "GET" | "POST" | "PUT" | "DELETE"
   // Evaluated inside the async call, so an invalid request rejects instead of throwing.
   body?: () => unknown
   query?: Record<string, string | number | undefined>
@@ -276,6 +276,9 @@ export function createApiClient({
           query,
           response: page(s.paymentItemSchema),
         }),
+      // Whether activation can resume where it stopped. No amount, no audit row.
+      status: (options: RequestOptions = {}) =>
+        call("/me/status", { ...options, response: s.accountStatusSchema }),
     },
 
     company: {
@@ -310,6 +313,28 @@ export function createApiClient({
           method: "POST",
           response: s.inviteSchema,
         }),
+      // Who may read every payment amount. Admin only; never carries an amount.
+      auditors: {
+        list: (query: PageQuery = {}, options: RequestOptions = {}) =>
+          call("/company/auditors", {
+            ...options,
+            query,
+            response: page(s.auditorSchema),
+          }),
+        invite: (email: string, options: RequestOptions = {}) =>
+          call("/company/auditors", {
+            ...options,
+            method: "POST",
+            body: body(s.inviteAuditorRequestSchema, { email }),
+            response: s.auditorSchema,
+          }),
+        revoke: async (auditorId: string, options: RequestOptions = {}) =>
+          call(`/company/auditors/${segment(auditorId)}`, {
+            ...options,
+            method: "DELETE",
+            response: s.auditorRevokedSchema,
+          }),
+      },
     },
 
     audit: {
@@ -322,6 +347,13 @@ export function createApiClient({
           ...options,
           query,
           response: page(s.paymentItemSchema),
+        }),
+      // Who decrypted what for the company the auditor audits, newest first.
+      accessLog: (query: PageQuery = {}, options: RequestOptions = {}) =>
+        call("/audit/access-log", {
+          ...options,
+          query,
+          response: page(s.accessLogItemSchema),
         }),
     },
 

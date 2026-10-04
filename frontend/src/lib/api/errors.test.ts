@@ -43,6 +43,9 @@ describe("messageFor", () => {
     "wrapped_mint_missing",
     "usdc_source_missing",
     "confidential_destination_unavailable",
+    "auditor_already_invited",
+    "auditor_already_active",
+    "auditor_not_found",
   ]
 
   it.each(newCodes)("has its own copy for %s", (code) => {
