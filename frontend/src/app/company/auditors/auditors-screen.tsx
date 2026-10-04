@@ -1,7 +1,7 @@
 "use client"
 
 import { useAuditors, useRemoveAuditor } from "@/lib/auditors/queries"
-import { ActivationPill } from "@/app/company/people/activation-pill"
+import { ActivationPill } from "@/components/ui/activation-pill"
 import type { Auditor } from "@/lib/auditors/types"
 import { Modal } from "@/components/ui/modal"
 import { buttonVariants } from "@/components/ui/button"
