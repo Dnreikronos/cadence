@@ -3,8 +3,8 @@ import { freshRecipient, signInAs, type Role } from "./demo"
 
 // The main screens of the merged work, for the specs that visit every one of them
 // (responsive, a11y). `ready` is what proves the data has loaded; `primary` is the
-// action a person came to the screen for. When a new screen merges (for example
-// /me/history), add it here and both specs cover it.
+// action a person came to the screen for. When a new screen merges, add it here and both
+// specs cover it.
 export type Screen = {
   name: string
   role: Role | "new-recipient" | null
@@ -73,13 +73,18 @@ export const screens: Screen[] = [
     primary: (page) => page.getByRole("button", { name: "Set up my account" }),
   },
   {
-    // The balance and history screen (task H) replaces this placeholder; give it a
-    // `primary` then.
     name: "recipient home",
     role: "recipient",
     path: "/me",
-    ready: (page) => main(page).getByRole("heading", { level: 1 }),
-    primary: null,
+    ready: (page) => main(page).getByText("Solaris").first(),
+    primary: (page) => page.getByRole("link", { name: "View all" }),
+  },
+  {
+    name: "recipient history",
+    role: "recipient",
+    path: "/me/history",
+    ready: (page) => main(page).getByText("Solaris").first(),
+    primary: (page) => page.getByRole("button", { name: "Export CSV" }),
   },
   {
     name: "recipient withdraw",

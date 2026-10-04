@@ -11,13 +11,6 @@ export type KnownNoise = {
   probe: string
 }
 
-export const knownNoise: KnownNoise[] = [
-  {
-    // The recipient's sidebar links to /me/history, which the recipient screens task (H)
-    // adds. Next prefetches the link, and the missing route logs a 404.
-    status: 404,
-    url: /\/me\/history(\?|$)/,
-    why: "/me/history does not exist yet (task H)",
-    probe: "/me/history",
-  },
-]
+// Empty: the /me/history 404 that the recipient's sidebar used to log went away when the
+// screen landed (its entry was deleted when the probe above said so).
+export const knownNoise: KnownNoise[] = []
