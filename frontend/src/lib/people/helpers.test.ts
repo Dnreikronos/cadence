@@ -51,10 +51,12 @@ describe("toast copy", () => {
   })
 
   it("offers a retry for a busy service but not straight after a rate limit", () => {
-    expect(inviteFailureCopy(new ApiError(503, "auth_unavailable"))).toEqual({
-      message: expect.stringMatching(/unavailable/),
-      retry: true,
-    })
+    expect(inviteFailureCopy(new ApiError(503, "service_unavailable"))).toEqual(
+      {
+        message: expect.stringMatching(/unavailable/),
+        retry: true,
+      },
+    )
     expect(
       inviteFailureCopy(new ApiError(429, "transfer_rate_limited")),
     ).toEqual({

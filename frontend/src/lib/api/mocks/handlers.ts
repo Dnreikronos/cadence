@@ -34,13 +34,18 @@ type Role = "admin" | "recipient" | "auditor"
 
 // Common checks, in the order the real service makes them. Returns a response
 // when the call should stop.
+//
+// `rateLimitCode` is the generic `rate_limited` unless the route prepares a payment:
+// those answer with their limiter's own code (the contract's rate limit row), reads and
+// the account, auditor and invite routes do not.
 async function guard(
   request: Request,
   role?: Role,
-  rateLimitCode = "transfer_rate_limited",
+  rateLimitCode = "rate_limited",
 ) {
   if (scenarios.has("slow")) await delay(timing.slowMs)
-  if (scenarios.has("service-down")) return fail(503, "auth_unavailable")
+  if (scenarios.has("auth-down")) return fail(503, "auth_unavailable")
+  if (scenarios.has("service-down")) return fail(503, "service_unavailable")
   if (scenarios.has("rate-limited")) {
     return fail(429, rateLimitCode, { "retry-after": "60" })
   }
@@ -388,7 +393,7 @@ export const handlers = [
 
   // ---- Transfer
   http.post(at("/transfer"), async ({ request }) => {
-    const stopped = await guard(request)
+    const stopped = await guard(request, undefined, "transfer_rate_limited")
     if (stopped) return stopped
     const { data, error } = await parse(request, s.transferRequestSchema)
     if (error) return error
@@ -407,7 +412,7 @@ export const handlers = [
 
   // ---- Runs
   http.post(at("/runs"), async ({ request }) => {
-    const stopped = await guard(request, "admin")
+    const stopped = await guard(request, "admin", "transfer_rate_limited")
     if (stopped) return stopped
     const { data, error } = await parse(request, s.runRequestSchema)
     if (error) return error
@@ -468,7 +473,7 @@ export const handlers = [
   http.post(
     at("/runs/:runId/payments/:paymentId/confirm"),
     async ({ request, params }) => {
-      const stopped = await guard(request, "admin")
+      const stopped = await guard(request, "admin", "transfer_rate_limited")
       if (stopped) return stopped
       const { data, error } = await parse(request, signatureBody)
       if (error) return error
@@ -520,7 +525,7 @@ export const handlers = [
   http.post(
     at("/runs/:runId/payments/:paymentId/retry"),
     async ({ request, params }) => {
-      const stopped = await guard(request, "admin")
+      const stopped = await guard(request, "admin", "transfer_rate_limited")
       if (stopped) return stopped
       const { payment, index } = findRunPayment(
         String(params.runId),
@@ -539,7 +544,7 @@ export const handlers = [
 
   // ---- Unwrap
   http.post(at("/unwrap"), async ({ request }) => {
-    const stopped = await guard(request, "recipient")
+    const stopped = await guard(request, "recipient", "transfer_rate_limited")
     if (stopped) return stopped
     const { data, error } = await parse(request, s.unwrapRequestSchema)
     if (error) return error
@@ -568,7 +573,7 @@ export const handlers = [
 
   // ---- Accounts and keys
   http.post(at("/accounts/configure"), async ({ request }) => {
-    const stopped = await guard(request)
+    const stopped = await guard(request, undefined, "transfer_rate_limited")
     if (stopped) return stopped
     const { data, error } = await parse(request, s.walletRequestSchema)
     if (error) return error
@@ -580,7 +585,7 @@ export const handlers = [
     confirmHandler(request, "accounts/configure"),
   ),
   http.post(at("/accounts/apply-pending"), async ({ request }) => {
-    const stopped = await guard(request)
+    const stopped = await guard(request, undefined, "transfer_rate_limited")
     if (stopped) return stopped
     const { data, error } = await parse(request, s.walletRequestSchema)
     if (error) return error
@@ -604,7 +609,7 @@ export const handlers = [
 
   // ---- Reads
   http.get(at("/me/status"), async ({ request }) => {
-    const stopped = await guard(request, "recipient", "rate_limited")
+    const stopped = await guard(request, "recipient")
     if (stopped) return stopped
     return HttpResponse.json({
       wallet_linked: db.walletLinked,
@@ -689,7 +694,7 @@ export const handlers = [
 
   // ---- Auditors (admin only; nothing here carries an amount)
   http.get(at("/company/auditors"), async ({ request }) => {
-    const stopped = await guard(request, "admin", "rate_limited")
+    const stopped = await guard(request, "admin")
     if (stopped) return stopped
     const rows = [...db.auditors]
       .sort(
@@ -700,7 +705,7 @@ export const handlers = [
     return paged(request, rows)
   }),
   http.post(at("/company/auditors"), async ({ request }) => {
-    const stopped = await guard(request, "admin", "rate_limited")
+    const stopped = await guard(request, "admin")
     if (stopped) return stopped
     const { data, error } = await parse(request, s.inviteAuditorRequestSchema)
     if (error) return error
@@ -727,7 +732,7 @@ export const handlers = [
   http.post(
     at("/company/auditors/:auditorId/revoke"),
     async ({ request, params }) => {
-      const stopped = await guard(request, "admin", "rate_limited")
+      const stopped = await guard(request, "admin")
       if (stopped) return stopped
       const index = db.auditors.findIndex((a) => a.id === params.auditorId)
       if (index < 0) return fail(404, "auditor_not_found")
@@ -738,7 +743,7 @@ export const handlers = [
 
   // ---- Access log (auditor only): who decrypted what, never an amount
   http.get(at("/audit/access-log"), async ({ request }) => {
-    const stopped = await guard(request, "auditor", "rate_limited")
+    const stopped = await guard(request, "auditor")
     if (stopped) return stopped
     const rows = [...db.accessLog].sort((a, b) => b.at.localeCompare(a.at))
     return paged(request, rows)

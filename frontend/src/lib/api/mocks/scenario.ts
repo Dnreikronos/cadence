@@ -7,7 +7,10 @@ export const scenarioNames = [
   "slow",
   "unauthenticated",
   "rate-limited",
+  // Every route answers 503 `service_unavailable`.
   "service-down",
+  // Every route answers 503 `auth_unavailable`: the sign-in provider is down.
+  "auth-down",
   // /wrap needs the activation artifacts first.
   "setup-required",
   // Every confirm is rejected by the network.
