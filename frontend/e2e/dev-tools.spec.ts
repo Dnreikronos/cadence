@@ -15,7 +15,8 @@ test("the /dev pages answer 404 in a production build, however they are spelled"
     "/%64ev/api",
     "/DEV/api",
   ]) {
-    const response = await request.get(path, { maxRedirects: 0 })
+    // Followed: Next first sends "/dev/" to "/dev" with a 308.
+    const response = await request.get(path)
     expect(response.status(), path).toBe(404)
   }
 })
