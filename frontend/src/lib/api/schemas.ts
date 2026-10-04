@@ -234,13 +234,30 @@ export const emailSchema = z
   .max(320)
   .regex(/^[^@\s]+@[^@\s]+$/)
 
+// The known values, which stay in the type for autocompletion, and any other
+// string, so a value added later is not a ContractError (additive-only).
+type Open<T extends string> = T | (string & Record<never, never>)
+function open<const T extends readonly [string, ...string[]]>(values: T) {
+  return z.union([
+    z.enum(values),
+    z.string().min(1) as z.ZodType<Open<T[number]>>,
+  ])
+}
+
 export const auditorStatuses = ["invited", "active", "invite-expired"] as const
 export type AuditorStatus = (typeof auditorStatuses)[number]
+
+// An unknown status is shown as a pending invite: it never claims access.
+export function knownAuditorStatus(status: string): AuditorStatus {
+  return (auditorStatuses as readonly string[]).includes(status)
+    ? (status as AuditorStatus)
+    : "invited"
+}
 
 export const auditorSchema = z.object({
   id,
   email: z.string().min(1),
-  status: z.enum(auditorStatuses),
+  status: open(auditorStatuses),
   invited_at: timestamp,
 })
 export type Auditor = z.infer<typeof auditorSchema>
@@ -265,10 +282,10 @@ export const accessLogItemSchema = z.object({
   id,
   at: timestamp,
   actor: z.object({
-    kind: z.enum(accessActorKinds),
+    kind: open(accessActorKinds),
     label: z.string(),
   }),
-  action: z.enum(accessActions),
+  action: open(accessActions),
   // What was read, in words. Never an amount or a payment id.
   scope: z.string(),
 })

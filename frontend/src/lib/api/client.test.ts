@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { ZodError } from "zod"
 import { createApiClient } from "./client"
 import { ApiError, ContractError } from "./errors"
+import { knownAuditorStatus } from "./schemas"
 
 const BASE = "https://api.cadence.test"
 const WALLET = "4egAZELoLKWqJwHwAwaZwS2su9rewh7is3ukCagHnSQ5"
@@ -260,13 +261,14 @@ describe("auditors, access log and account status", () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it("revokes with DELETE on the id's path and reads { status: revoked }", async () => {
+  it("revokes with a POST, since the service's CORS refuses DELETE, and reads { status: revoked }", async () => {
     const { api, calls } = setup(() => json({ status: "revoked" }))
     expect(await api.company.auditors.revoke(GUID)).toEqual({
       status: "revoked",
     })
-    expect(calls[0].url.pathname).toBe(`/company/auditors/${GUID}`)
-    expect(calls[0].init?.method).toBe("DELETE")
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url.pathname).toBe(`/company/auditors/${GUID}/revoke`)
+    expect(calls[0].init?.method).toBe("POST")
     expect(calls[0].init?.body).toBeUndefined()
   })
 
@@ -295,13 +297,27 @@ describe("auditors, access log and account status", () => {
     )
   })
 
-  it("fails loudly on an auditor with a status it does not know", async () => {
+  it("reads an auditor status it does not know, and shows it as a pending invite", async () => {
     const { api } = setup(() =>
       json({ items: [{ ...auditor, status: "suspended" }], next_cursor: null }),
     )
-    expect(await caught(api.company.auditors.list())).toBeInstanceOf(
-      ContractError,
-    )
+    const [item] = (await api.company.auditors.list()).items
+    expect(item.status).toBe("suspended")
+    expect(knownAuditorStatus(item.status)).toBe("invited")
+    for (const known of ["invited", "active", "invite-expired"]) {
+      expect(knownAuditorStatus(known)).toBe(known)
+    }
+  })
+
+  it("fails loudly on an auditor status that is not a string", async () => {
+    for (const status of [null, 5, "", undefined]) {
+      const { api } = setup(() =>
+        json({ items: [{ ...auditor, status }], next_cursor: null }),
+      )
+      expect(await caught(api.company.auditors.list())).toBeInstanceOf(
+        ContractError,
+      )
+    }
   })
 
   it("reads the access log from its own path and checks every row", async () => {
@@ -319,9 +335,20 @@ describe("auditors, access log and account status", () => {
     expect(calls[0].url.pathname).toBe("/audit/access-log")
     expect(calls[0].url.search).toBe("?limit=2")
 
-    for (const bad of [
+    // A value added later still parses, as the contract is additive.
+    const later = [
       { ...row, action: "read_everything" },
       { ...row, actor: { kind: "robot", label: "x" } },
+    ]
+    const { api: tolerant } = setup(() =>
+      json({ items: later, next_cursor: null }),
+    )
+    expect((await tolerant.audit.accessLog()).items).toEqual(later)
+
+    for (const bad of [
+      { ...row, action: 5 },
+      { ...row, action: "" },
+      { ...row, actor: { kind: null, label: "x" } },
       { ...row, at: "yesterday" },
       { ...row, scope: undefined },
     ]) {

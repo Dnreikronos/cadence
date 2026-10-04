@@ -287,11 +287,11 @@ describe("auditors, access log and account status", () => {
     scope: "Company payments",
   }
 
-  it("reads the three auditor statuses and an offset timestamp, not another status", () => {
-    for (const status of ["invited", "active", "invite-expired"]) {
+  it("reads the three auditor statuses and any other string, not a non-string", () => {
+    for (const status of ["invited", "active", "invite-expired", "suspended"]) {
       expect(auditorSchema.parse({ ...auditor, status }).status).toBe(status)
     }
-    for (const status of ["revoked", "Active", ""]) {
+    for (const status of ["", null, 3, undefined, {}]) {
       expect(auditorSchema.safeParse({ ...auditor, status }).success).toBe(
         false,
       )
@@ -302,7 +302,7 @@ describe("auditors, access log and account status", () => {
     expect(auditorSchema.safeParse({ ...auditor, id: "x" }).success).toBe(false)
   })
 
-  it("reads every access-log actor and action, and refuses the rest", () => {
+  it("reads every access-log actor and action, any other string, and refuses the rest", () => {
     for (const kind of ["service", "company", "recipient", "auditor"]) {
       expect(
         accessLogItemSchema.safeParse({ ...row, actor: { kind, label: "x" } })
@@ -314,10 +314,20 @@ describe("auditors, access log and account status", () => {
         true,
       )
     }
+    // Added later: still readable, and kept as the service sent it.
+    const later = accessLogItemSchema.parse({
+      ...row,
+      actor: { kind: "admin", label: "x" },
+      action: "write_payments",
+    })
+    expect(later.actor.kind).toBe("admin")
+    expect(later.action).toBe("write_payments")
     for (const bad of [
-      { actor: { kind: "admin", label: "x" } },
+      { actor: { kind: "", label: "x" } },
+      { actor: { kind: 1, label: "x" } },
       { actor: { kind: "auditor" } },
-      { action: "write_payments" },
+      { action: "" },
+      { action: null },
       { scope: 5 },
       { at: "2026-10-03" },
     ]) {

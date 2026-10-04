@@ -14,7 +14,7 @@ export type ApiClientOptions = {
 export type RequestOptions = { signal?: AbortSignal }
 
 type CallOptions<T extends z.ZodType> = RequestOptions & {
-  method?: "GET" | "POST" | "PUT" | "DELETE"
+  method?: "GET" | "POST" | "PUT"
   // Evaluated inside the async call, so an invalid request rejects instead of throwing.
   body?: () => unknown
   query?: Record<string, string | number | undefined>
@@ -329,9 +329,9 @@ export function createApiClient({
             response: s.auditorSchema,
           }),
         revoke: async (auditorId: string, options: RequestOptions = {}) =>
-          call(`/company/auditors/${segment(auditorId)}`, {
+          call(`/company/auditors/${segment(auditorId)}/revoke`, {
             ...options,
-            method: "DELETE",
+            method: "POST",
             response: s.auditorRevokedSchema,
           }),
       },

@@ -46,6 +46,7 @@ describe("messageFor", () => {
     "auditor_already_invited",
     "auditor_already_active",
     "auditor_not_found",
+    "rate_limited",
   ]
 
   it.each(newCodes)("has its own copy for %s", (code) => {
