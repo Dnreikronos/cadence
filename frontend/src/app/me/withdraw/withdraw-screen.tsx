@@ -92,6 +92,7 @@ export function WithdrawScreen({ viewer }: { viewer: ViewerScope }) {
           <WithdrawCard
             available={BigInt(balance.data.available)}
             pending={BigInt(balance.data.pending)}
+            stale={balance.isError}
           />
         </>
       )}
@@ -103,9 +104,12 @@ export function WithdrawScreen({ viewer }: { viewer: ViewerScope }) {
 function WithdrawCard({
   available,
   pending,
+  stale,
 }: {
   available: bigint
   pending: bigint
+  // The balance could not be refreshed: `available` is the last one read.
+  stale: boolean
 }) {
   const id = useId()
   const withdraw = useWithdraw()
@@ -312,9 +316,13 @@ function WithdrawCard({
             <button
               type="button"
               disabled={!hasFunds}
-              aria-disabled={isBusy || undefined}
+              // Max would fill the last balance read, which may be from before a withdrawal.
+              aria-disabled={isBusy || stale || undefined}
+              title={
+                stale ? "Max is back once your balance refreshes" : undefined
+              }
               onClick={() => {
-                if (isBusy) return
+                if (isBusy || stale) return
                 edit(formatBaseUnits(maxWithdrawUnits(available)))
               }}
               className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded-md px-2 py-1 text-caption font-medium text-ink-muted hover:bg-canvas hover:text-ink disabled:opacity-50 aria-disabled:opacity-50"
