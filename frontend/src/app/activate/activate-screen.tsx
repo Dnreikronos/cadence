@@ -7,12 +7,12 @@ import { useQueryClient } from "@tanstack/react-query"
 import { Check, CircleAlert, Loader2, X } from "lucide-react"
 import { useViewerScope } from "@/components/app/viewer-scope"
 import { buttonVariants } from "@/components/ui/button"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { ErrorState } from "@/components/ui/error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import {
   activationMessage,
-  canRetryStatus,
   isTerminal,
   isWalletUnavailable,
   statusMessage,
@@ -92,12 +92,11 @@ function WithStatus() {
   if (status.data) return <Flow status={status.data} />
   if (status.isError) {
     return (
-      <ErrorState
+      <ApiErrorState
+        error={status.error}
         title="Couldn't check your setup"
         description={`${statusMessage(status.error)} Nothing was changed.`}
-        onRetry={
-          canRetryStatus(status.error) ? () => status.refetch() : undefined
-        }
+        onRetry={() => status.refetch()}
       />
     )
   }

@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { ActivationPill } from "@/components/ui/activation-pill"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
-import { ErrorState } from "@/components/ui/error-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { Modal } from "@/components/ui/modal"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
@@ -112,12 +112,10 @@ function AuditorsBody({
   if (auditors.isPending) return <AuditorsSkeleton />
   if (auditors.isError) {
     return (
-      <ErrorState
+      <ApiErrorState
+        error={auditors.error}
         title="Couldn't load your auditors"
-        description={messageFor(auditors.error)}
-        onRetry={
-          canRetry(auditors.error) ? () => auditors.refetch() : undefined
-        }
+        onRetry={() => auditors.refetch()}
       />
     )
   }

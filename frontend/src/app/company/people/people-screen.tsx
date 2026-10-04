@@ -7,6 +7,7 @@ import { AmountDisplay } from "@/components/ui/amount-display"
 import { AvatarPerson } from "@/components/ui/avatar-person"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { ErrorState } from "@/components/ui/error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
@@ -140,14 +141,16 @@ export function PeopleScreen() {
           )}
 
           {amounts.state === "error" && (
-            <ErrorState
+            <ApiErrorState
+              error={amountsQuery.error}
               title="Couldn't load the monthly amounts"
               description="Your people are shown below. Try again to see what each is paid."
               onRetry={() => amountsQuery.refetch()}
             />
           )}
           {amounts.state === "stale" && (
-            <ErrorState
+            <ApiErrorState
+              error={amountsQuery.error}
               title="Couldn't refresh the monthly amounts"
               description="The amounts below may be out of date. Try again to refresh them."
               onRetry={() => amountsQuery.refetch()}

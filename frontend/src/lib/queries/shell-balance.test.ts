@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import { ApiError } from "@/lib/api/errors"
 import { shellBalanceOf } from "./shell-balance"
 
 const refetch = vi.fn()
@@ -35,6 +36,26 @@ describe("shellBalanceOf", () => {
     expect(shown).toMatchObject({ state: "hidden", error: true })
     shown.onRetry?.()
     expect(refetch).toHaveBeenCalledOnce()
+  })
+
+  it("does not nag when the failure is a signed-out session", () => {
+    expect(
+      shellBalanceOf({
+        ...base,
+        isError: true,
+        error: new ApiError(401, "authentication_required"),
+      }),
+    ).toEqual({ state: "hidden" })
+  })
+
+  it("still reports other API failures", () => {
+    expect(
+      shellBalanceOf({
+        ...base,
+        isError: true,
+        error: new ApiError(503, "service_unavailable"),
+      }),
+    ).toMatchObject({ state: "hidden", error: true })
   })
 
   it("goes back to the shimmer while a failed load is retried", () => {

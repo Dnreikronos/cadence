@@ -4,7 +4,7 @@ import Link from "next/link"
 import { SearchX } from "lucide-react"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
-import { ErrorState } from "@/components/ui/error-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { isApiError } from "@/lib/api/errors"
 import { usePeople } from "@/lib/queries/people"
@@ -50,7 +50,8 @@ export function RunScreen({ runId }: { runId: string }) {
       )
     }
     return (
-      <ErrorState
+      <ApiErrorState
+        error={run.error}
         title="Couldn't load this run"
         description={runMessage(run.error)}
         onRetry={() => run.refetch()}

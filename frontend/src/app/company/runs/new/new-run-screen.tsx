@@ -6,7 +6,7 @@ import { ArrowDownToLine, Users } from "lucide-react"
 import { AmountDisplay } from "@/components/ui/amount-display"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
-import { ErrorState } from "@/components/ui/error-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import type { RunCreated } from "@/lib/api/schemas"
@@ -149,7 +149,8 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
   if (!people.data) {
     if (!people.isError) return <RosterSkeleton />
     return (
-      <ErrorState
+      <ApiErrorState
+        error={people.error}
         title="Couldn't load your people"
         description={runMessage(people.error)}
         onRetry={() => people.refetch()}

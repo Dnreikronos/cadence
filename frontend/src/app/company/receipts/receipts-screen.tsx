@@ -8,7 +8,7 @@ import {
   RotateCw,
   Search,
 } from "lucide-react"
-import { isApiError, messageFor } from "@/lib/api"
+import { isApiError } from "@/lib/api"
 import type { PaymentItem } from "@/lib/api/schemas"
 import { unitsToUsd } from "@/lib/money"
 import {
@@ -31,7 +31,7 @@ import { ReceiptDialog } from "@/components/app/receipt-dialog"
 import { AmountDisplay } from "@/components/ui/amount-display"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
-import { ErrorState } from "@/components/ui/error-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { fieldClass } from "@/components/ui/field"
 import { Skeleton } from "@/components/ui/skeleton"
 import { StatusPill } from "@/components/ui/status-pill"
@@ -46,11 +46,6 @@ const statusLabels: Record<StatusFilter, string> = {
   confirmed: "Confirmed",
   pending: "Pending",
   failed: "Failed",
-}
-
-// A failure that can pass on its own is worth another try; a refusal is not.
-function offersRetry(error: unknown) {
-  return !isApiError(error) || error.isRetryable || error.status >= 500
 }
 
 export function ReceiptsScreen() {
@@ -79,12 +74,10 @@ export function ReceiptsScreen() {
   if (payments.isPending) return <ReceiptsSkeleton />
   if (payments.isError && !payments.data) {
     return (
-      <ErrorState
+      <ApiErrorState
+        error={payments.error}
         title="Couldn't load your payments"
-        description={messageFor(payments.error)}
-        onRetry={
-          offersRetry(payments.error) ? () => payments.refetch() : undefined
-        }
+        onRetry={() => payments.refetch()}
       />
     )
   }
@@ -180,29 +173,22 @@ export function ReceiptsScreen() {
       </div>
 
       {exporter.isError && (
-        <ErrorState
+        <ApiErrorState
+          error={exporter.error}
           title="Couldn't export your payments"
-          description={messageFor(exporter.error)}
-          onRetry={
-            offersRetry(exporter.error) ? () => exporter.mutate() : undefined
-          }
+          onRetry={() => exporter.mutate()}
         />
       )}
       {payments.isError && (
-        <ErrorState
+        <ApiErrorState
+          error={payments.error}
           title={
             payments.isFetchNextPageError
               ? "Couldn't load more payments"
               : "Couldn't refresh your payments"
           }
-          description={messageFor(payments.error)}
-          onRetry={
-            offersRetry(payments.error)
-              ? () =>
-                  payments.isFetchNextPageError
-                    ? loadMore()
-                    : payments.refetch()
-              : undefined
+          onRetry={() =>
+            payments.isFetchNextPageError ? loadMore() : payments.refetch()
           }
         />
       )}

@@ -5,7 +5,7 @@ import Link from "next/link"
 import { ArrowUpFromLine, Loader2 } from "lucide-react"
 import { useViewerScope } from "@/components/app/viewer-scope"
 import { buttonVariants } from "@/components/ui/button"
-import { ErrorState } from "@/components/ui/error-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import { balanceReaders } from "@/lib/me/copy"
@@ -41,7 +41,8 @@ export function BalanceCard() {
   }
   if (!balance.data) {
     return (
-      <ErrorState
+      <ApiErrorState
+        error={balance.error}
         title="Couldn't load your balance"
         description="Your balance is safe. Check your connection and try again."
         onRetry={() => balance.refetch()}

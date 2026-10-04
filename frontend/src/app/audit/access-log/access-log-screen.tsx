@@ -2,10 +2,9 @@
 
 import { ScrollText, ShieldCheck } from "lucide-react"
 import { EmptyState } from "@/components/ui/empty-state"
-import { ErrorState } from "@/components/ui/error-state"
-import { messageFor } from "@/lib/api/errors"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { accessRow } from "@/lib/audit/access-log"
-import { canRetry, listState, loadedItems } from "@/lib/audit/pages"
+import { listState, loadedItems } from "@/lib/audit/pages"
 import { useAccessLog } from "@/lib/queries/audit"
 import { ListSkeleton, LoadMore, Time, timeFormat } from "../list-parts"
 
@@ -41,10 +40,10 @@ export function AccessLogScreen({ company }: { company: string }) {
       {state === "loading" && <ListSkeleton label="Loading the access log" />}
 
       {state === "error" && (
-        <ErrorState
+        <ApiErrorState
+          error={log.error}
           title="Couldn't load the access log"
-          description={messageFor(log.error)}
-          onRetry={canRetry(log.error) ? () => log.refetch() : undefined}
+          onRetry={() => log.refetch()}
         />
       )}
 

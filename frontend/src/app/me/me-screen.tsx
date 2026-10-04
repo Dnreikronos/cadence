@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { ArrowRight, Wallet } from "lucide-react"
 import { EmptyState } from "@/components/ui/empty-state"
-import { ErrorState } from "@/components/ui/error-state"
+import { ApiErrorState } from "@/components/ui/api-error-state"
 import { RECENT_PAYMENTS } from "@/lib/queries/me-options"
 import { useRecentPayments } from "@/lib/queries/me"
 import { BalanceCard } from "./balance-card"
@@ -38,7 +38,8 @@ function RecentPayments() {
       {!recent.data && !recent.isError ? (
         <PaymentListSkeleton rows={3} />
       ) : !recent.data ? (
-        <ErrorState
+        <ApiErrorState
+          error={recent.error}
           title="Couldn't load your payments"
           description="Check your connection and try again."
           onRetry={() => recent.refetch()}
