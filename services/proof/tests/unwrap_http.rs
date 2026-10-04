@@ -163,6 +163,46 @@ async fn authenticated_withdrawal_warns_before_preparing_and_confirms_immutably(
     let (status, safe) = post(h.app(), "/unwrap", "test-user", request(1_000_000, false)).await;
     assert_eq!(status, StatusCode::OK, "{safe}");
     assert_eq!(safe["reveal_risk"]["level"], "none");
+    // Rebuilding the router would reset the quota shared by both users.
+    let app = h.app();
+    let quota_check = json!({"wallet":wallet.to_string(),"amount":"1"});
+    let quota_prepare = json!({"wallet":wallet.to_string(),"amount":"1","aes_key":STANDARD.encode([0;16]),"acknowledge_reveal_risk":false});
+    for attempt in 0..10 {
+        let (path, body) = if attempt % 2 == 0 {
+            ("/unwrap/check", quota_check.clone())
+        } else {
+            ("/unwrap", quota_prepare.clone())
+        };
+        let (status, body) = post(app.clone(), path, "other-user", body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+        assert_eq!(body["error"], "wallet_access_denied");
+    }
+    for _ in 0..10 {
+        let (status, body) = post(
+            app.clone(),
+            "/unwrap/check",
+            "test-user",
+            quota_check.clone(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["reveal_risk"]["level"], "none");
+    }
+    let response = app
+        .oneshot(
+            Request::post("/unwrap")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer test-user")
+                .body(Body::from(request(1, false).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(response.headers()["retry-after"], "60");
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 16384).await.unwrap()).unwrap();
+    assert_eq!(body["error"], "unwrap_rate_limited");
     // A real confidential incoming payment, confirmed through the existing API.
     let mut transfer_request = h.request();
     transfer_request["recipient"] = json!(source.to_string());

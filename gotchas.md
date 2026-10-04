@@ -1,5 +1,10 @@
 # Gotchas
 
+- Authenticate the caller and authorize wallet ownership before charging a
+  per-wallet quota. Rejected ownership checks must not spend another wallet's
+  budget. Quota regression tests must reuse the same router across callers;
+  rebuilding it resets the limiter and hides this failure.
+
 - Payment-run retries cannot infer nonexecution from a null finalized RPC lookup,
   even after blockhash expiry. Preserve unresolved attempts until finalized
   evidence is available, and isolate their errors after finalized expiry so

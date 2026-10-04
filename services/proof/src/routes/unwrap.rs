@@ -109,14 +109,14 @@ async fn context(
         .clone()
         .ok_or(AppError::UnwrapUnavailable("unwrap_unavailable"))?;
     let user = service.auth.user(headers).await?;
-    if !state.limits.wallet(wallet) {
-        return Err(AppError::UnwrapRateLimited);
-    }
     service
         .store
         .authorize_wallet(&user, &wallet, signature)
         .await
         .map_err(storage_error)?;
+    if !state.limits.wallet(wallet) {
+        return Err(AppError::UnwrapRateLimited);
+    }
     state
         .rpc
         .require_devnet()
