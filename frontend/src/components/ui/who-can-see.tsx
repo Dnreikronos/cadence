@@ -13,18 +13,28 @@ import {
 } from "./popover"
 
 // Cadence runs the proof service and holds viewing keys (ADR B17), so it is always named.
-export function whoCanSee(viewerRole: Role, hasAuditor: boolean) {
+// `hasAuditor` undefined means not known yet: the longer sentence is the safe one,
+// never "no auditor".
+export function whoCanSee(viewerRole: Role, hasAuditor: boolean | undefined) {
   const readers = {
     admin: [
       "Your company",
       "the recipient",
-      ...(hasAuditor ? ["your auditor"] : []),
+      ...(hasAuditor === undefined
+        ? ["anyone your company has designated"]
+        : hasAuditor
+          ? ["your auditor"]
+          : []),
       "Cadence",
     ],
     recipient: [
       "You",
       "the company that paid you",
-      ...(hasAuditor ? ["its auditor"] : []),
+      ...(hasAuditor === undefined
+        ? ["anyone the company has designated"]
+        : hasAuditor
+          ? ["its auditor"]
+          : []),
       "Cadence",
     ],
     auditor: ["You", "the company", "the recipient", "Cadence"],
@@ -39,18 +49,23 @@ function list(items: string[]) {
 export function WhoCanSee({
   viewerRole,
   hasAuditor,
+  note,
   className,
   label = "Who can see this amount",
   description,
-  note = "Cadence reads amounts only to prove transfers, and every read is logged.",
+  cadenceLine = "Cadence reads amounts to prove transfers and to answer reads and exports by the company, the recipient and the auditor. Every read is logged.",
 }: {
   viewerRole: Role
-  hasAuditor: boolean
+  // Undefined while it is not known whether an auditor exists.
+  hasAuditor: boolean | undefined
+  // An extra sentence, for a place where some amounts are an exception.
+  note?: string
   className?: string
   // For a page that shows no amount of its own: its own label and texts.
   label?: string
   description?: string
-  note?: string
+  // Replaces the sentence about what Cadence reads.
+  cadenceLine?: string
 }) {
   return (
     <Popover>
@@ -70,7 +85,8 @@ export function WhoCanSee({
             {description ?? whoCanSee(viewerRole, hasAuditor)}
           </PopoverDescription>
         </PopoverHeader>
-        <p className="text-caption/normal text-ink-muted">{note}</p>
+        <p className="text-caption/normal text-ink-muted">{cadenceLine}</p>
+        {note && <p className="text-caption/normal text-ink-muted">{note}</p>}
       </PopoverContent>
     </Popover>
   )

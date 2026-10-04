@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import { usePeople, useRemovePerson, useSendInvite } from "@/lib/people/queries"
 import { kindLabels, type Person } from "@/lib/people/types"
-import { ActivationPill } from "./activation-pill"
+import { ActivationPill } from "@/components/ui/activation-pill"
 import { PersonFormModal } from "./person-form"
 
 // A row grid on wide screens; on narrow ones the cells wrap under the name.

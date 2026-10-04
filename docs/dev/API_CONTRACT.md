@@ -30,7 +30,7 @@ details are easy to over-read, so they are stated exactly:
 
 - The ✅ routes sign and submit nothing. A Cadence fee payer (#66, 🟡) would
   **co-sign** as fee payer; #66 itself asks to record that as a clarification of B9
-  ("no *customer* signing key reaches our infrastructure").
+  ("no _customer_ signing key reaches our infrastructure").
 - The browser does not hold a viewing key, but the service does. Proof generation
   runs server-side and Cadence holds customers' ElGamal secrets in Vault (ADR B17).
 - Two values the browser sends are key-equivalent and must be handled like
@@ -39,19 +39,19 @@ details are easy to over-read, so they are stated exactly:
 
 ## Conventions
 
-| Topic | Rule |
-|---|---|
-| Base URL | Read by the web app from an env var (proposed name `NEXT_PUBLIC_PROOF_API_URL`). The service is a separate origin, so CORS applies (next row). |
-| CORS | `PROOF_CORS_ORIGINS` defaults to `*` when unset (any origin, no credentials). An explicitly empty value disables cross-origin access. Otherwise it is a comma-separated list of exact origins. Allowed methods are **GET and POST only**. Allowed request headers are `Content-Type` and `Authorization`. Preflight is cached for 600 s (`cors.rs:13-43`). `PUT`, `PATCH` and `DELETE` fail preflight today. |
-| Format | JSON in and out, `Content-Type: application/json`. Bodies are limited to 8 KiB by a `DefaultBodyLimit` on the wrap and transfer routers (not on `/health`). An oversize body, a missing or wrong `Content-Type`, malformed JSON, a wrong field type and an unknown field all return `400 invalid_request`. The service never returns 413 or 415. |
-| Amounts | **Integer base units as a decimal string**, six decimals: `"1000000"` is 1 USDC. Never a JSON number (that is `400 invalid_request`), never `"1.5"`. The server accepts 1 to 15 ASCII digits whose value is `1` to `2^48 - 1` (`281474976710655`); an empty string, more than 15 characters, a non-digit, `0` or a larger value is `400 invalid_amount`. The server accepts leading zeros today (`"0001"` is 1). The web app is stricter on purpose and never sends them. The web app converts at the edge with exact integer math and never uses floats for money. |
-| Identifiers | `request_id` is 64 **lowercase** hexadecimal characters, the SHA-256 of the transaction wire bytes (uppercase is `400 invalid_request_id`). `company_wallet` must be a base58 public key that is on the ed25519 curve. Other wallet and account fields are base58 public keys. Signatures are base58 transaction signatures. |
-| Time | RFC 3339 UTC. |
-| Cluster | Devnet only today. On another cluster `/wrap` and `/wrap/confirm` fail with `wrap_requires_devnet`. Only `/transfer` and `/transfer/confirm` remap it to `transfer_requires_devnet` (`client.rs:68`, `transfer.rs:335-340`). |
-| Rate limits | Fixed 60 s windows, held in memory per service instance and reset on restart. The wrap routes and the transfer routes each have their own limiter, so a wrap call does not spend transfer quota. Per window and limiter: 120 requests in total, 30 per direct socket peer, and (prepare only) 10 per `company_wallet`. Forwarded IP headers are ignored, so behind a proxy all users share the proxy's peer quota. These are **not** windows: at most 8 requests in flight per limiter, and on `/transfer` at most 4 proof workers. Every limit returns `429` with `Retry-After: 60` and the route's `wrap_rate_limited` or `transfer_rate_limited` code, concurrency caps included. A confirm call spends the same peer and global quota as a prepare call, so polling uses budget. `/transfer` and `/transfer/confirm` also give up after 30 s with `503 transfer_timeout` (`wrap_limits.rs:41-115`, `transfer.rs:89`). `/health` is not limited. |
-| `Retry-After` | CORS sets no `expose_headers`, and `Retry-After` is not a CORS-safelisted response header, so cross-origin browser code reads `null` for it. Until the backend exposes it, the web app waits a fixed 60 s on any `429` (60 is the only value the service sends) and does not auto-retry in a loop. **Backend request:** add `Access-Control-Expose-Headers: Retry-After`. |
-| Caching | `Cache-Control: no-store` on every response that carries an amount. The web app fetches with `cache: "no-store"` and keeps amounts in memory only. The service sets no `Cache-Control` on any route today (the only response header it sets itself is `Retry-After`), so this is a backend request. |
-| Compatibility | Additive only. See [Evolving the contract](#evolving-the-contract). |
+| Topic         | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Base URL      | Read by the web app from an env var (proposed name `NEXT_PUBLIC_PROOF_API_URL`). The service is a separate origin, so CORS applies (next row).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| CORS          | `PROOF_CORS_ORIGINS` defaults to `*` when unset (any origin, no credentials). An explicitly empty value disables cross-origin access. Otherwise it is a comma-separated list of exact origins. Allowed methods are **GET and POST only**. Allowed request headers are `Content-Type` and `Authorization`. Preflight is cached for 600 s (`cors.rs:13-43`). `PUT`, `PATCH` and `DELETE` fail preflight today.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Format        | JSON in and out, `Content-Type: application/json`. Bodies are limited to 8 KiB by a `DefaultBodyLimit` on the wrap and transfer routers (not on `/health`). An oversize body, a missing or wrong `Content-Type`, malformed JSON, a wrong field type and an unknown field all return `400 invalid_request`. The service never returns 413 or 415.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Amounts       | **Integer base units as a decimal string**, six decimals: `"1000000"` is 1 USDC. Never a JSON number (that is `400 invalid_request`), never `"1.5"`. The server accepts 1 to 15 ASCII digits whose value is `1` to `2^48 - 1` (`281474976710655`); an empty string, more than 15 characters, a non-digit, `0` or a larger value is `400 invalid_amount`. The server accepts leading zeros today (`"0001"` is 1). The web app is stricter on purpose and never sends them. The web app converts at the edge with exact integer math and never uses floats for money.                                                                                                                                                                                                                                                                                                                                                                                 |
+| Identifiers   | `request_id` is 64 **lowercase** hexadecimal characters, the SHA-256 of the transaction wire bytes (uppercase is `400 invalid_request_id`). `company_wallet` must be a base58 public key that is on the ed25519 curve. Other wallet and account fields are base58 public keys. Signatures are base58 transaction signatures.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Time          | RFC 3339 UTC.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Cluster       | Devnet only today. On another cluster `/wrap` and `/wrap/confirm` fail with `wrap_requires_devnet`. Only `/transfer` and `/transfer/confirm` remap it to `transfer_requires_devnet` (`client.rs:68`, `transfer.rs:335-340`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Rate limits   | Fixed 60 s windows, held in memory per service instance and reset on restart. The wrap routes and the transfer routes each have their own limiter, so a wrap call does not spend transfer quota. Per window and limiter: 120 requests in total, 30 per direct socket peer, and (prepare only) 10 per `company_wallet`. Forwarded IP headers are ignored, so behind a proxy all users share the proxy's peer quota. These are **not** windows: at most 8 requests in flight per limiter, and on `/transfer` at most 4 proof workers. Every limit returns `429` with `Retry-After: 60` and the route's `wrap_rate_limited` or `transfer_rate_limited` code, concurrency caps included. A confirm call spends the same peer and global quota as a prepare call, so polling uses budget. `/transfer` and `/transfer/confirm` also give up after 30 s with `503 transfer_timeout` (`wrap_limits.rs:41-115`, `transfer.rs:89`). `/health` is not limited. |
+| `Retry-After` | CORS sets no `expose_headers`, and `Retry-After` is not a CORS-safelisted response header, so cross-origin browser code reads `null` for it. Until the backend exposes it, the web app waits a fixed 60 s on any `429` (60 is the only value the service sends) and does not auto-retry in a loop. **Backend request:** add `Access-Control-Expose-Headers: Retry-After`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Caching       | `Cache-Control: no-store` on every response that carries an amount. The web app fetches with `cache: "no-store"` and keeps amounts in memory only. The service sets no `Cache-Control` on any route today (the only response header it sets itself is `Retry-After`), so this is a backend request.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Compatibility | Additive only. See [Evolving the contract](#evolving-the-contract).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 ### Authentication ✅ for `/transfer`, 🟡 for everything else
 
@@ -140,16 +140,16 @@ is `405`, both with an empty body, because no fallback handler is registered
 
 ### Codes in use ✅
 
-| Status | Codes |
-|---|---|
-| 400 | `invalid_request`, `invalid_account`, `invalid_wallet`, `invalid_amount`, `invalid_transfer`, `invalid_balance_key`, `invalid_request_id`, `invalid_signature`, `invalid_confidential_setup` |
-| 401 | `authentication_required` |
-| 403 | `wallet_access_denied` |
-| 404 | `transfer_not_found`, `wrap_not_found` |
-| 409 | `wrap_requires_devnet`, `transfer_requires_devnet`, `wallet_link_required`, `sender_account_missing`, `recipient_account_missing`, `invalid_sender_account`, `invalid_confidential_state`, `proof_generation_failed`, `transaction_not_finalized`, `transaction_failed`, `transaction_mismatch`, `transfer_already_confirmed`, `wrap_already_confirmed`, `confidential_setup_required`, `wrapped_mint_missing`, `invalid_wrapped_mint`, `usdc_source_missing`, `invalid_usdc_source`, `insufficient_usdc`, `invalid_wrap_destination`, `confidential_destination_unavailable`, `confidential_key_mismatch` |
-| 429 | `transfer_rate_limited`, `wrap_rate_limited` (both with `Retry-After: 60`) |
-| 500 | `internal_error` |
-| 503 | `transfer_unavailable`, `auth_unavailable`, `key_storage_unavailable`, `transfer_storage_unavailable`, `wrap_storage_unavailable`, `rpc_unavailable`, `transfer_timeout` |
+| Status | Codes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `invalid_request`, `invalid_account`, `invalid_wallet`, `invalid_amount`, `invalid_transfer`, `invalid_balance_key`, `invalid_request_id`, `invalid_signature`, `invalid_confidential_setup`                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 401    | `authentication_required`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| 403    | `wallet_access_denied`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 404    | `transfer_not_found`, `wrap_not_found`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 409    | `wrap_requires_devnet`, `transfer_requires_devnet`, `wallet_link_required`, `sender_account_missing`, `recipient_account_missing`, `invalid_sender_account`, `invalid_confidential_state`, `proof_generation_failed`, `transaction_not_finalized`, `transaction_failed`, `transaction_mismatch`, `transfer_already_confirmed`, `wrap_already_confirmed`, `confidential_setup_required`, `wrapped_mint_missing`, `invalid_wrapped_mint`, `usdc_source_missing`, `invalid_usdc_source`, `insufficient_usdc`, `invalid_wrap_destination`, `confidential_destination_unavailable`, `confidential_key_mismatch` |
+| 429    | `transfer_rate_limited`, `wrap_rate_limited` (both with `Retry-After: 60`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 500    | `internal_error`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 503    | `transfer_unavailable`, `auth_unavailable`, `key_storage_unavailable`, `transfer_storage_unavailable`, `wrap_storage_unavailable`, `rpc_unavailable`, `transfer_timeout`                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 Which route emits what, where it is not obvious:
 
@@ -179,21 +179,21 @@ Which route emits what, where it is not obvious:
 
 Statuses and routes are part of the proposal.
 
-| Status | Code | Where |
-|---|---|---|
-| 403 | `forbidden_role` | Any `/me`, `/company`, `/audit` route called outside the caller's role. |
-| 404 | `run_not_found` | `GET /runs/:run_id` and the per-payment confirm and retry routes, when the run is not in the caller's company. |
-| 404 | `payment_not_found` | `POST /runs/:run_id/payments/:payment_id/confirm` and `/retry`, when the payment is not in that run. |
-| 404 | `person_not_found` | `POST /runs`, `PUT /company/people/:person_id/amount` and `POST /company/people/:person_id/invite`, when `person_id` is not in the caller's company. |
-| 404 | `auditor_not_found` | `POST /company/auditors/:auditor_id/revoke`, when the id is not an auditor or pending invite of the caller's company. |
-| 409 | `recipient_not_activated` | `POST /runs` and the retry route, for a person without an activated account. |
-| 409 | `reveal_risk_not_acknowledged` | `POST /unwrap`, see [Unwrap](#unwrap-private-usdc-to-public-with-the-reveal-risk-flag-). |
-| 409 | `credit_counter_mismatch` | `POST /accounts/apply-pending/confirm`. |
-| 409 | `key_already_enrolled` | `POST /keys/enroll`. |
-| 409 | `person_already_active`, `person_removed` | `POST /company/people/:person_id/invite`, see [Invites](#invites-). |
-| 409 | `auditor_already_invited` | `POST /company/auditors`, for an address with a pending invite, see [Auditors](#auditors-). |
-| 409 | `auditor_already_active` | `POST /company/auditors`, for an address that already audits the company. |
-| 429 | `rate_limited` | The auditor, access log and account status routes, with `Retry-After: 60`. They are not payments, so they do not use `wrap_rate_limited` or `transfer_rate_limited`. |
+| Status | Code                                      | Where                                                                                                                                                                |
+| ------ | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 403    | `forbidden_role`                          | Any `/me`, `/company`, `/audit` route called outside the caller's role.                                                                                              |
+| 404    | `run_not_found`                           | `GET /runs/:run_id` and the per-payment confirm and retry routes, when the run is not in the caller's company.                                                       |
+| 404    | `payment_not_found`                       | `POST /runs/:run_id/payments/:payment_id/confirm` and `/retry`, when the payment is not in that run.                                                                 |
+| 404    | `person_not_found`                        | `POST /runs`, `PUT /company/people/:person_id/amount` and `POST /company/people/:person_id/invite`, when `person_id` is not in the caller's company.                 |
+| 404    | `auditor_not_found`                       | `POST /company/auditors/:auditor_id/revoke`, when the id is not an auditor or pending invite of the caller's company.                                                |
+| 409    | `recipient_not_activated`                 | `POST /runs` and the retry route, for a person without an activated account.                                                                                         |
+| 409    | `reveal_risk_not_acknowledged`            | `POST /unwrap`, see [Unwrap](#unwrap-private-usdc-to-public-with-the-reveal-risk-flag-).                                                                             |
+| 409    | `credit_counter_mismatch`                 | `POST /accounts/apply-pending/confirm`.                                                                                                                              |
+| 409    | `key_already_enrolled`                    | `POST /keys/enroll`.                                                                                                                                                 |
+| 409    | `person_already_active`, `person_removed` | `POST /company/people/:person_id/invite`, see [Invites](#invites-).                                                                                                  |
+| 409    | `auditor_already_invited`                 | `POST /company/auditors`, for an address with a pending invite, see [Auditors](#auditors-).                                                                          |
+| 409    | `auditor_already_active`                  | `POST /company/auditors`, for an address that already audits the company.                                                                                            |
+| 429    | `rate_limited`                            | The auditor, access log and account status routes, with `Retry-After: 60`. They are not payments, so they do not use `wrap_rate_limited` or `transfer_rate_limited`. |
 
 The review findings below propose three more (`run_in_progress`,
 `idempotency_key_reused`, `invalid_cursor`); they are not part of the shapes yet.
@@ -272,14 +272,22 @@ All prepare routes return the same core fields, plus route-specific ones:
 ### Confirm ✅
 
 ```json
-{ "request_id": "<from prepare>", "signature": "<submitted transaction signature>" }
+{
+  "request_id": "<from prepare>",
+  "signature": "<submitted transaction signature>"
+}
 ```
 
 Success returns the receipt, and a repeat with the same signature returns the same
 receipt:
 
 ```json
-{ "request_id": "<id>", "signature": "<signature>", "slot": 123, "status": "finalized" }
+{
+  "request_id": "<id>",
+  "signature": "<signature>",
+  "slot": 123,
+  "status": "finalized"
+}
 ```
 
 - The service reads the transaction at finalized commitment with
@@ -302,7 +310,7 @@ receipt:
   `409 transfer_already_confirmed` (`/transfer/confirm`) or
   `409 wrap_already_confirmed` (`/wrap/confirm`).
 - **`/transfer/confirm` only:** another user's `request_id` is `404
-  transfer_not_found`, because transfer records are looked up by `request_id` and
+transfer_not_found`, because transfer records are looked up by `request_id` and
   `user_id`. **`/wrap/confirm` has no user:** a wrap record is looked up by
   `request_id` alone, and anyone holding an id may confirm it. That only records
   the public fact that the wallet's own signed transaction landed
@@ -423,9 +431,7 @@ as written, the payments of a run cannot all be prepared together.
 ```json
 {
   "company_wallet": "<wallet public key>",
-  "payments": [
-    { "person_id": "<uuid>", "amount": "4200000000" }
-  ],
+  "payments": [{ "person_id": "<uuid>", "amount": "4200000000" }],
   "idempotency_key": "<client uuid>"
 }
 ```
@@ -584,15 +590,15 @@ Every response from these routes carries `Cache-Control: no-store`.
 All collection routes are paged: `?limit=50&cursor=<opaque>`, newest first, and
 return `{ "items": [...], "next_cursor": "<opaque> | null" }`.
 
-| Route | Who | Returns |
-|---|---|---|
-| `GET /me/balance` | recipient | `{ "available": "<base units>", "pending": "<base units>", "as_of_slot": 123 }` from the AES balance (ADR B3) |
-| `GET /company/balance` | company admin | `{ "available": "<base units>", "pending": "<base units>", "as_of_slot": 123 }`, the company's private balance, for the Deposit screen and the shell |
-| `GET /me/payments` | recipient | their payments |
-| `GET /company/payments` | company admin | the company's payments |
-| `GET /company/people/amounts` | company admin | the roster amounts (#64) |
-| `PUT /company/people/:person_id/amount` | company admin | set one amount, `{ "amount": "<base units>" }`, stored encrypted |
-| `GET /audit/:company_id/payments` | auditor with a grant on that company | decrypted amounts for that company |
+| Route                                   | Who                                  | Returns                                                                                                                                              |
+| --------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /me/balance`                       | recipient                            | `{ "available": "<base units>", "pending": "<base units>", "as_of_slot": 123 }` from the AES balance (ADR B3)                                        |
+| `GET /company/balance`                  | company admin                        | `{ "available": "<base units>", "pending": "<base units>", "as_of_slot": 123 }`, the company's private balance, for the Deposit screen and the shell |
+| `GET /me/payments`                      | recipient                            | their payments                                                                                                                                       |
+| `GET /company/payments`                 | company admin                        | the company's payments                                                                                                                               |
+| `GET /company/people/amounts`           | company admin                        | the roster amounts (#64)                                                                                                                             |
+| `PUT /company/people/:person_id/amount` | company admin                        | set one amount, `{ "amount": "<base units>" }`, stored encrypted                                                                                     |
+| `GET /audit/:company_id/payments`       | auditor with a grant on that company | decrypted amounts for that company                                                                                                                   |
 
 **Blocked: `PUT` fails CORS preflight.** The service allows only GET and POST
 (see [Conventions](#conventions)), so a browser cannot call
@@ -678,11 +684,11 @@ are for the **admin role only**; any other role gets `403 forbidden_role`. They
 decrypt nothing and write no row to the decryption audit log, and **no response
 carries an amount**.
 
-| Route | Returns |
-|---|---|
-| `GET /company/auditors` | `{ "items": [ <auditor> ], "next_cursor": "<opaque> \| null" }`, newest invite first, paged like the other reads |
-| `POST /company/auditors` | the new `<auditor>`, with `201` |
-| `POST /company/auditors/:auditor_id/revoke` | `200` with `{ "status": "revoked" }` |
+| Route                                       | Returns                                                                                                          |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `GET /company/auditors`                     | `{ "items": [ <auditor> ], "next_cursor": "<opaque> \| null" }`, newest invite first, paged like the other reads |
+| `POST /company/auditors`                    | the new `<auditor>`, with `201`                                                                                  |
+| `POST /company/auditors/:auditor_id/revoke` | `200` with `{ "status": "revoked" }`                                                                             |
 
 An auditor:
 
@@ -733,7 +739,10 @@ returns `{ "items": [ <entry> ], "next_cursor": "<opaque> | null" }`.
 {
   "id": "<uuid>",
   "at": "2026-10-03T18:00:00Z",
-  "actor": { "kind": "service | company | recipient | auditor", "label": "Ana Ribeiro" },
+  "actor": {
+    "kind": "service | company | recipient | auditor",
+    "label": "Ana Ribeiro"
+  },
   "action": "read_payments | read_balance | export_csv",
   "scope": "Company payments"
 }
@@ -833,8 +842,8 @@ that findings 9 and 10 ask for: [Auditors](#auditors-), the
 the problem, why it is real, and the suggested change. The backend owner decides.
 
 1. **A payroll run cannot prepare its payments together.**
-   *Problem.* `POST /runs` returns N independent unsigned transactions at once.
-   *Why it is real.* `confidential::build` generates each transfer's proofs and the
+   _Problem._ `POST /runs` returns N independent unsigned transactions at once.
+   _Why it is real._ `confidential::build` generates each transfer's proofs and the
    new decryptable balance from one snapshot of the sender account
    (`confidential.rs:83-103`), and `TRANSFER_API.md` says to prepare again after any
    balance change. Payments 2 to N were built against the balance before payment 1,
@@ -843,7 +852,7 @@ the problem, why it is real, and the suggested change. The backend owner decides
    is limited to 10 per wallet per minute (`wrap_limits.rs:64`), there are 4 proof
    workers (`transfer.rs:89`) and a 30 s timeout (`wrap_limits.rs:107`), and the
    confirm polling shares the 30 per peer per minute quota (`wrap_limits.rs:46`).
-   *Suggested change.* `POST /runs` creates only the run and the payment rows. Add
+   _Suggested change._ `POST /runs` creates only the run and the payment rows. Add
    `POST /runs/:run_id/payments/:payment_id/prepare`, called one at a time after the
    previous payment confirms. Add a `max_payments` limit (the 8 KiB body holds about
    100 entries), a `409 run_in_progress` while a run is unfinished, and a separate
@@ -852,52 +861,52 @@ the problem, why it is real, and the suggested change. The backend owner decides
    codes, or allow a `person_id` field in run errors.
 
 2. **The AES key is not stored, so three routes cannot work as written.**
-   *Problem.* `/transfer` needs `aes_key` from the browser, `GET /me/balance`
+   _Problem._ `/transfer` needs `aes_key` from the browser, `GET /me/balance`
    (ADR B3) and apply-pending (#68, "the new AES balance needs the server-held key")
    have no key to use.
-   *Why it is real.* `ViewingKey::derive` discards the balance key
+   _Why it is real._ `ViewingKey::derive` discards the balance key
    (`elgamal.rs:28-30`, `_balance_key`), and Vault stores only the ElGamal secret
    (`vault.rs:58-67`; `TRANSFER_API.md`: "Vault retains only the ElGamal secret").
    The browser would have to keep the derivation signature to rebuild the AES key,
    and that signature is key-equivalent, which is what B17 was chosen to avoid.
    Separately, only the available balance has an AES copy: `pending` is
    ElGamal-only and needs a discrete-log solve, so B3 does not cover it.
-   *Suggested change.* Derive and store the AES key at enroll (a new Vault format
+   _Suggested change._ Derive and store the AES key at enroll (a new Vault format
    version) and drop `aes_key` from `/transfer`. Decide how `pending` is shown
    (slow decrypt, or not shown as an amount).
 
 3. **`/keys/enroll` can be squatted.**
-   *Problem.* An attacker can enroll a victim's token account first. The victim then
+   _Problem._ An attacker can enroll a victim's token account first. The victim then
    gets `key_already_enrolled`, and their transfers fail.
-   *Why it is real.* `viewing_keys` is keyed by `token_account` alone
+   _Why it is real._ `viewing_keys` is keyed by `token_account` alone
    (`20260929000000_encrypted_viewing_keys.sql:17`) and `store_viewing_key` does not
    check that the wallet owns the account (lines 40-63; `vault.rs:47-48` leaves that
    to the caller). The attacker signs the derivation message for the victim's token
    account with their own wallet. `read_viewing_key` then finds no row for the
    victim's wallet and account (lines 98-99), so `vault::load` fails
    (`transfer.rs:196-204`, `503 key_storage_unavailable`).
-   *Suggested change.* Body `{wallet, token_account, signature}`. Require a linked
+   _Suggested change._ Body `{wallet, token_account, signature}`. Require a linked
    wallet and an on-chain check that `wallet` owns `token_account` before enrolling,
    a per-user rate limit and `Cache-Control: no-store`. The derivation is per token
    account, so a wallet with several accounts enrolls each one.
 
 4. **Recipients have no way to link a wallet, and `wallet` fields are not bound to
    the caller.**
-   *Problem.* Only `/transfer` accepts `wallet_signature`
+   _Problem._ Only `/transfer` accepts `wallet_signature`
    (`transfer.rs:101,158`), and recipients never call it. The other wallet routes
    take a bare `wallet`.
-   *Why it is real.* Without a link, `/unwrap` cannot tell whose `matches` it is
+   _Why it is real._ Without a link, `/unwrap` cannot tell whose `matches` it is
    returning, and a caller could pass another person's wallet and read their payment
    ids and dates.
-   *Suggested change.* Add `POST /wallets/link`, or accept `wallet_signature` on
+   _Suggested change._ Add `POST /wallets/link`, or accept `wallet_signature` on
    every wallet route. Bind every `wallet` field to the caller's linked wallet and
    answer `403 wallet_access_denied` otherwise.
 
 5. **Retry and duplicate handling are undefined.**
-   *Problem.* Nothing says how many prepare attempts a payment may have or when a
+   _Problem._ Nothing says how many prepare attempts a payment may have or when a
    retry is safe. A new `/transfer` prepare always gives a new `request_id`, so
    retrying while the first may still land pays twice.
-   *Suggested change.* Define attempts per payment. Allow a retry only after the
+   _Suggested change._ Define attempts per payment. Allow a retry only after the
    indexer shows the previous attempt expired: its blockhash is past and the
    signature is absent at finalized commitment. Bind `idempotency_key` to the user
    and the key together with a hash of the payload, and answer a reused key with a
@@ -906,10 +915,10 @@ the problem, why it is real, and the suggested change. The backend owner decides
    records the signature.
 
 6. **The reveal-risk warning has nowhere to come from.**
-   *Problem.* The flow says `409 reveal_risk_not_acknowledged` makes the app show a
+   _Problem._ The flow says `409 reveal_risk_not_acknowledged` makes the app show a
    warning from `level`, but a 409 carries only a code (`error.rs:80`), not `level`
    or `matches`.
-   *Suggested change.* A check call (for example `POST /unwrap/check`) returns `200`
+   _Suggested change._ A check call (for example `POST /unwrap/check`) returns `200`
    with `{ "requires_acknowledgement": true, "reveal_risk": { ... } }` before
    prepare. `acknowledge_reveal_risk: true` can be sent up front, so it is advisory
    and not a security control. Echo `level` only, not the tolerance (question 11).
@@ -917,28 +926,28 @@ the problem, why it is real, and the suggested change. The backend owner decides
    default, or any address"), and the response has no field for one.
 
 7. **The transparent fallback is a silent privacy downgrade.**
-   *Problem.* #60 falls back to ordinary Token-2022 transfers when the ZK program is
+   _Problem._ #60 falls back to ordinary Token-2022 transfers when the ZK program is
    unavailable. The amounts become public and the admin may not know.
-   *Suggested change.* An `allow_transparent` flag on a run, default `false`, and a
+   _Suggested change._ An `allow_transparent` flag on a run, default `false`, and a
    pre-flight availability signal (question 9). The admin must consent before any
    transparent payment is prepared.
 
 8. **The fee-payer question is about policy, not order.**
-   *Problem.* Question 1 asks "which key signs first".
-   *Why it is real.* The message fixes where each signature sits; the order in which
+   _Problem._ Question 1 asks "which key signs first".
+   _Why it is real._ The message fixes where each signature sits; the order in which
    the parties sign does not matter on Solana. Today the wallet is both fee payer and
    only signer (`transfer.rs:246`, `wrap.rs:119`). What is open is who co-signs,
    when (before the bytes are returned, or in a second call) and under what spend
    policy (#66 asks for spend limits and monitoring). The client also cannot verify
    an amount, because it is a ciphertext.
-   *Suggested change.* Settle co-sign timing and spend policy first. Before signing,
+   _Suggested change._ Settle co-sign timing and spend policy first. Before signing,
    the client should at least decode the message and verify the fee payer, the
    programs, the source, the destination and the mint.
 
 9. **The auditor model does not match the tenancy schema.**
-   *Problem.* `/audit/:company_id` and the company picker in #88 assume an auditor
+   _Problem._ `/audit/:company_id` and the company picker in #88 assume an auditor
    serves several companies, and there is no way to add or remove one.
-   *Why it is real.* `memberships` has `user_id` as primary key, so one user has one
+   _Why it is real._ `memberships` has `user_id` as primary key, so one user has one
    role in one company (`20261001000000_tenancy.sql:13-18`): the company id in the
    path is redundant and the picker is impossible. Invite inserts are granted to the
    service role only (line 114), so there is no route to invite an auditor by email.
@@ -946,33 +955,33 @@ the problem, why it is real, and the suggested change. The backend owner decides
    nobody has a delete grant on `memberships` (lines 100-103), so an accepted auditor
    cannot be revoked. People removed from a company must still read their own
    history (lines 125-127).
-   *Suggested change.* Derive the company from the caller's membership and drop
+   _Suggested change._ Derive the company from the caller's membership and drop
    `:company_id` (or require it to equal the membership). Add routes to invite and to
    revoke an auditor, with the grants they need. Read the role from the database on
    every call. `GET /me/payments` must not depend on `people.status`.
 
 10. **The read routes are too thin for the screens that use them.**
-    *Problem.* A balance read in the shell writes one audit row per navigation,
+    _Problem._ A balance read in the shell writes one audit row per navigation,
     which drowns the audit trail (`vault.rs:74-85` audits every key read and caches
     nothing). Some screens have no route at all.
-    *Suggested change.* Read balances on demand and cache them in memory. Add
+    _Suggested change._ Read balances on demand and cache them in memory. Add
     `GET /me/status` (linked, enrolled, configured, pending) so #80 can resume, by-id
     payment reads for receipts, a run list, and a person filter. Specify cursors as
     keyset pagination on an immutable `created_at` (with the id as a tie-breaker), a
     documented maximum `limit`, and `400 invalid_cursor`.
 
 11. **A user can burn another wallet's prepare quota.**
-    *Problem.* In `/transfer`, `limits.wallet(wallet)` runs after authentication but
+    _Problem._ In `/transfer`, `limits.wallet(wallet)` runs after authentication but
     **before** `authorize_wallet` (`transfer.rs:152-159`). Any signed-in user can send
     prepares naming a victim's `company_wallet` and use up its 10 per minute. `/wrap`
     has the same property with no authentication at all (`wrap.rs:76`).
-    *Suggested change.* Run the wallet quota after `authorize_wallet`. Key the quotas
+    _Suggested change._ Run the wallet quota after `authorize_wallet`. Key the quotas
     for the run routes on the authorized user, not on a field of the request.
 
 12. **There is no machine-readable schema, and the B13 wording was inverted.**
-    *Problem.* This document, the client's schemas and the mock handlers can drift
+    _Problem._ This document, the client's schemas and the mock handlers can drift
     apart, and nothing checks them against the Rust tests.
-    *Suggested change.* Publish an OpenAPI or JSON Schema file that both the mocks and
+    _Suggested change._ Publish an OpenAPI or JSON Schema file that both the mocks and
     the Rust tests validate. The ADR B13 note is fixed in [Roles](#authentication--for-transfer--for-everything-else):
     B13 makes RLS the boundary because the client reads Postgres directly, and these
     service routes rely on the service's own checks.

@@ -53,8 +53,8 @@ export function AppShell({
         email={email}
         onMenu={() => setIsDrawerOpen(true)}
       />
-      <div className="lg:grid lg:grid-cols-[232px_minmax(0,1fr)]">
-        <aside className="sticky top-14 hidden h-[calc(100svh-3.5rem)] border-r border-line bg-surface-subtle lg:block">
+      <div className="lg:grid lg:grid-cols-[232px_minmax(0,1fr)] print:block">
+        <aside className="sticky top-14 hidden h-[calc(100svh-3.5rem)] border-r border-line bg-surface-subtle lg:block print:hidden">
           <Sidebar role={role} balance={shownBalance} />
         </aside>
         <main className="min-w-0 px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
@@ -116,7 +116,7 @@ function BarTop({
   onMenu: () => void
 }) {
   return (
-    <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b border-line bg-surface px-4 sm:px-6">
+    <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b border-line bg-surface px-4 sm:px-6 print:hidden">
       <button
         type="button"
         onClick={onMenu}

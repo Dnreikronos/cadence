@@ -59,21 +59,21 @@ the real service and wiring Turnkey; no screen is redone.
 
 ## Tasks
 
-| # | Task | Issue | Routes | Depends on |
-|---|---|---|---|---|
-| F1 | Foundation: demo viewer, wallet provider, money helpers, shell wiring | #76 | `/sign-in`, shell | none |
-| F2 | Client and mock additions: auditors, access log, status | #59, #88, #80 | none | none |
-| A | Company people and invites on the client | #81 | `/company/people` | F1 |
-| B | Company deposit on the client | #82 | `/company/deposit` | F1 |
-| C | Payroll runs: new run, progress, retry, payments home | #83 | `/company`, `/company/runs/new`, `/company/runs/[id]` | F1 |
-| D | Company history, receipts and export | #84 | `/company/receipts` | F1 |
-| E | Auditors on the client (João's #112, then migrated) | #85 | `/company/auditors` | F2, #112 |
-| G | Activation: wallet, key enrollment, account setup | #80 | `/activate` | F1, F2 |
-| H | Recipient: balance, history, receipts | #86 | `/me`, `/me/history` | F1 |
-| I | Recipient: withdraw with the reveal-risk warning | #87 | `/me/withdraw` | F1 |
-| J | Auditor panel and access log | #88 | `/audit`, `/audit/access-log` | F1, F2 |
-| K | Sign-in completion: invite acceptance, sign-out, empty states | #76 | `(auth)`, `/auth/confirm` | F1 |
-| Q | End-to-end tests, accessibility and design pass, docs | all | none | A to K |
+| #   | Task                                                                  | Issue         | Routes                                                | Depends on |
+| --- | --------------------------------------------------------------------- | ------------- | ----------------------------------------------------- | ---------- |
+| F1  | Foundation: demo viewer, wallet provider, money helpers, shell wiring | #76           | `/sign-in`, shell                                     | none       |
+| F2  | Client and mock additions: auditors, access log, status               | #59, #88, #80 | none                                                  | none       |
+| A   | Company people and invites on the client                              | #81           | `/company/people`                                     | F1         |
+| B   | Company deposit on the client                                         | #82           | `/company/deposit`                                    | F1         |
+| C   | Payroll runs: new run, progress, retry, payments home                 | #83           | `/company`, `/company/runs/new`, `/company/runs/[id]` | F1         |
+| D   | Company history, receipts and export                                  | #84           | `/company/receipts`                                   | F1         |
+| E   | Auditors on the client (João's #112, then migrated)                   | #85           | `/company/auditors`                                   | F2, #112   |
+| G   | Activation: wallet, key enrollment, account setup                     | #80           | `/activate`                                           | F1, F2     |
+| H   | Recipient: balance, history, receipts                                 | #86           | `/me`, `/me/history`                                  | F1         |
+| I   | Recipient: withdraw with the reveal-risk warning                      | #87           | `/me/withdraw`                                        | F1         |
+| J   | Auditor panel and access log                                          | #88           | `/audit`, `/audit/access-log`                         | F1, F2     |
+| K   | Sign-in completion: invite acceptance, sign-out, empty states         | #76           | `(auth)`, `/auth/confirm`                             | F1         |
+| Q   | End-to-end tests, accessibility and design pass, docs                 | all           | none                                                  | A to K     |
 
 Parallelism: F1 and F2 first, in parallel. Then A to K in parallel in separate
 worktrees; merge in the order they are green, rebasing the rest. Q last.

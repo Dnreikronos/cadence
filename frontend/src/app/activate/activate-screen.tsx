@@ -337,7 +337,7 @@ function WhoSeesWhat() {
           hasAuditor={false}
           label="Who can see your payments"
           description="You, the company that pays you, any auditor it appoints and Cadence can read the amounts of your payments. The public cannot: on-chain they are ciphertext."
-          note="Cadence aims to log every read of an amount."
+          cadenceLine="Cadence aims to log every read of an amount."
         />
       </div>
       <dl className="mt-4 space-y-3 text-ui/normal">

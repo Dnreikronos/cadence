@@ -4,13 +4,13 @@ Proposed layout, following the convention used in `supa-skeleton`. Nothing here
 is established yet — if this doc set moves into an existing repo, match that
 repo's paths instead of these.
 
-| Genre | Path |
-|---|---|
-| PRD | `docs/prd-<slug>.md` |
-| ADR / decision log | `docs/decisions/YYYY-MM-DD-<slug>.md` |
-| Implementation plan | `docs/plans/YYYY-MM-DD-NNN-plan-<slug>.md` |
-| Design deep-dive | `docs/dev/<UPPER_SNAKE_CASE>.md` |
-| Spike / POC report | `docs/dev/spikes/YYYY-MM-DD-<slug>.md` |
+| Genre                | Path                                                    |
+| -------------------- | ------------------------------------------------------- |
+| PRD                  | `docs/prd-<slug>.md`                                    |
+| ADR / decision log   | `docs/decisions/YYYY-MM-DD-<slug>.md`                   |
+| Implementation plan  | `docs/plans/YYYY-MM-DD-NNN-plan-<slug>.md`              |
+| Design deep-dive     | `docs/dev/<UPPER_SNAKE_CASE>.md`                        |
+| Spike / POC report   | `docs/dev/spikes/YYYY-MM-DD-<slug>.md`                  |
 | Past-problem writeup | `docs/solutions/<category>/<claim-as-sentence-slug>.md` |
 
 ## Product
