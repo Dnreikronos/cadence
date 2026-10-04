@@ -10,36 +10,48 @@ import { unitsToUsd } from "@/lib/money"
 import { initialsOf } from "@/lib/runs/people"
 import {
   excludedNote,
+  isTicked,
   kindLabels,
+  type Choices,
   type Excluded,
   type PayrollPerson,
 } from "@/lib/runs/plan"
 
-// The people who can be paid, each with a checkbox. Everyone starts ticked.
+// The people who can be paid, each with a checkbox. Everyone starts ticked except whoever
+// was paid in the last 24 hours: ticking them again is a choice, and a warned one.
 export function PayableList({
   payable,
-  unticked,
+  recentlyPaid,
+  choices,
   onToggle,
   onToggleAll,
   disabled,
 }: {
   payable: readonly PayrollPerson[]
-  unticked: ReadonlySet<string>
+  recentlyPaid: ReadonlySet<string>
+  choices: Choices
   onToggle: (id: string) => void
   onToggleAll: (selectAll: boolean) => void
   disabled: boolean
 }) {
-  const selected = payable.length - unticked.size
-  const all = selected === payable.length
+  const selectable = payable.filter((person) => !recentlyPaid.has(person.id))
+  const ticked = selectable.filter((person) =>
+    isTicked(person.id, recentlyPaid, choices),
+  ).length
+  const all = selectable.length > 0 && ticked === selectable.length
+  const someRepaid = payable.some(
+    (person) =>
+      recentlyPaid.has(person.id) && isTicked(person.id, recentlyPaid, choices),
+  )
   return (
     <div className="overflow-hidden rounded-xl border border-line bg-surface">
       <label className="flex min-h-11 items-center gap-3 border-b border-line bg-surface-subtle px-4 py-2 text-label text-ink-muted uppercase">
         <input
           type="checkbox"
           checked={all}
-          disabled={disabled}
+          disabled={disabled || selectable.length === 0}
           ref={(input) => {
-            if (input) input.indeterminate = selected > 0 && !all
+            if (input) input.indeterminate = (ticked > 0 && !all) || someRepaid
           }}
           onChange={() => onToggleAll(!all)}
           className="size-4 shrink-0 accent-ink"
@@ -51,7 +63,8 @@ export function PayableList({
           <PayableRow
             key={person.id}
             person={person}
-            ticked={!unticked.has(person.id)}
+            ticked={isTicked(person.id, recentlyPaid, choices)}
+            recent={recentlyPaid.has(person.id)}
             disabled={disabled}
             onToggle={() => onToggle(person.id)}
           />
@@ -64,15 +77,18 @@ export function PayableList({
 function PayableRow({
   person,
   ticked,
+  recent,
   disabled,
   onToggle,
 }: {
   person: PayrollPerson
   ticked: boolean
+  recent: boolean
   disabled: boolean
   onToggle: () => void
 }) {
   const id = useId()
+  const warning = `${id}-warning`
   return (
     <li className="border-b border-line last:border-0">
       <label
@@ -85,14 +101,22 @@ function PayableRow({
           checked={ticked}
           disabled={disabled}
           onChange={onToggle}
+          aria-describedby={recent ? warning : undefined}
           className="size-4 shrink-0 accent-ink"
         />
         <span aria-hidden>
           <AvatarPerson initials={initialsOf(person.name)} size={30} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-ui font-medium wrap-break-word text-ink">
-            {person.name}
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-ui font-medium wrap-break-word text-ink">
+              {person.name}
+            </span>
+            {recent && (
+              <span className="rounded-full border border-warning-border bg-warning-bg px-2 py-0.5 text-[11.5px] whitespace-nowrap text-warning-fg">
+                Paid recently
+              </span>
+            )}
           </span>
           <span className="block text-caption text-ink-muted">
             {kindLabels[person.kind]} ·{" "}
@@ -104,6 +128,20 @@ function PayableRow({
           className={ticked ? "text-ui" : "text-ui text-ink-muted"}
         />
       </label>
+      {recent && (
+        <p
+          id={warning}
+          className={
+            ticked
+              ? "px-4 pb-3 text-caption/normal font-medium text-danger-fg"
+              : "px-4 pb-3 text-caption/normal text-ink-muted"
+          }
+        >
+          {ticked
+            ? "Paid in the last 24 hours. Ticked again, this pays them a second time."
+            : "Paid in the last 24 hours, so not ticked. Tick to pay again."}
+        </p>
+      )}
     </li>
   )
 }

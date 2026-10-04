@@ -22,6 +22,11 @@ const pills: Record<
     className: "border-pending/40 text-ink",
     dot: "bg-pending animate-pulse motion-reduce:animate-none",
   },
+  unknown: {
+    label: "Check needed",
+    className: "border-warning-border bg-warning-bg text-warning-fg",
+    dot: "bg-warning-dot",
+  },
   confirmed: {
     label: "Confirmed",
     className: "border-success-border bg-success-bg text-success-fg",

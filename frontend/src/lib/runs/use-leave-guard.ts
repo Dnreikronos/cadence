@@ -4,10 +4,14 @@ import { useEffect } from "react"
 import { leavesPage } from "./leave"
 
 const warning =
-  "Payments are still being signed. If you leave now, the ones not signed yet won't be sent."
+  "A payment is still being signed or confirmed. If you leave now, the ones not signed yet won't be sent, and you lose track of the ones in flight."
 
 // Asks before the page is left while `active`: closing or reloading the tab (the
-// browser's own prompt) and following a link inside the app (a confirm).
+// browser's own prompt) and following a link inside the app (a confirm). The browser's
+// Back button and `router.push` are not guarded: the App Router gives no hook to cancel
+// a client-side navigation, and faking one with history entries breaks Back for
+// everyone. The state this protects (signatures held only on screen) is why persisting
+// it is a prerequisite for real signing.
 export function useLeaveGuard(active: boolean) {
   useEffect(() => {
     if (!active) return

@@ -10,6 +10,8 @@ import { isApiError } from "@/lib/api/errors"
 import { usePayrollPeople, useRun } from "@/lib/queries/payroll"
 import { runMessage } from "@/lib/runs/messages"
 import { nameLookup } from "@/lib/runs/people"
+import { holdsUnconfirmed } from "@/lib/runs/progress"
+import { useLeaveGuard } from "@/lib/runs/use-leave-guard"
 import { useRunSigner } from "@/lib/runs/use-run-signer"
 import { RunProgress } from "../run-progress"
 
@@ -17,6 +19,7 @@ export function RunScreen({ runId }: { runId: string }) {
   const run = useRun(runId)
   const people = usePayrollPeople()
   const signer = useRunSigner()
+  useLeaveGuard(signer.busy || holdsUnconfirmed(signer.local))
 
   const data = run.data
   if (!data && !run.isError) {
@@ -68,7 +71,7 @@ export function RunScreen({ runId }: { runId: string }) {
       <RunProgress
         runId={runId}
         signer={signer}
-        nameOf={nameLookup(people.data)}
+        nameOf={nameLookup(people.data, !people.isPending)}
       />
       <div className="flex flex-wrap gap-2">
         <Link

@@ -11,53 +11,80 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import type { RunCreated } from "@/lib/api/schemas"
 import { randomUuid } from "@/lib/api/uuid"
-import { formatUnits, unitsToUsd } from "@/lib/money"
+import { unitsToUsd } from "@/lib/money"
 import {
   useCompanyBalance,
   useCreateRun,
   useInviteRecipient,
   usePayrollPeople,
+  useRecentlyPaid,
 } from "@/lib/queries/payroll"
 import type { ViewerScope } from "@/lib/queries/keys"
 import { runMessage } from "@/lib/runs/messages"
 import { nameLookup } from "@/lib/runs/people"
 import {
+  allChoices,
   attemptKey,
   buildRunRequest,
+  createdMatches,
   fingerprintOf,
+  formatExact,
+  isTicked,
   maxRunPayments,
   payLabel,
   peopleCount,
+  repaid,
   runTotal,
   selectRecipients,
   shortfall,
   splitRoster,
   type AttemptKey,
+  type Choices,
+  type PayrollPerson,
 } from "@/lib/runs/plan"
+import { holdsUnconfirmed } from "@/lib/runs/progress"
+import { useLeaveGuard } from "@/lib/runs/use-leave-guard"
 import { useRunSigner } from "@/lib/runs/use-run-signer"
 import { RunProgress } from "../run-progress"
 import { ConfirmRunDialog } from "./confirm-dialog"
 import { ExcludedList, PayableList } from "./roster"
 
+// What the confirmation shows and what is sent: fixed when the dialog opens, so a list
+// that refreshes underneath it cannot change who is paid.
+type Review = {
+  recipients: readonly PayrollPerson[]
+  total: string
+  repaid: readonly PayrollPerson[]
+}
+
+const nobody: ReadonlySet<string> = new Set()
+
 export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
   const people = usePayrollPeople()
   const balance = useCompanyBalance(viewer)
+  const recent = useRecentlyPaid()
   const create = useCreateRun()
   const invite = useInviteRecipient()
   const signer = useRunSigner()
+  // A run being created, signed or confirmed cannot be left without losing track of it.
+  useLeaveGuard(
+    create.isPending || signer.busy || holdsUnconfirmed(signer.local),
+  )
 
-  const [unticked, setUnticked] = useState<ReadonlySet<string>>(new Set())
+  const [choices, setChoices] = useState<Choices>({})
   const [invited, setInvited] = useState<ReadonlySet<string>>(new Set())
   const [confirming, setConfirming] = useState(false)
+  const [review, setReview] = useState<Review | null>(null)
   const [created, setCreated] = useState<RunCreated | null>(null)
   const [createError, setCreateError] = useState<string | null>(null)
   // One idempotency key per attempt, kept across clicks and retries of the same list.
   const attempt = useRef<AttemptKey | null>(null)
 
   const roster = useMemo(() => splitRoster(people.data ?? []), [people.data])
+  const recentlyPaid = recent.data ?? nobody
   const recipients = useMemo(
-    () => selectRecipients(roster.payable, unticked),
-    [roster.payable, unticked],
+    () => selectRecipients(roster.payable, recentlyPaid, choices),
+    [roster.payable, recentlyPaid, choices],
   )
   const total = runTotal(recipients)
   const missing = balance.data ? shortfall(total, balance.data.available) : null
@@ -83,7 +110,7 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
           runId={created.run_id}
           created={created}
           signer={signer}
-          nameOf={nameLookup(people.data)}
+          nameOf={nameLookup(people.data, !people.isPending)}
         />
         <div className="flex flex-wrap gap-2">
           <Link
@@ -105,7 +132,7 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
               attempt.current = null
               create.reset()
               setCreated(null)
-              setUnticked(new Set())
+              setChoices({})
             }}
             className={buttonVariants()}
           >
@@ -143,24 +170,33 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
   }
 
   function toggle(id: string) {
-    setUnticked((current) => {
-      const next = new Set(current)
-      if (!next.delete(id)) next.add(id)
-      return next
+    setChoices((current) => ({
+      ...current,
+      [id]: !isTicked(id, recentlyPaid, current),
+    }))
+  }
+
+  function openReview() {
+    setReview({
+      recipients,
+      total,
+      repaid: repaid(recipients, recentlyPaid),
     })
+    setCreateError(null)
+    setConfirming(true)
   }
 
   function startRun() {
-    if (!wallet.address) return
+    if (!wallet.address || !review) return
     const key = attemptKey(
       attempt.current,
-      fingerprintOf(wallet.address, recipients),
+      fingerprintOf(wallet.address, review.recipients),
       randomUuid,
     )
     attempt.current = key
     let request
     try {
-      request = buildRunRequest(wallet.address, recipients, key.key)
+      request = buildRunRequest(wallet.address, review.recipients, key.key)
     } catch {
       setCreateError("This run isn't valid. Check who is ticked and try again.")
       return
@@ -168,6 +204,13 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
     setCreateError(null)
     create.mutate(request, {
       onSuccess: (run) => {
+        // Sign only what was asked for: the same people, once each.
+        if (!createdMatches(request, run)) {
+          setCreateError(
+            "Cadence prepared payments for different people than you chose, so nothing was signed. Check your payments before trying again.",
+          )
+          return
+        }
         setCreated(run)
         setConfirming(false)
         void signer.start(run)
@@ -189,6 +232,9 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
     recipients.length === 0 ||
     tooMany ||
     missing !== null ||
+    // Neither the balance nor who was paid today can be guessed: wait for both.
+    !balance.data ||
+    !recent.data ||
     !signable ||
     people.isFetching
 
@@ -197,13 +243,12 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
       {roster.payable.length > 0 ? (
         <PayableList
           payable={roster.payable}
-          unticked={unticked}
+          recentlyPaid={recentlyPaid}
+          choices={choices}
           disabled={create.isPending}
           onToggle={toggle}
           onToggleAll={(selectAll) =>
-            setUnticked(
-              selectAll ? new Set() : new Set(roster.payable.map((p) => p.id)),
-            )
+            setChoices(allChoices(roster.payable, recentlyPaid, selectAll))
           }
         />
       ) : (
@@ -236,16 +281,18 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
           missing={missing}
           tooMany={tooMany}
           wallet={wallet}
+          recent={recent}
           blocked={blocked}
-          onReview={() => setConfirming(true)}
+          onReview={openReview}
         />
       )}
 
       <ConfirmRunDialog
         open={confirming}
         onOpenChange={closeDialog}
-        recipients={recipients}
-        total={total}
+        recipients={review?.recipients ?? []}
+        repaid={review?.repaid ?? []}
+        total={review?.total ?? "0"}
         pending={create.isPending}
         error={createError}
         onConfirm={startRun}
@@ -261,6 +308,7 @@ function Summary({
   missing,
   tooMany,
   wallet,
+  recent,
   blocked,
   onReview,
 }: {
@@ -270,6 +318,7 @@ function Summary({
   missing: string | null
   tooMany: boolean
   wallet: ReturnType<typeof useRunSigner>["wallet"]
+  recent: ReturnType<typeof useRecentlyPaid>
   blocked: boolean
   onReview: () => void
 }) {
@@ -324,7 +373,7 @@ function Summary({
           className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning-border bg-warning-bg p-3 text-ui/normal text-warning-fg"
         >
           <p className="min-w-0 flex-1 basis-56">
-            Your private balance is {formatUnits(missing)} short for this run.
+            Your private balance is {formatExact(missing)} short for this run.
             Deposits are public on-chain; payments from the private balance are
             not.
           </p>
@@ -333,9 +382,28 @@ function Summary({
             className={buttonVariants({ variant: "secondary", size: "sm" })}
           >
             <ArrowDownToLine className="size-3.5" />
-            Deposit {formatUnits(missing)}
+            Deposit {formatExact(missing)}
           </Link>
         </div>
+      )}
+      {recent.isError ? (
+        <p role="alert" className="text-ui/normal text-danger-fg">
+          Couldn&apos;t check who was paid in the last 24 hours, so a run
+          can&apos;t be started: it could pay someone twice.{" "}
+          <button
+            type="button"
+            onClick={() => recent.refetch()}
+            className="underline underline-offset-2"
+          >
+            Try again
+          </button>
+        </p>
+      ) : (
+        !recent.data && (
+          <p className="text-ui/normal text-ink-muted">
+            Checking who was paid in the last 24 hours…
+          </p>
+        )
       )}
       {tooMany && (
         <p role="alert" className="text-ui/normal text-danger-fg">
