@@ -370,3 +370,13 @@ details.faq[open] .faq-answer {
     transform: translateX(100%);
   }
 }
+
+/* A receipt prints alone: while its dialog is open, the rest of the page is left out. */
+@media print {
+  body:has([data-receipt-print]) {
+    overflow: visible !important;
+  }
+  body:has([data-receipt-print]) > :not(:has([data-receipt-print])) {
+    display: none !important;
+  }
+}
