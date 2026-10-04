@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import { isApiError, messageFor } from "@/lib/api"
 import { removalCopy } from "@/lib/auditors/copy"
+import { hasActiveAuditor } from "@/lib/people/view"
 import {
   canRetry,
   useAuditors,
@@ -42,8 +43,9 @@ export function AuditorsScreen() {
     if (!auditors.isFetching) refocus.current = null
   }, [auditors.isFetching, auditors.dataUpdatedAt])
 
-  const hasAuditor =
-    auditors.data?.rows.some((a) => a.status === "active") ?? false
+  // Unknown while the list loads or failed, and for an unknown status: the longer,
+  // safe sentence, as on the other screens.
+  const hasAuditor = hasActiveAuditor(auditors.data)
 
   const inviteButton = (
     <button

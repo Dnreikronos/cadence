@@ -182,6 +182,18 @@ describe("hasActiveAuditor", () => {
     expect(hasActiveAuditor({ rows: [], truncated: false })).toBe(false)
   })
 
+  it("counts a status the app does not know as a reader, so the sentence never leaves one out", () => {
+    const unknown = { status: "invited", unrecognized: true }
+    // Even when the rest of the list is certain, and even in a partial list.
+    expect(hasActiveAuditor({ rows: [unknown], truncated: false })).toBe(true)
+    expect(
+      hasActiveAuditor({
+        rows: [{ status: "invite-expired" }, unknown],
+        truncated: true,
+      }),
+    ).toBe(true)
+  })
+
   it("is unknown while loading or failed, and for a partial list without one", () => {
     expect(hasActiveAuditor(undefined)).toBeUndefined()
     expect(

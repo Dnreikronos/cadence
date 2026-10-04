@@ -12,6 +12,7 @@ import { api } from "@/lib/api"
 import type { ApiClient } from "@/lib/api/client"
 import { isApiError, messageFor } from "@/lib/api/errors"
 import {
+  isKnownAuditorStatus,
   knownAuditorStatus,
   type Auditor,
   type AuditorStatus,
@@ -20,7 +21,13 @@ import { removalCopy } from "@/lib/auditors/copy"
 import { queryKeys } from "./keys"
 
 // An auditor as the screen shows it: a status the screen knows how to describe.
-export type AuditorRow = Omit<Auditor, "status"> & { status: AuditorStatus }
+export type AuditorRow = Omit<Auditor, "status"> & {
+  status: AuditorStatus
+  // Set when the service sent a status this app does not know. The row shows as a
+  // pending invite, but the sentences that name who can read amounts count it as a
+  // reader (`hasActiveAuditor`), so they never leave one out.
+  unrecognized?: true
+}
 
 export type AuditorList = {
   rows: AuditorRow[]
@@ -49,7 +56,11 @@ export async function listAllAuditors(
       { signal },
     )
     for (const item of page.items) {
-      byId.set(item.id, { ...item, status: knownAuditorStatus(item.status) })
+      byId.set(item.id, {
+        ...item,
+        status: knownAuditorStatus(item.status),
+        ...(isKnownAuditorStatus(item.status) ? {} : { unrecognized: true }),
+      })
     }
     // A cursor that does not move would read the same page for ever.
     more = !!page.next_cursor && page.next_cursor !== cursor
