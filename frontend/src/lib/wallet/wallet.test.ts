@@ -68,7 +68,7 @@ describe("mockWalletFor", () => {
     const wallet = mockWalletFor("admin")
     const signed = await wallet.signer.signTransaction(Uint8Array.of(1, 2))
     expect([...signed]).toEqual([1, 2, 1])
-    expect(await wallet.submit(signed)).toMatch(/^MockSignature\d+1*$/)
+    expect(await wallet.submit(signed)).toMatch(/^MockSignature\d+A1*$/)
   })
 })
 
