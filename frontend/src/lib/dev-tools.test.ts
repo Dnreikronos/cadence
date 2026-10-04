@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { devToolsEnabled } from "./dev-tools"
+import { blocksDevPath, devToolsEnabled, isDevPath } from "./dev-tools"
 
 describe("devToolsEnabled", () => {
   it("is on in the dev server with no setting", () => {
@@ -26,4 +26,75 @@ describe("devToolsEnabled", () => {
       devToolsEnabled({ nodeEnv: "production", isMainnet: true, flag: "1" }),
     ).toBe(false)
   })
+})
+
+describe("isDevPath", () => {
+  it.each([
+    "/dev",
+    "/dev/",
+    "/dev/api",
+    "/dev/components/shell/admin",
+    "/dev//api",
+    "//dev",
+    "/DEV",
+    "/Dev/Api",
+    "/%64ev",
+    "/%64ev/api",
+    "/dev%2Fapi",
+    "/%2564ev",
+    "/%44EV/",
+  ])("is %s", (path) => {
+    expect(isDevPath(path)).toBe(true)
+  })
+
+  it.each([
+    "/",
+    "/devices",
+    "/developers",
+    "/dev-tools",
+    "/company/dev",
+    "/company/dev/x",
+    "/me",
+    "/sign-in",
+    "/%E0%A4%A",
+  ])("is not %s", (path) => {
+    expect(isDevPath(path)).toBe(false)
+  })
+})
+
+describe("blocksDevPath, the middleware's decision", () => {
+  const production = { nodeEnv: "production", isMainnet: false }
+  const blocked = ["/dev", "/dev/", "/dev/api", "/%64ev", "/DEV/components"]
+
+  it.each(blocked)("blocks %s in production without the flag", (path) => {
+    expect(blocksDevPath(path, production)).toBe(true)
+    expect(blocksDevPath(path, { ...production, flag: "0" })).toBe(true)
+  })
+
+  it.each(blocked)(
+    "lets %s through with the flag, and in development",
+    (path) => {
+      expect(blocksDevPath(path, { ...production, flag: "1" })).toBe(false)
+      expect(
+        blocksDevPath(path, { nodeEnv: "development", isMainnet: false }),
+      ).toBe(false)
+    },
+  )
+
+  it.each(blocked)("blocks %s on mainnet whatever is set", (path) => {
+    expect(
+      blocksDevPath(path, {
+        nodeEnv: "development",
+        flag: "1",
+        isMainnet: true,
+      }),
+    ).toBe(true)
+  })
+
+  it.each(["/devices", "/", "/company", "/sign-in", "/me/history"])(
+    "never blocks %s",
+    (path) => {
+      expect(blocksDevPath(path, production)).toBe(false)
+    },
+  )
 })
