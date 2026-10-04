@@ -52,7 +52,7 @@ function setup(
     saved?: Submission | null
     wallet?: Partial<Wallet>
     storage?: "available" | "unavailable"
-    pendingUnits?: string
+    pendingUnits?: string | null
     signAndConfirm?: Deps["signAndConfirm"]
   } = {},
 ) {
@@ -111,7 +111,9 @@ function setup(
     refresh,
     toast,
     store,
-    pendingUnits: () => options.pendingUnits,
+    // Not given: the balance was read and nothing was pending. `null`: not known.
+    pendingUnits: () =>
+      options.pendingUnits === null ? undefined : (options.pendingUnits ?? "0"),
     now: () => clock,
     sleep,
   }
@@ -635,20 +637,77 @@ describe("MakePrivateController", () => {
       earlierPending: "200000000",
     })
     expect(toast).toHaveBeenCalledWith(
-      "1 USDC is now private, with your earlier pending deposit",
+      "1 USDC is now private, with your earlier pending deposit (200 USDC)",
     )
   })
 
   it("does not claim an earlier credit when none was pending", async () => {
-    for (const pendingUnits of [undefined, "0"]) {
-      const { controller } = setup({ pendingUnits })
-      await controller.deposit("1000000")
-      expect(controller.getState()).not.toHaveProperty("earlierPending", "0")
-      expect(controller.getState()).toEqual({
-        status: "done",
-        amount: "1000000",
-      })
+    const { controller } = setup({ pendingUnits: "0" })
+    await controller.deposit("1000000")
+    expect(controller.getState()).not.toHaveProperty("earlierPending", "0")
+    expect(controller.getState()).toEqual({
+      status: "done",
+      amount: "1000000",
+    })
+  })
+
+  it("says so without a number when it was not known what was pending", async () => {
+    const { controller, toast } = setup({ pendingUnits: null })
+    await controller.deposit("1000000")
+    expect(controller.getState()).toEqual({
+      status: "done",
+      amount: "1000000",
+      earlierPending: null,
+    })
+    expect(toast).toHaveBeenCalledWith(
+      "1 USDC is now private, with any earlier pending deposit",
+    )
+  })
+
+  it("keeps what was pending in the record, for a deposit picked up after a reload", async () => {
+    const { controller, records, saved } = setup({ pendingUnits: "200000000" })
+    const run = controller.deposit("1000000")
+    await run
+    expect(records.length).toBeGreaterThan(0)
+    expect(records.every((r) => r.earlier_pending === "200000000")).toBe(true)
+    expect(saved()).toBeNull()
+  })
+
+  it("records none as 0, and leaves the field out when it is not known", async () => {
+    const none = setup({ pendingUnits: "0" })
+    await none.controller.deposit("1000000")
+    expect(none.records[0].earlier_pending).toBe("0")
+    const unknown = setup({ pendingUnits: null })
+    await unknown.controller.deposit("1000000")
+    expect(unknown.records[0].earlier_pending).toBeUndefined()
+  })
+
+  it("carries the recorded amount into what it says after a reload", async () => {
+    const saved = {
+      kind: "wrap",
+      request_id: "a".repeat(64),
+      signature: SIG,
+      last_valid_block_height: 500,
+      wallet: COMPANY_WALLET,
+      at: 1_000_000,
+      earlier_pending: "200000000",
     }
+    const { controller } = setup({ saved })
+    await controller.start()
+    await vi.waitFor(() =>
+      expect(controller.getState().status).toBe("resolved"),
+    )
+    expect(controller.getState()).toMatchObject({
+      status: "resolved",
+      earlierPending: "200000000",
+    })
+    // An older record has no field: not known.
+    const older = setup({ saved: { ...saved, earlier_pending: undefined } })
+    await older.controller.start()
+    await vi.waitFor(() =>
+      expect(older.controller.getState().status).toBe("resolved"),
+    )
+    expect(older.controller.getState()).toMatchObject({ earlierPending: null })
   })
 
   it("applies a pending credit on its own, leaving no amount in the message", async () => {

@@ -8,7 +8,7 @@ import { fieldClass } from "@/components/ui/field"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import { describeUsdc } from "@/lib/deposit/controller"
-import { doneMessage } from "@/lib/deposit/message"
+import { confirmedMessage, doneMessage } from "@/lib/deposit/message"
 import { formatBaseUnits, toBaseUnits } from "@/lib/deposit/schema"
 import { makePrivateSteps, stepLabels } from "@/lib/deposit/types"
 import { hasActiveAuditor } from "@/lib/people/view"
@@ -435,7 +435,11 @@ function Resolved({
 }) {
   return (
     <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-ui/normal text-ink">
-      <p className="min-w-0">{resolvedText[state.outcome]}</p>
+      <p className="min-w-0">
+        {state.outcome === "confirmed"
+          ? confirmedMessage(state.earlierPending)
+          : resolvedText[state.outcome]}
+      </p>
       <button
         type="button"
         onClick={onDismiss}

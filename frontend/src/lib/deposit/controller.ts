@@ -8,7 +8,13 @@ import {
   runMakePrivate,
   type Resume,
 } from "./make-private"
-import { doneToast } from "./message"
+import {
+  doneToast,
+  earlierFromBalance,
+  earlierFromRecord,
+  earlierToRecord,
+  type EarlierPending,
+} from "./message"
 import { reconcileWrap, type Reconciled } from "./reconcile"
 import type { MakePrivateStep } from "./types"
 
@@ -28,9 +34,13 @@ export type MakePrivateState =
       retryable: boolean
     }
   // `amount` is absent when only a pending credit was made available.
-  | { status: "done"; amount?: string; earlierPending?: string }
+  | { status: "done"; amount?: string; earlierPending?: EarlierPending }
   // What the check of an earlier wrap found. Informational: the form is free.
-  | { status: "resolved"; outcome: Reconciled }
+  | {
+      status: "resolved"
+      outcome: Reconciled
+      earlierPending?: EarlierPending
+    }
 
 export type Deps = {
   wallet: string
@@ -63,7 +73,7 @@ export class MakePrivateController {
   // The amount of the deposit in flight, for a retry of its wrap step.
   private amount = ""
   // What was already pending when that deposit started.
-  private earlierPending: string | undefined
+  private earlierPending: EarlierPending = null
   private record: Submission | null = null
   // Whatever is running now; a stale run never touches the state or the flag.
   private generation = 0
@@ -109,8 +119,7 @@ export class MakePrivateController {
 
   deposit(units: string) {
     this.amount = units
-    const pending = this.getDeps().pendingUnits?.()
-    this.earlierPending = pending && BigInt(pending) > 0n ? pending : undefined
+    this.earlierPending = earlierFromBalance(this.getDeps().pendingUnits?.())
     return this.begin("wrap")
   }
 
@@ -203,6 +212,7 @@ export class MakePrivateController {
             signature: null,
             last_valid_block_height: wrap.last_valid_block_height,
             wallet: deps.wallet,
+            earlier_pending: earlierToRecord(this.earlierPending),
             at: (deps.now ?? Date.now)(),
           })
         },
@@ -272,7 +282,11 @@ export class MakePrivateController {
       if (!this.live(generation)) return
       deps.store.clear()
       deps.refresh()
-      this.set({ status: "resolved", outcome })
+      this.set({
+        status: "resolved",
+        outcome,
+        earlierPending: earlierFromRecord(record.earlier_pending),
+      })
     } catch {
       if (!this.live(generation) || abort.signal.aborted) return
       // The service could not be asked. Keep the record and the lock, and let

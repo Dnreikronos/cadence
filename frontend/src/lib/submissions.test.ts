@@ -44,6 +44,28 @@ describe("submissions", () => {
     expect(readSubmission("wrap", storage)).toEqual(record)
   })
 
+  it("keeps what was pending before a deposit, and reads a record from before that field existed", () => {
+    const storage = fakeStorage()
+    recordSubmission({ ...record, earlier_pending: "200000000" }, storage)
+    expect(readSubmission("wrap", storage)?.earlier_pending).toBe("200000000")
+    // The record above has no such field and is still valid.
+    clearSubmission("wrap", storage)
+    recordSubmission(record, storage)
+    expect(readSubmission("wrap", storage)).toEqual(record)
+    expect(readSubmission("wrap", storage)).not.toHaveProperty(
+      "earlier_pending",
+    )
+  })
+
+  it("drops a record whose earlier_pending is not digits", () => {
+    const storage = fakeStorage()
+    storage.setItem(
+      "cadence:submission:wrap",
+      JSON.stringify({ ...record, earlier_pending: "-5" }),
+    )
+    expect(readSubmission("wrap", storage)).toBeNull()
+  })
+
   it("stamps the time when none is given", () => {
     const storage = fakeStorage()
     const before = Date.now()
