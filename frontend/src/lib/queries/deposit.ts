@@ -1,23 +1,25 @@
 "use client"
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import {
-  canRetry,
-  failureMessage,
-  MakePrivateError,
-  needsSetup,
-  runMakePrivate,
-  type Resume,
-} from "@/lib/deposit/make-private"
-import type { MakePrivateStep } from "@/lib/deposit/types"
-import { formatUnits } from "@/lib/money"
+  MakePrivateController,
+  SUBMISSION_KIND,
+  type Deps,
+} from "@/lib/deposit/controller"
 import { readPublicUsdc } from "@/lib/solana/balances"
+import {
+  clearSubmission,
+  readSubmission,
+  recordSubmission,
+} from "@/lib/submissions"
 import { useSignAndConfirm } from "@/lib/wallet/context"
 import { invalidateBalances } from "./invalidate"
 import { queryKeys } from "./keys"
+
+export type { MakePrivateState } from "@/lib/deposit/controller"
 
 // The company's USDC that anyone can see on-chain, in base units. Money arrives
 // from outside the app, so it is refreshed while the screen is open.
@@ -39,110 +41,59 @@ export function useCompanyBalance(wallet: string) {
   })
 }
 
-export type MakePrivateState =
-  | { status: "idle" }
-  | { status: "running"; step: MakePrivateStep }
-  | {
-      status: "failed"
-      step: MakePrivateStep
-      resume: Resume
-      message: string
-      setupRequired: boolean
-      retryable: boolean
-    }
-  // `amount` is absent when only a pending credit was made available.
-  | { status: "done"; amount?: string }
-
 // Make a deposit private: wrap, sign, then apply the pending credit. Leaving the
-// screen stops the flow before anything more is sent; a deposit that already
-// landed shows up as pending and can be applied from the screen later.
+// screen stops the flow before anything more is sent. A wrap already handed to
+// the network is recorded, and checked when the screen comes back, before
+// another can be sent.
 export function useMakePrivate(wallet: string) {
   const queryClient = useQueryClient()
   const signAndConfirm = useSignAndConfirm()
-  const [state, setState] = useState<MakePrivateState>({ status: "idle" })
-  const running = useRef(false)
-  const controller = useRef<AbortController | null>(null)
-  // The amount of the deposit in flight, for a retry of its wrap step.
-  const amount = useRef("")
-
-  useEffect(() => () => controller.current?.abort(), [])
-
-  const refresh = useCallback(() => {
-    void invalidateBalances(queryClient)
-    void queryClient.invalidateQueries({ queryKey: queryKeys.deposit.all })
-  }, [queryClient])
-
-  const start = useCallback(
-    async (from: "wrap" | "apply") => {
-      if (running.current) return
-      running.current = true
-      const abort = new AbortController()
-      controller.current = abort
-      setState({
-        status: "running",
-        step: from === "wrap" ? "preparing" : "applying",
-      })
-      try {
-        await runMakePrivate({
-          from,
-          amount: amount.current,
-          wallet,
-          api,
-          signAndConfirm,
-          signal: abort.signal,
-          onStep: (step) => setState({ status: "running", step }),
-          // Each confirmed transaction moved money, whether or not the next step works.
-          onConfirmed: refresh,
-        })
-        const done = amount.current || undefined
-        toast.success(
-          done
-            ? `${formatUnits(done)} is now private`
-            : "Your pending USDC is now available",
-        )
-        setState({ status: "done", amount: done })
-      } catch (error) {
-        if (abort.signal.aborted) return
-        const failure =
-          error instanceof MakePrivateError
-            ? error
-            : new MakePrivateError("preparing", "wrap", error)
-        setState({
-          status: "failed",
-          step: failure.step,
-          resume: failure.resume,
-          message: failureMessage(failure),
-          setupRequired: needsSetup(failure),
-          retryable: canRetry(failure),
-        })
-      } finally {
-        running.current = false
-      }
+  const deps = useRef<Deps>(null as never)
+  deps.current = {
+    wallet,
+    api,
+    signAndConfirm,
+    refresh: () => {
+      void invalidateBalances(queryClient)
+      void queryClient.invalidateQueries({ queryKey: queryKeys.deposit.all })
     },
-    [wallet, signAndConfirm, refresh],
+    toast: (message) => toast.success(message),
+    store: {
+      read: () => readSubmission(SUBMISSION_KIND),
+      record: (record) => recordSubmission(record),
+      clear: () => clearSubmission(SUBMISSION_KIND),
+    },
+  }
+  const [controller] = useState(
+    () => new MakePrivateController(() => deps.current),
   )
+  const state = useSyncExternalStore(
+    controller.subscribe,
+    controller.getState,
+    controller.getState,
+  )
+
+  useEffect(() => {
+    controller.start()
+    return () => controller.dispose()
+  }, [controller])
+
+  // A sent wrap is not undone by leaving: say so before the tab closes.
+  const inFlight = controller.inFlight
+  useEffect(() => {
+    if (!inFlight) return
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [inFlight])
 
   return {
     state,
     // `units` is an integer base-unit string, already validated.
-    deposit: (units: string) => {
-      amount.current = units
-      return start("wrap")
-    },
-    applyPending: () => {
-      amount.current = ""
-      return start("apply")
-    },
-    retry: () => {
-      if (state.status !== "failed") return
-      if (state.resume === "check") return
-      return start(state.resume)
-    },
-    // After an unknown outcome: look at the balances instead of sending again.
-    check: () => {
-      refresh()
-      setState({ status: "idle" })
-    },
-    dismiss: () => setState({ status: "idle" }),
+    deposit: (units: string) => controller.deposit(units),
+    applyPending: () => controller.applyPending(),
+    retry: () => controller.retry(),
+    check: () => controller.check(),
+    dismiss: () => controller.dismiss(),
   }
 }

@@ -243,12 +243,108 @@ describe("runMakePrivate", () => {
       expect(canRetry(error)).toBe(false)
     })
 
+    it("never offers a second deposit when submit throws, since the node may have taken it", async () => {
+      const wallet = walletWith({
+        submit: vi.fn(async () => {
+          throw new Error("RPC timed out after broadcast")
+        }),
+      })
+      const { api, run } = setup(wallet)
+
+      const error = await failure(run())
+
+      expect(error).toMatchObject({ step: "confirming", resume: "check" })
+      expect(canRetry(error)).toBe(false)
+      expect(api.wrap.prepare).toHaveBeenCalledTimes(1)
+      expect(api.wrap.confirm).not.toHaveBeenCalled()
+    })
+
+    it("tells the caller the wrap is going out before submit runs, and the signature after", async () => {
+      const order: string[] = []
+      const wallet = walletWith({
+        submit: vi.fn(async () => {
+          order.push("submit")
+          return SIG
+        }),
+      })
+      const { run } = setup(wallet)
+
+      await run({
+        onSubmitting: (wrap) => order.push(`submitting ${wrap.request_id}`),
+        onSubmitted: (signature) => order.push(`submitted ${signature}`),
+      })
+
+      expect(order.slice(0, 3)).toEqual([
+        `submitting ${prepared("a").request_id}`,
+        "submit",
+        `submitted ${SIG}`,
+      ])
+    })
+
+    it("hands over the block height the transaction is good until", async () => {
+      const { run } = setup()
+      const seen = vi.fn()
+
+      await run({ onSubmitting: seen })
+
+      expect(seen).toHaveBeenCalledWith(
+        expect.objectContaining({ last_valid_block_height: 1 }),
+      )
+    })
+
+    it("does not say a wrap is going out when the person leaves while signing", async () => {
+      const abort = new AbortController()
+      const wallet = walletWith({
+        signer: {
+          address: COMPANY_WALLET,
+          signTransaction: async (bytes) => {
+            abort.abort(new Error("left"))
+            return bytes
+          },
+        },
+      })
+      const { run } = setup(wallet)
+      const seen = vi.fn()
+
+      const error = await failure(
+        run({ signal: abort.signal, onSubmitting: seen }),
+      )
+
+      expect(seen).not.toHaveBeenCalled()
+      expect(error.resume).toBe("wrap")
+    })
+
+    it("looks before it retries when the apply goes out and is not confirmed", async () => {
+      const { api, run } = setup()
+      let calls = 0
+      const signAndConfirm = vi.fn(
+        async (_prepared, confirm, onStep, extra) => {
+          if (++calls === 1) {
+            onStep?.("signing")
+            onStep?.("submitting")
+            extra.onSubmitted?.(SIG)
+            return confirm(SIG)
+          }
+          throw new ConfirmTimeoutError(SIG)
+        },
+      )
+
+      const error = await failure(
+        run({ signAndConfirm: signAndConfirm as never }),
+      )
+
+      expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
+      expect(error).toMatchObject({ step: "applying", resume: "check" })
+      expect(canRetry(error)).toBe(false)
+      expect(failureMessage(error)).toMatch(/Check your balances/)
+    })
+
     it("treats a confirm timeout as an unknown outcome, in plain words", async () => {
       const timeout = new ConfirmTimeoutError(SIG)
       const wrap = vi.fn(async (_prepared, _confirm, onStep, extra) => {
         onStep?.("signing")
         onStep?.("submitting")
-        extra.onSubmitted(SIG)
+        extra.onSubmitted?.(SIG)
         onStep?.("confirming")
         throw timeout
       })

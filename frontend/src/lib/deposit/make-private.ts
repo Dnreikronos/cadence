@@ -33,6 +33,14 @@ type Input = {
   onStep: (step: MakePrivateStep) => void
   // A transaction was confirmed, so balances changed. Called once per transaction.
   onConfirmed?: (which: "wrap" | "apply") => void
+  // The wrap is about to be handed to the network, before `submit` runs: from
+  // here it may land even if the page is closed or `submit` throws.
+  onSubmitting?: (wrap: {
+    request_id: string
+    last_valid_block_height: number
+  }) => void
+  // The network returned the wrap's signature.
+  onSubmitted?: (signature: string) => void
 }
 
 // The network answered that it dropped the transaction. Anything else after a
@@ -52,6 +60,8 @@ export async function runMakePrivate({
   signal,
   onStep,
   onConfirmed,
+  onSubmitting,
+  onSubmitted,
 }: Input): Promise<void> {
   let step: MakePrivateStep = from === "wrap" ? "preparing" : "applying"
   let wrapped = from === "apply"
@@ -71,13 +81,19 @@ export async function runMakePrivate({
             { signal },
           ),
         (signStep) => {
+          // Set before `submit` runs, not after it returns: a submit that throws
+          // (a timeout, a dropped connection) may still have reached the network.
+          if (signStep === "submitting") {
+            submitted = true
+            onSubmitting?.(prepared)
+          }
           // Submitting and confirming read the same to the person: "waiting".
           const next = signStep === "signing" ? "signing" : "confirming"
           if (next === step) return
           step = next
           onStep(step)
         },
-        { signal, onSubmitted: () => (submitted = true) },
+        { signal, onSubmitted },
       )
       wrapped = true
       onConfirmed?.("wrap")
@@ -106,8 +122,16 @@ export async function runMakePrivate({
   }
 }
 
-function resumeFor(error: unknown, wrapped: boolean, submitted: boolean) {
-  if (wrapped) return "apply"
+function resumeFor(
+  error: unknown,
+  wrapped: boolean,
+  submitted: boolean,
+): Resume {
+  if (wrapped) {
+    // A second apply cannot wrap twice, but one that went out and was not
+    // confirmed may make the next one fail: look first.
+    return error instanceof ConfirmTimeoutError ? "check" : "apply"
+  }
   const lost = error instanceof ApiError && lostForGood.has(error.code)
   return submitted && !lost ? "check" : "wrap"
 }
