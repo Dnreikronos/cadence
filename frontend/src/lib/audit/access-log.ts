@@ -20,8 +20,9 @@ const known = (labels: Record<string, string>, value: string) =>
 export const actorKindLabel = (kind: string) => known(actorKinds, kind)
 export const actionLabel = (action: string) => known(actions, action)
 
+// `key` is for React only; it is never shown.
 export type AccessRow = {
-  id: string
+  key: string
   at: string
   who: string
   kind: string
@@ -31,7 +32,7 @@ export type AccessRow = {
 
 export function accessRow(item: AccessLogItem): AccessRow {
   return {
-    id: item.id,
+    key: item.id,
     at: item.at,
     who: item.actor.label,
     kind: actorKindLabel(item.actor.kind),

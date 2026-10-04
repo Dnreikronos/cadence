@@ -1,4 +1,4 @@
-import { QueryClient } from "@tanstack/react-query"
+import { InfiniteQueryObserver, QueryClient } from "@tanstack/react-query"
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import { ApiError } from "@/lib/api/errors"
 import { createApiClient } from "@/lib/api/client"
@@ -12,6 +12,7 @@ import {
   AUDIT_PAGE_SIZE,
   accessLogOptions,
   auditPaymentsOptions,
+  exportAudit,
 } from "./audit-options"
 
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }))
@@ -105,5 +106,80 @@ describe("accessLogOptions", () => {
       .fetchInfiniteQuery(accessLogOptions(api))
       .catch((e: unknown) => e)
     expect(error).toMatchObject({ status: 403, code: "forbidden_role" })
+  })
+})
+
+describe("a page that fails to load", () => {
+  it("keeps the rows already loaded and loads on after a retry", async () => {
+    const queryClient = client()
+    const observer = new InfiniteQueryObserver(
+      queryClient,
+      accessLogOptions(api),
+    )
+    const unsubscribe = observer.subscribe(() => {})
+    await observer.refetch()
+    expect(loadedItems(observer.getCurrentResult().data)).toHaveLength(
+      AUDIT_PAGE_SIZE,
+    )
+
+    scenarios.set("service-down")
+    await observer.fetchNextPage()
+    const failed = observer.getCurrentResult()
+    expect(failed.isFetchNextPageError).toBe(true)
+    expect(failed.error).toMatchObject({ status: 503 })
+    expect(loadedItems(failed.data)).toHaveLength(AUDIT_PAGE_SIZE)
+    expect(failed.hasNextPage).toBe(true)
+
+    scenarios.clear()
+    await observer.fetchNextPage()
+    const done = observer.getCurrentResult()
+    expect(done.isFetchNextPageError).toBe(false)
+    expect(loadedItems(done.data)).toHaveLength(db.accessLog.length)
+    expect(done.hasNextPage).toBe(false)
+    unsubscribe()
+  })
+})
+
+describe("exportAudit", () => {
+  it("saves the CSV under a dated name that carries no amount", async () => {
+    const saved: { blob: Blob; filename: string }[] = []
+    const filename = await exportAudit(
+      api,
+      COMPANY_ID,
+      "Solaris",
+      (blob, name) => saved.push({ blob, filename: name }),
+      new Date(2026, 9, 4),
+    )
+    expect(filename).toBe("cadence-audit-solaris-2026-10-04.csv")
+    expect(saved).toHaveLength(1)
+    expect(saved[0].filename).toBe(filename)
+    expect(saved[0].blob.type).toMatch(/^text\/csv/)
+    const text = await saved[0].blob.text()
+    expect(text).toContain("Bruno Costa")
+    for (const payment of db.payments) {
+      expect(filename).not.toContain(String(payment.amount / 1_000_000n))
+    }
+  })
+
+  it("saves nothing when the export fails", async () => {
+    scenarios.set("service-down")
+    const saved: Blob[] = []
+    await expect(
+      exportAudit(api, COMPANY_ID, "Solaris", (blob) => saved.push(blob)),
+    ).rejects.toMatchObject({ status: 503 })
+    expect(saved).toEqual([])
+  })
+
+  it("saves nothing for a company that is not theirs", async () => {
+    const saved: Blob[] = []
+    await expect(
+      exportAudit(
+        api,
+        "c0000000-0000-4000-8000-000000000002",
+        "Other",
+        (blob) => saved.push(blob),
+      ),
+    ).rejects.toMatchObject({ status: 404 })
+    expect(saved).toEqual([])
   })
 })

@@ -6,6 +6,7 @@ import {
   filtersActive,
   isStatusFilter,
   noFilters,
+  receiptLabel,
 } from "./payments"
 
 const item = (
@@ -117,5 +118,21 @@ describe("auditRow", () => {
     expect(
       auditRow(item(1, "A", "pending", { signature: null })).signature,
     ).toBeNull()
+  })
+})
+
+describe("receiptLabel", () => {
+  it("names the person and the time, so same-day payments differ", () => {
+    const morning = receiptLabel(
+      { name: "Bruno Costa", paidAt: "2026-09-01T09:00:00Z" },
+      "UTC",
+    )
+    const evening = receiptLabel(
+      { name: "Bruno Costa", paidAt: "2026-09-01T17:30:00Z" },
+      "UTC",
+    )
+    expect(morning).toBe("Receipt for Bruno Costa, Sep 1, 2026, 9:00 AM")
+    expect(evening).toBe("Receipt for Bruno Costa, Sep 1, 2026, 5:30 PM")
+    expect(morning).not.toBe(evening)
   })
 })

@@ -62,3 +62,18 @@ export function auditRow(item: PaymentItem): AuditRow {
     signature: item.signature,
   }
 }
+
+const receiptTime = (timeZone?: string) =>
+  new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone,
+  })
+
+// Two payments to one person on one day must not read alike to a screen reader.
+export function receiptLabel(
+  row: Pick<AuditRow, "name" | "paidAt">,
+  timeZone?: string,
+) {
+  return `Receipt for ${row.name}, ${receiptTime(timeZone).format(new Date(row.paidAt))}`
+}

@@ -43,7 +43,7 @@ describe("labels", () => {
 describe("accessRow", () => {
   it("maps an entry for the list", () => {
     expect(accessRow(entry)).toEqual({
-      id: entry.id,
+      key: entry.id,
       at: "2026-10-03T18:00:00Z",
       who: "Ana Ribeiro",
       kind: "Auditor",
@@ -63,5 +63,13 @@ describe("accessRow", () => {
       kind: "regulator",
       action: "read_audit_trail",
     })
+  })
+})
+
+describe("what a row shows", () => {
+  it("never carries the entry id among the fields that are rendered", () => {
+    const { key, ...shown } = accessRow(entry)
+    expect(key).toBe(entry.id)
+    expect(JSON.stringify(Object.values(shown))).not.toContain(entry.id)
   })
 })

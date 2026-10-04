@@ -15,6 +15,8 @@ export function csvFilename(company: string, now: Date) {
   return `cadence-audit-${slug}-${day}.csv`
 }
 
+export const REVOKE_AFTER_MS = 10_000
+
 // The export needs the bearer header, so it arrives as a Blob and is saved from here.
 export function saveBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
@@ -25,5 +27,6 @@ export function saveBlob(blob: Blob, filename: string) {
   document.body.append(link)
   link.click()
   link.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 0)
+  // Some browsers read the blob after the click returns: revoking at once can cancel the download.
+  setTimeout(() => URL.revokeObjectURL(url), REVOKE_AFTER_MS)
 }
