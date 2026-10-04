@@ -13,6 +13,7 @@ import { formatUnits } from "@/lib/money"
 import {
   failureOf,
   heldBy,
+  mergeHeld,
   runWithdraw,
   type Held,
   type WithdrawInput,
@@ -38,10 +39,10 @@ export function useWithdrawInFlight() {
   return useIsMutating({ mutationKey: withdrawKey }) > 0
 }
 
-// The latest withdrawal of this session that may have gone through, read from the
-// mutation cache so it survives leaving the screen. The reducer holds that amount
+// Every withdrawal of this session that may have gone through, read from the
+// mutation cache so it survives leaving the screen. The reducer holds those amounts
 // back; without this, coming back would show a fresh form for the same amount.
-export function useSentWithdrawal(): Held | null {
+export function useSentWithdrawal(): readonly Held[] {
   const sent = useMutationState({
     filters: { mutationKey: withdrawKey, status: "error" },
     select: (mutation): Held | null =>
@@ -50,7 +51,10 @@ export function useSentWithdrawal(): Held | null {
         (mutation.state.variables as WithdrawVariables | undefined)?.amount,
       ),
   })
-  return sent.findLast((held) => held !== null) ?? null
+  return mergeHeld(
+    [],
+    sent.filter((held) => held !== null),
+  )
 }
 
 export type WithdrawVariables = Omit<WithdrawInput, "wallet">
@@ -65,6 +69,8 @@ export function useWithdraw() {
 
   return useMutation({
     mutationKey: withdrawKey,
+    // Never run prepare and sign again by itself, whatever the app's mutation default.
+    retry: false,
     // Kept for the session: a failed one is what `useSentWithdrawal` reads.
     gcTime: Infinity,
     mutationFn: (variables: WithdrawVariables) =>

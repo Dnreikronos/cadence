@@ -109,17 +109,10 @@ function WithdrawCard({
   const hasFunds = available > 0n
   const stage = state.stage
 
-  // One that finished unresolved while this screen was closed.
-  const heldAmount = state.held?.amount
-  const heldSignature = state.held?.signature
+  // Ones that finished unresolved while this screen was closed. A no-op once they are held.
   useEffect(() => {
-    if (
-      sent &&
-      (sent.amount !== heldAmount || sent.signature !== heldSignature)
-    ) {
-      dispatch({ type: "hold", held: sent })
-    }
-  }, [sent, heldAmount, heldSignature])
+    dispatch({ type: "hold", held: sent })
+  }, [sent])
 
   // Move focus to what just appeared, so a keyboard or screen-reader user lands on it.
   useEffect(() => {
@@ -146,7 +139,10 @@ function WithdrawCard({
       return
     }
     const units = parsed.units.toString()
-    const next = withdrawReducer(state, { type: "submit", amount: units })
+    // Seeded here, not left to the effect above, so a failure that landed this very
+    // render is already counted.
+    const current = withdrawReducer(state, { type: "hold", held: sent })
+    const next = withdrawReducer(current, { type: "submit", amount: units })
     if (next.stage !== "working") {
       if (state.stage === "needs-acknowledgement") {
         // Asked to agree, and has not yet.
@@ -162,6 +158,7 @@ function WithdrawCard({
     }
     setError(undefined)
     setAckError(undefined)
+    dispatch({ type: "hold", held: sent })
     dispatch({ type: "submit", amount: units })
     withdraw.mutate(
       {
@@ -195,9 +192,7 @@ function WithdrawCard({
   // The reducer refuses this amount while it may already have gone out; the button says so too.
   const typed = toWithdrawUnits(amount, available)
   const isHeld =
-    state.held !== null &&
-    typed.ok &&
-    typed.units.toString() === state.held.amount
+    typed.ok && state.held.some((h) => h.amount === typed.units.toString())
 
   if (inFlight && state.stage === "form") {
     return (
@@ -375,12 +370,20 @@ function WithdrawCard({
         {state.stage === "working" && <Progress state={state} />}
       </div>
 
-      {state.held && (
-        <HeldNotice
-          id={`${id}-held`}
-          held={state.held}
-          isAlert={state.stage === "failed" && state.failure.sent}
-        />
+      {state.held.length > 0 && (
+        <div id={`${id}-held`} className="space-y-3">
+          {state.held.map((held) => (
+            <HeldNotice
+              key={held.amount}
+              held={held}
+              isAlert={
+                state.stage === "failed" &&
+                state.failure.sent &&
+                state.amount === held.amount
+              }
+            />
+          ))}
+        </div>
       )}
 
       {state.stage === "failed" && !state.failure.sent && (
@@ -473,18 +476,9 @@ function Acknowledge({
 
 // A withdrawal that may already have gone through. It stays until the page reloads, and
 // the reducer will not send the same amount again meanwhile.
-function HeldNotice({
-  id,
-  held,
-  isAlert,
-}: {
-  id: string
-  held: Held
-  isAlert: boolean
-}) {
+function HeldNotice({ held, isAlert }: { held: Held; isAlert: boolean }) {
   return (
     <div
-      id={id}
       role={isAlert ? "alert" : undefined}
       className="mt-4 flex gap-3 rounded-xl border border-warning-border bg-warning-bg p-4 text-warning-fg"
     >
