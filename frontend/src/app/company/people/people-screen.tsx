@@ -144,7 +144,7 @@ export function PeopleScreen() {
             <ApiErrorState
               error={amountsQuery.error}
               title="Couldn't load the monthly amounts"
-              description="Your people are shown below. Try again to see what each is paid."
+              context="Your people are shown below."
               onRetry={() => amountsQuery.refetch()}
             />
           )}
@@ -152,7 +152,7 @@ export function PeopleScreen() {
             <ApiErrorState
               error={amountsQuery.error}
               title="Couldn't refresh the monthly amounts"
-              description="The amounts below may be out of date. Try again to refresh them."
+              context="The amounts below may be out of date."
               onRetry={() => amountsQuery.refetch()}
             />
           )}

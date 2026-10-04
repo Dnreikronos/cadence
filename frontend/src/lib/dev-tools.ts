@@ -38,13 +38,3 @@ export function isDevPath(pathname: string): boolean {
     .replace(/\/+$/, "")
   return clean === "/dev" || clean.startsWith("/dev/")
 }
-
-// What the middleware answers with a 404: a /dev path while dev tools are off. The
-// layout checks too, but a layout is the weakest place in the App Router (a request for
-// a page's payload alone can skip it), so the door is here first.
-export function blocksDevPath(
-  pathname: string,
-  env: Parameters<typeof devToolsEnabled>[0],
-): boolean {
-  return isDevPath(pathname) && !devToolsEnabled(env)
-}

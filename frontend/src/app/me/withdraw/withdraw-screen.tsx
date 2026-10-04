@@ -85,7 +85,7 @@ export function WithdrawScreen({ viewer }: { viewer: ViewerScope }) {
             <ApiErrorState
               error={balance.error}
               title="Couldn't refresh your balance"
-              description="The balance below may be out of date."
+              context="The balance below may be out of date."
               onRetry={() => balance.refetch()}
             />
           )}

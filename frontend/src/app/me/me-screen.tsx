@@ -41,7 +41,6 @@ function RecentPayments() {
         <ApiErrorState
           error={recent.error}
           title="Couldn't load your payments"
-          description="Check your connection and try again."
           onRetry={() => recent.refetch()}
         />
       ) : recent.data.items.length === 0 ? (

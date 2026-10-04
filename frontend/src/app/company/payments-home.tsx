@@ -70,7 +70,7 @@ export function PaymentsHome() {
             <ApiErrorState
               error={payments.error}
               title="Couldn't load your payments"
-              description={runMessage(payments.error)}
+              describe={runMessage}
               onRetry={() => payments.refetch()}
             />
           ) : (

@@ -162,7 +162,7 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
       <ApiErrorState
         error={people.error}
         title="Couldn't load your people"
-        description={runMessage(people.error)}
+        describe={runMessage}
         // One "Try again" clears everything that failed: the check of who was paid in
         // the last 24 hours and the balance sit behind this list, and would otherwise
         // show their own alert once it loads.

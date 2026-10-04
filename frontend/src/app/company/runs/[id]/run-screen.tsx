@@ -56,7 +56,7 @@ export function RunScreen({ runId }: { runId: string }) {
       <ApiErrorState
         error={run.error}
         title="Couldn't load this run"
-        description={runMessage(run.error)}
+        describe={runMessage}
         onRetry={() => run.refetch()}
       />
     )

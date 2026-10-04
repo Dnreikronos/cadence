@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { blocksDevPath, devToolsEnabled, isDevPath } from "./dev-tools"
+import { devToolsEnabled, isDevPath } from "./dev-tools"
 
 describe("devToolsEnabled", () => {
   it("is on in the dev server with no setting", () => {
@@ -60,41 +60,4 @@ describe("isDevPath", () => {
   ])("is not %s", (path) => {
     expect(isDevPath(path)).toBe(false)
   })
-})
-
-describe("blocksDevPath, the middleware's decision", () => {
-  const production = { nodeEnv: "production", isMainnet: false }
-  const blocked = ["/dev", "/dev/", "/dev/api", "/%64ev", "/DEV/components"]
-
-  it.each(blocked)("blocks %s in production without the flag", (path) => {
-    expect(blocksDevPath(path, production)).toBe(true)
-    expect(blocksDevPath(path, { ...production, flag: "0" })).toBe(true)
-  })
-
-  it.each(blocked)(
-    "lets %s through with the flag, and in development",
-    (path) => {
-      expect(blocksDevPath(path, { ...production, flag: "1" })).toBe(false)
-      expect(
-        blocksDevPath(path, { nodeEnv: "development", isMainnet: false }),
-      ).toBe(false)
-    },
-  )
-
-  it.each(blocked)("blocks %s on mainnet whatever is set", (path) => {
-    expect(
-      blocksDevPath(path, {
-        nodeEnv: "development",
-        flag: "1",
-        isMainnet: true,
-      }),
-    ).toBe(true)
-  })
-
-  it.each(["/devices", "/", "/company", "/sign-in", "/me/history"])(
-    "never blocks %s",
-    (path) => {
-      expect(blocksDevPath(path, production)).toBe(false)
-    },
-  )
 })

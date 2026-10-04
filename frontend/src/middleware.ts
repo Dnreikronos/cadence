@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { cleanSearch, guard, requiredRole, type Role } from "@/lib/auth/guard"
 import { isDemoEnabled } from "@/lib/demo/mode"
-import { blocksDevPath } from "@/lib/dev-tools"
-import { devToolsEnv } from "@/lib/dev-tools-env"
+import { isDevPath } from "@/lib/dev-tools"
+import { devToolsOff } from "@/lib/dev-tools-env"
 import { DEMO_COOKIE, parseDemoRole } from "@/lib/demo/viewer"
 import { membershipOf } from "@/lib/supabase/membership"
 import { createMiddlewareClient } from "@/lib/supabase/middleware"
@@ -10,7 +10,7 @@ import { createMiddlewareClient } from "@/lib/supabase/middleware"
 export async function middleware(request: NextRequest) {
   // The /dev pages need no session, so they are shut here before anything else runs:
   // a 404 for the app's own not-found page, whatever the path's spelling.
-  if (blocksDevPath(request.nextUrl.pathname, devToolsEnv())) {
+  if (isDevPath(request.nextUrl.pathname) && devToolsOff()) {
     return NextResponse.rewrite(new URL("/dev-tools-are-off", request.url), {
       status: 404,
     })

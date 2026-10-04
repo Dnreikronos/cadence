@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const config = vi.hoisted(() => ({
   broken: false,
@@ -50,6 +50,8 @@ function outcome(response: NextResponse) {
   return to ? new URL(to).pathname + new URL(to).search : "next"
 }
 
+afterEach(() => vi.unstubAllEnvs())
+
 beforeEach(() => {
   Object.assign(config, {
     broken: false,
@@ -68,6 +70,65 @@ beforeEach(() => {
     response: () => NextResponse.next(),
     cacheHeaders: {},
   }))
+})
+
+describe("the /dev pages", () => {
+  const status = (response: NextResponse) => response.status
+  const rewritten = (response: NextResponse) =>
+    response.headers.get("x-middleware-rewrite")
+
+  it.each([
+    "/dev",
+    "/dev/",
+    "/dev/api",
+    "/dev/components",
+    "/%64ev",
+    "/DEV/api",
+  ])(
+    "answers 404 for %s in a production build without the flag, with or without a session",
+    async (path) => {
+      vi.stubEnv("NODE_ENV", "production")
+      for (const role of [undefined, "admin"]) {
+        const response = await visit(path, role)
+        expect(status(response)).toBe(404)
+        expect(rewritten(response)).toContain("/dev-tools-are-off")
+      }
+      // Before the demo cookie or Supabase are looked at.
+      expect(createMiddlewareClient).not.toHaveBeenCalled()
+    },
+  )
+
+  it("does not block look-alikes, or the pages around it", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    for (const path of ["/devices", "/developers", "/", "/sign-in"]) {
+      expect(outcome(await visit(path))).toBe("next")
+    }
+    expect(outcome(await visit("/company", "admin"))).toBe("next")
+  })
+
+  it.each(["/dev", "/dev/", "/dev/api", "/%64ev"])(
+    "lets %s through in development, and in production with the flag",
+    async (path) => {
+      vi.stubEnv("NODE_ENV", "development")
+      expect(outcome(await visit(path))).toBe("next")
+      vi.stubEnv("NODE_ENV", "production")
+      vi.stubEnv("NEXT_PUBLIC_DEV_TOOLS", "1")
+      expect(outcome(await visit(path))).toBe("next")
+    },
+  )
+
+  it("answers 404 on mainnet even with the flag", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("NEXT_PUBLIC_DEV_TOOLS", "1")
+    config.isMainnet = true
+    expect(status(await visit("/dev/api"))).toBe(404)
+  })
+
+  it("fails closed when the cluster setting is bad, and still serves the public pages", async () => {
+    config.broken = true
+    expect(status(await visit("/dev/api"))).toBe(404)
+    expect(outcome(await visit("/sign-in"))).toBe("next")
+  })
 })
 
 describe("demo cookie in the demo configuration", () => {

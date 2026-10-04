@@ -95,7 +95,8 @@ function WithStatus() {
       <ApiErrorState
         error={status.error}
         title="Couldn't check your setup"
-        description={`${statusMessage(status.error)} Nothing was changed.`}
+        describe={statusMessage}
+        context="Nothing was changed."
         onRetry={() => status.refetch()}
       />
     )

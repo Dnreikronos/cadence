@@ -44,7 +44,7 @@ export function BalanceCard() {
       <ApiErrorState
         error={balance.error}
         title="Couldn't load your balance"
-        description="Your balance is safe. Check your connection and try again."
+        context="Your balance is safe."
         onRetry={() => balance.refetch()}
       />
     )

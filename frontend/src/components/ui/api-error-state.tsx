@@ -1,25 +1,31 @@
 "use client"
 
 import { usePathname, useSearchParams } from "next/navigation"
-import { messageFor } from "@/lib/api/errors"
-import { errorActionFor, signInHref } from "@/lib/api/error-action"
+import {
+  errorActionFor,
+  errorDescription,
+  signInHref,
+} from "@/lib/api/error-action"
 import { ErrorState } from "./error-state"
 
-// `ErrorState` for an error from the service: the action comes from the error. A 401
-// gets a "Sign in" link back to this page, an error that may pass gets "Try again"
-// (when the screen can retry), and one that would answer the same gets neither. The
-// description is the error's own copy unless the screen has better, except for a 401:
-// "check your connection" would contradict the sign-in link next to it.
+// `ErrorState` for an error from the service: the action and the words come from the
+// error. A 401 gets a "Sign in" link back to this page, an error that may pass gets "Try
+// again" (when the screen can retry), and one that would answer the same gets neither
+// and is never told to try again (see `errorDescription` for the options).
 export function ApiErrorState({
   error,
   title,
-  description,
+  describe,
+  networkDescription,
+  context,
   onRetry,
   className,
 }: {
   error: unknown
   title?: string
-  description?: string
+  describe?: (error: unknown) => string
+  networkDescription?: string
+  context?: string
   onRetry?: () => void
   className?: string
 }) {
@@ -29,11 +35,11 @@ export function ApiErrorState({
   return (
     <ErrorState
       title={title}
-      description={
-        action === "sign-in"
-          ? messageFor(error)
-          : (description ?? messageFor(error))
-      }
+      description={errorDescription(error, {
+        describe,
+        networkDescription,
+        context,
+      })}
       onRetry={action === "retry" ? onRetry : undefined}
       signInHref={
         action === "sign-in"

@@ -27,7 +27,7 @@ export function ActivationGate({ children }: { children: React.ReactNode }) {
       <ApiErrorState
         error={status.error}
         title="Couldn't check your account"
-        description={statusMessage(status.error)}
+        describe={statusMessage}
         onRetry={() => status.refetch()}
       />
     )
