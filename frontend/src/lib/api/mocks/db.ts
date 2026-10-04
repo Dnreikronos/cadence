@@ -198,6 +198,9 @@ function seed() {
     counter: 0,
     role: null as "admin" | "recipient" | "auditor" | null,
     company: { available: 84_000_000_000n, pending: 0n } as Ledger,
+    // Plain USDC in the company wallet, read from the chain rather than the service.
+    // A confirmed wrap spends it.
+    publicUsdc: 12_500_000_000n,
     me: { available: 8_000_000_000n, pending: 0n } as Ledger,
     payments,
     amounts: new Map<string, bigint>([

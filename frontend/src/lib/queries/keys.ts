@@ -33,11 +33,16 @@ export const queryKeys = {
       [...balance, "company", viewer.company, viewer.email] as const,
     me: (viewer: ViewerScope) =>
       [...balance, "me", viewer.company, viewer.email] as const,
+    // The company balance as the deposit screen reads it, keyed by the wallet it
+    // belongs to. Under `all`, so `invalidateBalances` refreshes it too.
+    companyWallet: (wallet: string) =>
+      [...balance, "company-wallet", wallet] as const,
   },
   // The public USDC the company holds and can make private.
   deposit: {
     all: deposit,
-    info: () => [...deposit, "info"] as const,
+    publicUsdc: (wallet: string) =>
+      [...deposit, "public-usdc", wallet] as const,
   },
   payments: {
     all: payments,

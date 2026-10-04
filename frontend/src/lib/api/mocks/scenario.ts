@@ -17,6 +17,8 @@ export const scenarioNames = [
   "partial-failure",
   // Apply-pending finds a credit that arrived mid-flight.
   "credit-mismatch",
+  // The chain read behind the public USDC balance fails (not a proof-service call).
+  "rpc-down",
 ] as const
 export type Scenario = (typeof scenarioNames)[number]
 

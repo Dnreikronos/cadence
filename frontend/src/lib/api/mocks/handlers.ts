@@ -182,6 +182,8 @@ async function confirmHandler(request: Request, kind: string) {
 // negative: a confirm that would is refused, and changes nothing.
 function applyEffect(kind: string, wallet: string, amount?: bigint) {
   if (kind === "wrap" && amount) {
+    if (amount > db.publicUsdc) return fail(409, "insufficient_usdc")
+    db.publicUsdc -= amount
     db.company.pending += amount
   } else if (kind === "accounts/configure" && wallet !== COMPANY_WALLET) {
     // Configuring needs a linked wallet, so it links one too. The company's
