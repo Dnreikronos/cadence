@@ -3,6 +3,7 @@ import { AppShell } from "@/components/app/app-shell"
 import { PageHeader } from "@/components/app/page-header"
 import { DepositScreen } from "@/app/company/deposit/deposit-screen"
 import { PeopleScreen } from "@/app/company/people/people-screen"
+import { AuditorsScreen } from "@/app/company/auditors/auditors-screen"
 
 // Renders a company screen without a session, against the mock stores. The real
 // routes sit behind the role guard, which needs a local Supabase and an admin.
@@ -18,6 +19,12 @@ const screens = {
     description:
       "Fund your company with USDC, then make it private to pay people.",
     Screen: DepositScreen,
+  },
+  auditors: {
+    title: "Auditors",
+    description:
+      "People who can see every payment amount, like your accountant. They need no wallet.",
+    Screen: AuditorsScreen,
   },
 } as const
 
