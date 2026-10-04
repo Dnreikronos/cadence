@@ -1,4 +1,4 @@
-import { signInAsDemo } from "@/lib/demo/actions"
+import { signInAsDemo, signInAsNewRecipient } from "@/lib/demo/actions"
 import { demoViewer } from "@/lib/demo/viewer"
 import type { Role } from "@/lib/auth/guard"
 
@@ -38,6 +38,19 @@ export function DemoPanel({ next }: { next?: string | null }) {
             </span>
           </button>
         ))}
+        {/* A recipient with nothing set up, to see the activation screen. */}
+        <button
+          type="submit"
+          formAction={signInAsNewRecipient}
+          className="flex w-full flex-col gap-0.5 rounded-xl border border-line bg-surface px-4 py-3 text-left transition-colors duration-150 hover:border-ink/25 hover:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink"
+        >
+          <span className="text-ui font-medium text-ink">
+            New recipient (shows activation)
+          </span>
+          <span className="text-label text-ink-muted">
+            Sets up a wallet and keys first · {demoViewer("recipient").email}
+          </span>
+        </button>
       </form>
       <p className="mt-4 text-label text-ink-muted">
         Everything here is fake data: balances, people and payments reset when

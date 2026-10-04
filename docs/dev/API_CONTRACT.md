@@ -812,9 +812,11 @@ handler, including each failure that changes the UI:
   pending set `pending_credits`. Nothing the company's wallet does changes that
   status. "Linked but not enrolled" can be reached by configuring first, but not by
   stopping between a wallet link and the enrollment, because one enroll call flips
-  both flags. The mock also has a reset for the steps alone (`resetAccountStatus`, and
-  `cadenceMock.resetAccountStatus()` in the browser); it leaves balances, credits and
-  requests already in flight alone.
+  both flags. The seed is a recipient who has done every step, so a reload does not
+  send each recipient screen to activation. The mock also has a reset for the steps
+  alone (`resetAccountStatus`, and `cadenceMock.resetAccountStatus()` in the browser),
+  which makes a recipient who has done none; it leaves balances, credits and requests
+  already in flight alone.
 
 A handler returns an error body with **only** `{ "error": code }`, so a mock cannot
 teach a screen to depend on a field the real service will not send. A mock that
