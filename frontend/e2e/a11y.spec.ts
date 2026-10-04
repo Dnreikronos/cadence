@@ -67,3 +67,24 @@ for (const [viewport, size] of Object.entries(viewports) as [
     })
   })
 }
+
+// The suite runs with reduced motion, so dialogs are in place at once. Once, with the
+// transitions on, to be sure the check also holds for what a person with motion sees.
+test.describe("axe with motion on", () => {
+  test.use({ reducedMotion: "no-preference" })
+
+  test("the add-person dialog has no serious violations", async ({ page }) => {
+    await signInAs(page, "admin")
+    await page.goto("/company/people")
+    await page.getByRole("button", { name: "Add person" }).first().click()
+    await expect(
+      page.getByRole("dialog", { name: "Add a person" }),
+    ).toBeVisible()
+
+    await expectNoSeriousA11yViolations(
+      page,
+      "add-person dialog (motion)",
+      "desktop",
+    )
+  })
+})

@@ -19,6 +19,16 @@ export async function expectNoSeriousA11yViolations(
   screen: string,
   viewport: "desktop" | "mobile",
 ) {
+  // A dialog that is still fading in has half-transparent text: wait for every finite
+  // animation and transition to end (a spinner never does, and is left alone).
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map((a) => a.finished.catch(() => undefined)),
+    ),
+  )
   const { violations } = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
     .analyze()

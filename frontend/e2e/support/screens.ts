@@ -115,4 +115,7 @@ export async function openScreen(page: Page, screen: Screen) {
     await page.goto(screen.path)
   }
   await expect(screen.ready(page).first()).toBeVisible()
+  // Next swaps the document title after a client-side navigation (`/activate?fresh=1`
+  // replaces its own URL): wait for it, or axe can read the moment it is empty.
+  await expect(page).toHaveTitle(/.+/)
 }
