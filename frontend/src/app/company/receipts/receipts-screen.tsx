@@ -8,7 +8,6 @@ import {
   RotateCw,
   Search,
 } from "lucide-react"
-import { isApiError } from "@/lib/api"
 import type { PaymentItem } from "@/lib/api/schemas"
 import { unitsToUsd } from "@/lib/money"
 import {
