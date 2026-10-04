@@ -218,6 +218,26 @@ export type Phase = "preparing" | SignStep
 // pay out twice, so the reducer refuses until the person has reloaded.
 export type Held = { amount: string; signature: string | null }
 
+// Every unresolved withdrawal stays held, not only the latest. One entry per amount;
+// a known signature replaces an unknown one.
+export function mergeHeld(
+  current: readonly Held[],
+  more: readonly Held[],
+): readonly Held[] {
+  const merged = [...current]
+  for (const held of more) {
+    const at = merged.findIndex((h) => h.amount === held.amount)
+    if (at === -1) merged.push(held)
+    else if (merged[at].signature === null && held.signature !== null) {
+      merged[at] = held
+    }
+  }
+  return merged.length === current.length &&
+    merged.every((h, i) => h === current[i])
+    ? current
+    : merged
+}
+
 // What a failed withdrawal leaves behind: its amount and signature if it may have gone out.
 export function heldBy(
   error: unknown,
@@ -247,7 +267,7 @@ type Stage =
       failure: Failure
     }
 
-export type WithdrawState = Stage & { held: Held | null }
+export type WithdrawState = Stage & { held: readonly Held[] }
 
 export type WithdrawEvent =
   | { type: "submit"; amount: string }
@@ -260,9 +280,9 @@ export type WithdrawEvent =
   | { type: "failed"; failure: Failure }
   | { type: "reset" }
   // A withdrawal from earlier in the session turned out to be unresolved.
-  | { type: "hold"; held: Held }
+  | { type: "hold"; held: readonly Held[] }
 
-export const initialWithdraw: WithdrawState = { stage: "form", held: null }
+export const initialWithdraw: WithdrawState = { stage: "form", held: [] }
 
 // The agreement is for one amount: it is asked for again whenever the amount changes,
 // and nothing is sent until the box is ticked. An amount that may already have gone
@@ -275,7 +295,7 @@ export function withdrawReducer(
   switch (event.type) {
     case "submit": {
       if (state.stage === "working" || state.stage === "done") return state
-      if (held?.amount === event.amount) return state
+      if (held.some((h) => h.amount === event.amount)) return state
       if (state.stage === "needs-acknowledgement") {
         if (!state.acknowledged || event.amount !== state.amount) return state
         return working(event.amount, true, held)
@@ -332,21 +352,25 @@ export function withdrawReducer(
               ? { ...event.failure, retryable: false }
               : event.failure,
             held: event.failure.sent
-              ? { amount: state.amount, signature: event.failure.signature }
+              ? mergeHeld(held, [
+                  { amount: state.amount, signature: event.failure.signature },
+                ])
               : held,
           }
         : state
     case "reset":
       return state.stage === "done" ? { stage: "form", held } : state
-    case "hold":
-      return { ...state, held: event.held }
+    case "hold": {
+      const merged = mergeHeld(held, event.held)
+      return merged === held ? state : { ...state, held: merged }
+    }
   }
 }
 
 function working(
   amount: string,
   acknowledged: boolean,
-  held: Held | null,
+  held: readonly Held[],
 ): WithdrawState {
   return {
     stage: "working",

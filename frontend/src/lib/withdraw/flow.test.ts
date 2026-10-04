@@ -12,6 +12,7 @@ import {
   failureOf,
   heldBy,
   initialWithdraw,
+  mergeHeld,
   runWithdraw,
   sentMessage,
   withdrawReducer,
@@ -273,7 +274,7 @@ describe("withdrawReducer", () => {
       stage: "needs-acknowledgement",
       amount: "100",
       acknowledged: false,
-      held: null,
+      held: [],
     })
   })
 
@@ -361,7 +362,7 @@ describe("withdrawReducer", () => {
       amount: "100",
       level: "near",
       signature: "sig",
-      held: null,
+      held: [],
     })
   })
 
@@ -422,7 +423,7 @@ describe("withdrawReducer", () => {
       expect(failedSent()).toMatchObject({
         stage: "failed",
         failure: { sent: true, retryable: false },
-        held: { amount: "100", signature: "sig" },
+        held: [{ amount: "100", signature: "sig" }],
       })
     })
 
@@ -440,7 +441,7 @@ describe("withdrawReducer", () => {
       const edited = withdrawReducer(failedSent(), { type: "amount-changed" })
       expect(edited).toMatchObject({
         stage: "form",
-        held: { amount: "100" },
+        held: [{ amount: "100" }],
       })
       expect(withdrawReducer(edited, { type: "submit", amount: "100" })).toBe(
         edited,
@@ -459,15 +460,60 @@ describe("withdrawReducer", () => {
         ],
         failedSent(),
       )
-      expect(done).toMatchObject({ stage: "form", held: { amount: "100" } })
+      expect(done).toMatchObject({ stage: "form", held: [{ amount: "100" }] })
       expect(withdrawReducer(done, { type: "submit", amount: "100" })).toBe(
         done,
       )
     })
 
+    it("holds every unresolved amount, so an earlier one is not freed by a later one", () => {
+      const both = run(
+        [
+          { type: "submit", amount: "100" },
+          { type: "failed", failure: { ...sent, signature: "sigY" } },
+          { type: "amount-changed" },
+        ],
+        withdrawReducer(failedSent("200"), { type: "amount-changed" }),
+      )
+      // 200 is unresolved, then 100 is submitted and unresolved too.
+      expect(both).toMatchObject({
+        stage: "form",
+        held: [{ amount: "200" }, { amount: "100", signature: "sigY" }],
+      })
+      expect(withdrawReducer(both, { type: "submit", amount: "200" })).toBe(
+        both,
+      )
+      expect(withdrawReducer(both, { type: "submit", amount: "100" })).toBe(
+        both,
+      )
+      expect(withdrawReducer(both, { type: "submit", amount: "300" })).toEqual(
+        expect.objectContaining({ stage: "working" }),
+      )
+    })
+
+    it("takes in what the mutation cache holds without losing what it already has", () => {
+      const state = run(
+        [
+          {
+            type: "hold",
+            held: [
+              { amount: "200", signature: "a" },
+              { amount: "300", signature: null },
+            ],
+          },
+        ],
+        failedSent("100"),
+      )
+      expect(state.held.map((h) => h.amount)).toEqual(["100", "200", "300"])
+      // Holding the same things again changes nothing.
+      expect(withdrawReducer(state, { type: "hold", held: state.held })).toBe(
+        state,
+      )
+    })
+
     it("does not hold anything for an ordinary failure", () => {
       const state = run([{ type: "failed", failure }], submitted())
-      expect(state.held).toBeNull()
+      expect(state.held).toEqual([])
       expect(withdrawReducer(state, { type: "submit", amount: "100" })).toEqual(
         expect.objectContaining({ stage: "working" }),
       )
@@ -480,7 +526,7 @@ describe("withdrawReducer", () => {
       amount: "100",
       level: "none",
       signature: "sig",
-      held: null,
+      held: [],
     }
     for (const event of [
       { type: "step", step: "signing" },
@@ -491,6 +537,28 @@ describe("withdrawReducer", () => {
       expect(withdrawReducer(done, event)).toBe(done)
     }
     expect(withdrawReducer(done, { type: "reset" })).toEqual(initialWithdraw)
+  })
+})
+
+describe("mergeHeld", () => {
+  it("keeps one entry per amount, and prefers a known signature", () => {
+    const merged = mergeHeld(
+      [{ amount: "1", signature: null }],
+      [
+        { amount: "1", signature: "s1" },
+        { amount: "2", signature: null },
+        { amount: "2", signature: "s2" },
+      ],
+    )
+    expect(merged).toEqual([
+      { amount: "1", signature: "s1" },
+      { amount: "2", signature: "s2" },
+    ])
+  })
+
+  it("returns the very same list when nothing is new", () => {
+    const current = [{ amount: "1", signature: "s" }]
+    expect(mergeHeld(current, [{ amount: "1", signature: null }])).toBe(current)
   })
 })
 
@@ -515,7 +583,10 @@ describe("heldBy", () => {
 
   it("is what a screen opened later is given, so the amount stays blocked", () => {
     const held = heldBy(new SentWithdrawalError(new Error("x"), "sig"), "100")!
-    const reopened = withdrawReducer(initialWithdraw, { type: "hold", held })
+    const reopened = withdrawReducer(initialWithdraw, {
+      type: "hold",
+      held: [held],
+    })
     expect(withdrawReducer(reopened, { type: "submit", amount: "100" })).toBe(
       reopened,
     )
