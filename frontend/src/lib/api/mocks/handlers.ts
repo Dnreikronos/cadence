@@ -182,6 +182,8 @@ async function confirmHandler(request: Request, kind: string) {
 // negative: a confirm that would is refused, and changes nothing.
 function applyEffect(kind: string, wallet: string, amount?: bigint) {
   if (kind === "wrap" && amount) {
+    if (amount > db.publicUsdc) return fail(409, "insufficient_usdc")
+    db.publicUsdc -= amount
     db.company.pending += amount
   } else if (kind === "accounts/configure" && wallet !== COMPANY_WALLET) {
     // Configuring needs a linked wallet, so it links one too. The company's
@@ -362,6 +364,11 @@ export const handlers = [
     if (error) return error
     if (scenarios.has("setup-required") && !data.setup) {
       return fail(409, "confidential_setup_required")
+    }
+    // Like the real service, refuse what the USDC account cannot cover. Confirm
+    // checks again, since the balance can fall in between.
+    if (BigInt(data.amount) > db.publicUsdc) {
+      return fail(409, "insufficient_usdc")
     }
     const p = prepared(data.company_wallet, 0)
     remember("wrap", p, data.company_wallet, BigInt(data.amount))

@@ -15,7 +15,25 @@ import {
 // Cadence runs the proof service and holds viewing keys (ADR B17), so it is always named.
 // `hasAuditor` undefined means not known yet: the longer sentence is the safe one,
 // never "no auditor".
-export function whoCanSee(viewerRole: Role, hasAuditor: boolean | undefined) {
+// `scope` is what the amount is: a payment has a counterparty who reads it too,
+// a balance is the holder's own (and Cadence's, and whoever the holder designated).
+export function whoCanSee(
+  viewerRole: Role,
+  hasAuditor: boolean | undefined,
+  scope: "payment" | "balance" = "payment",
+) {
+  if (scope === "balance" && viewerRole !== "auditor") {
+    const own = [
+      viewerRole === "admin" ? "Your company" : "You",
+      ...(hasAuditor === undefined
+        ? ["anyone your company has designated"]
+        : hasAuditor
+          ? ["your auditor"]
+          : []),
+      "Cadence",
+    ]
+    return `${list(own)} can read this amount. The public cannot: on-chain it is ciphertext.`
+  }
   const readers = {
     admin: [
       "Your company",
@@ -49,6 +67,7 @@ function list(items: string[]) {
 export function WhoCanSee({
   viewerRole,
   hasAuditor,
+  scope = "payment",
   note,
   className,
   label = "Who can see this amount",
@@ -58,6 +77,8 @@ export function WhoCanSee({
   viewerRole: Role
   // Undefined while it is not known whether an auditor exists.
   hasAuditor: boolean | undefined
+  // What the amount is: a balance has no counterparty reading it.
+  scope?: "payment" | "balance"
   // An extra sentence, for a place where some amounts are an exception.
   note?: string
   className?: string
@@ -82,7 +103,7 @@ export function WhoCanSee({
         <PopoverHeader>
           <PopoverTitle>Who can see this</PopoverTitle>
           <PopoverDescription>
-            {description ?? whoCanSee(viewerRole, hasAuditor)}
+            {description ?? whoCanSee(viewerRole, hasAuditor, scope)}
           </PopoverDescription>
         </PopoverHeader>
         <p className="text-caption/normal text-ink-muted">{cadenceLine}</p>
