@@ -7,7 +7,10 @@ import type { Page } from "@playwright/test"
 const row = (page: Page, name: string) =>
   page.getByRole("row").filter({ hasText: name })
 
-const count = (page: Page) => page.locator("main p[aria-live=polite]")
+const count = (page: Page) =>
+  page
+    .getByRole("main")
+    .getByText(/^(\d+ of )?\d+ (loaded )?payments?( loaded)?$/)
 
 test.beforeEach(async ({ page }) => {
   await signInAs(page, "admin")
@@ -82,4 +85,38 @@ test("exports a CSV that holds only the documented columns", async ({
     "Diego Martins 6300",
     "Northwind Audit 9500",
   ])
+})
+
+test("Download receipt prints under the receipt's name, then puts the page title back", async ({
+  page,
+}) => {
+  // The print dialog is the browser's: stand in for it and record the title it was given.
+  await page.evaluate(() => {
+    window.print = () => {
+      ;(window as unknown as { printedAs: string }).printedAs = document.title
+    }
+  })
+  const original = await page.title()
+  expect(original).not.toBe("")
+  await page
+    .getByRole("button", { name: "Receipt for Diego Martins, Sep 1, 2026" })
+    .click()
+
+  await page
+    .getByRole("dialog", { name: "Payment receipt" })
+    .getByRole("button", { name: "Download receipt" })
+    .click()
+
+  const receiptName = "Cadence receipt 2026-09-01 Diego Martins"
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as unknown as { printedAs?: string }).printedAs,
+      ),
+    )
+    .toBe(receiptName)
+  // Still the receipt's name while the browser is printing, and the old title after it.
+  await expect(page).toHaveTitle(receiptName)
+  await page.evaluate(() => window.dispatchEvent(new Event("afterprint")))
+  await expect(page).toHaveTitle(original)
 })

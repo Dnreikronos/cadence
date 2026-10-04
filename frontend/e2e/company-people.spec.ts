@@ -7,10 +7,9 @@ import type { Page } from "@playwright/test"
 const seedTotal = "$23,800.00"
 
 const row = (page: Page, name: string) =>
-  page.locator("main ul > li").filter({ hasText: name })
+  page.getByRole("main").getByRole("listitem").filter({ hasText: name })
 
-const summary = (page: Page) =>
-  page.locator("main p").filter({ hasText: "per month" })
+const summary = (page: Page) => page.getByText("per month")
 
 async function addPerson(
   page: Page,

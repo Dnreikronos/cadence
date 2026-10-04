@@ -58,21 +58,34 @@ export async function readDownload(download: Download) {
   }
 }
 
-// A payments export: the header first, then at most the documented columns per line.
+// A payments export, strictly: the header line is exactly the documented columns, the
+// file has the rows expected and nothing else, and every row has one cell per column, no
+// more and no fewer (a stray column would be data nobody agreed to export).
+//
+// One deliberate deviation, kept loose until the contract settles: the amount. The
+// contract (docs/dev/API_CONTRACT.md, "CSV export", still a draft) says a decimal USDC
+// string with exactly six decimals, `4200.000000`; the mock answers `4200`, trimming the
+// zeros (src/lib/api/mocks/handlers.ts, `csv()`). The lead decided not to change the mock
+// yet, so the amount is only checked to be a decimal USDC amount, never base units: the
+// callers compare its numeric value. Tighten the pattern to `\d+\.\d{6}` when the mock
+// follows the contract.
 export function expectPaymentsCsv(text: string, expectedRows: number) {
   const lines = text.split(/\r?\n/).filter((line) => line !== "")
   expect(lines[0], "the first line is the header").toBe(csvColumns.join(","))
+  expect(lines, "one line per payment, after the header").toHaveLength(
+    expectedRows + 1,
+  )
   const rows = parseCsv(text)
+  expect(rows[0]).toEqual(csvColumns)
   expect(rows).toHaveLength(expectedRows + 1)
   for (const row of rows) {
-    expect(row.length, `columns of ${JSON.stringify(row)}`).toBeLessThanOrEqual(
+    expect(row, `cells of ${JSON.stringify(row)}`).toHaveLength(
       csvColumns.length,
     )
   }
-  for (const [date, , amount, status] of rows.slice(1)) {
+  for (const [date, counterparty, amount, status] of rows.slice(1)) {
     expect(date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    // A decimal USDC amount, not base units. The contract asks for exactly six decimals
-    // ("4200.000000"); the mock trims the zeros ("4200"), so the shape is checked loosely.
+    expect(counterparty).not.toBe("")
     expect(amount).toMatch(/^\d{1,10}(\.\d{1,6})?$/)
     expect(["confirmed", "pending", "failed"]).toContain(status)
   }

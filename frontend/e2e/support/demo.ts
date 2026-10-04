@@ -109,3 +109,30 @@ export async function expectNoHorizontalOverflow(page: Page) {
     )
     .toEqual({ overflow: 0, body: 0 })
 }
+
+// Counts the page's fetches whose path ends with `suffix` (start it before the page loads).
+// Returns a function that reads the count: a test can tell that a request went out, and
+// how many times, without a sleep.
+export async function countFetches(page: Page, suffix: string) {
+  const key = `__fetches:${suffix}`
+  await page.addInitScript(
+    ({ key, suffix }) => {
+      const counts = window as unknown as Record<string, number>
+      counts[key] = 0
+      const original = window.fetch
+      window.fetch = (input, init) => {
+        const url = input instanceof Request ? input.url : String(input)
+        if (new URL(url, location.href).pathname.endsWith(suffix)) {
+          counts[key] += 1
+        }
+        return original(input, init)
+      }
+    },
+    { key, suffix },
+  )
+  return () =>
+    page.evaluate(
+      (key) => (window as unknown as Record<string, number>)[key] ?? 0,
+      key,
+    )
+}

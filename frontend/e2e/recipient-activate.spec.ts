@@ -50,7 +50,7 @@ test("resumes where it stopped after a failure at the last step", async ({
   page,
   watch,
 }) => {
-  watch.allowStatus(409)
+  watch.allowStatus(409, /\/accounts\/configure\/confirm$/)
   await openFresh(page)
   // Every confirm is rejected: the wallet and the key steps do not confirm, the last does.
   await setMock(page, "instant", "tx-failed")

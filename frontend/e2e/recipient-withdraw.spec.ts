@@ -1,5 +1,6 @@
 import {
   clearMock,
+  countFetches,
   navLink,
   setMock,
   sidebar,
@@ -31,7 +32,7 @@ test("an amount that matches a payment needs the acknowledgement", async ({
   page,
   watch,
 }) => {
-  watch.allowStatus(409)
+  watch.allowStatus(409, /\/unwrap$/)
   const card = await openWithdraw(page, "instant")
 
   await amountField(card).fill("4200")
@@ -91,7 +92,7 @@ test("an amount close to a payment is a warning too", async ({
   page,
   watch,
 }) => {
-  watch.allowStatus(409)
+  watch.allowStatus(409, /\/unwrap$/)
   const card = await openWithdraw(page, "instant")
 
   // Within 1% of $3,800.00 but not equal.
@@ -110,13 +111,20 @@ test("more than the balance, and an amount that is not a number, are refused", a
 }) => {
   const card = await openWithdraw(page, "instant")
 
+  const refusal = card.getByRole("alert")
+
   await amountField(card).fill("8000.01")
   await card.getByRole("button", { name: "Withdraw", exact: true }).click()
-  await expect(card.getByRole("alert")).toBeVisible()
+  await expect(refusal).toHaveText("That is more than your available balance")
 
+  // A different refusal replaces the first: the second really was refused too.
   await amountField(card).fill("abc")
   await card.getByRole("button", { name: "Withdraw", exact: true }).click()
-  await expect(card.getByRole("alert")).toBeVisible()
+  await expect(refusal).toHaveText("Enter an amount")
+
+  await amountField(card).fill("0")
+  await card.getByRole("button", { name: "Withdraw", exact: true }).click()
+  await expect(refusal).toHaveText("The amount must be more than zero")
   await expect(sidebar(page)).toContainText("$8,000.00")
 })
 
@@ -124,7 +132,7 @@ test("a transaction the network rejects says nothing was sent, and the amount ca
   page,
   watch,
 }) => {
-  watch.allowStatus(409)
+  watch.allowStatus(409, /\/unwrap\/confirm$/)
   const card = await openWithdraw(page, "instant")
   await setMock(page, "instant", "tx-failed")
 
@@ -149,26 +157,46 @@ test("after the network does not confirm in time, the same amount is refused", a
   page,
   watch,
 }) => {
-  watch.allowStatus(409, 503)
-  // The confirm gives up after 60 s: a fake clock lets the test spend them at once. It
-  // is installed before anything loads, and only moves when the test moves it.
+  watch.allowStatus(409, /\/unwrap\/confirm$/)
+  // The balance behind the sidebar is asked again too, and is down as well.
+  watch.allowStatus(503, /mock\.cadence\.test\//)
+  // The confirm gives up after 60 s of asking. A fake clock lets the test spend them: it is
+  // installed before anything loads, and paused once the form is up, so from then on time
+  // moves only when the test moves it.
   await page.clock.install()
+  const confirms = await countFetches(page, "/unwrap/confirm")
   const card = await openWithdraw(page)
+  const clockNow = () => page.evaluate(() => Date.now())
+  await page.clock.pauseAt((await clockNow()) + 1_000)
+  const start = await clockNow()
 
   await amountField(card).fill("1234.56")
   await card.getByRole("button", { name: "Withdraw", exact: true }).click()
-  await expect(card.getByText("Waiting for the network")).toBeVisible()
+  await expect.poll(confirms).toBe(1)
   // From here the service stops answering the confirm, so it is asked again and again.
   await setMock(page, "service-down")
 
   const held = card.getByText("The withdrawal may have gone through")
+  // Half a minute of asking, and still asking: the service being down once, or twice, is
+  // not the end of it. (Each step lets the next request go out before time moves again.)
   await expect(async () => {
-    await page.clock.fastForward(15_000)
-    await expect(held).toBeVisible({ timeout: 1_000 })
+    await page.clock.fastForward(5_000)
+    expect(await confirms()).toBeGreaterThanOrEqual(3)
   }).toPass()
+  expect((await clockNow()) - start).toBeLessThan(60_000)
+  await expect(held).toBeHidden()
+  await expect(card.getByText("Waiting for the network")).toBeVisible()
+
+  // Past the minute it gives up, and says the money may have moved.
+  await expect(async () => {
+    await page.clock.fastForward(10_000)
+    await expect(held).toBeVisible({ timeout: 500 })
+  }).toPass()
+  expect((await clockNow()) - start).toBeGreaterThanOrEqual(60_000)
   await expect(card.getByRole("alert")).toContainText("may have gone through")
 
   // The same amount is not sent again, even though the field still holds it.
+  await page.clock.resume()
   await clearMock(page)
   await setMock(page, "instant")
   const withdraw = card.getByRole("button", { name: "Withdraw", exact: true })

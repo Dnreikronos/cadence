@@ -35,7 +35,9 @@ const person = (page: Page, name: string) =>
   page.getByRole("checkbox", { name: new RegExp(name) })
 
 const payButton = (page: Page) =>
-  page.getByRole("button", { name: /^(Pay \d+ people?|Pick who to pay)/ })
+  page.getByRole("button", {
+    name: /^(Pay \d+ (people|person)|Pick who to pay)/,
+  })
 
 const rowOf = (page: Page, name: string) =>
   page
@@ -120,7 +122,7 @@ test("a partial failure shows one failed and one expired, and the failed one can
   page,
   watch,
 }) => {
-  watch.allowStatus(409)
+  watch.allowStatus(409, /\/runs\/[^/]+\/payments\/[^/]+\/confirm$/)
   await openNewRun(page, "partial-failure")
   await payButton(page).click()
   await page
@@ -164,4 +166,47 @@ test("a partial failure shows one failed and one expired, and the failed one can
   await expect(sidebar(page)).toContainText(
     usd(startBalance - amounts[confirmedPerson!] - amounts[failedPerson!]),
   )
+})
+
+test("people who were just paid are not ticked for the next run, and ticking them warns", async ({
+  page,
+}) => {
+  await openNewRun(page)
+  await person(page, "Northwind Audit").uncheck()
+  await payButton(page).click()
+  await page
+    .getByRole("dialog", { name: "Pay 2 people · $10,500.00" })
+    .getByRole("button", { name: "Confirm and sign" })
+    .click()
+  const progress = page.getByRole("region", { name: "Payments in this run" })
+  await expect(progress.getByRole("status")).toContainText("2 of 2 confirmed")
+
+  // Back to a new run by client-side navigation: the mock still has the payments.
+  await page.getByRole("link", { name: "Back to payments" }).click()
+  await page.getByRole("link", { name: "New payroll run" }).first().click()
+  await expect(page).toHaveURL("/company/runs/new")
+
+  for (const name of ["Bruno Costa", "Diego Martins"]) {
+    await expect(person(page, name)).not.toBeChecked()
+    await expect(person(page, name)).toHaveAccessibleDescription(
+      "Paid in the last 24 hours, so not ticked. Tick to pay again.",
+    )
+  }
+  await expect(page.getByText("Paid recently")).toHaveCount(2)
+  await expect(person(page, "Northwind Audit")).toBeChecked()
+  await expect(payButton(page)).toHaveText("Pay 1 person · $9,500.00")
+
+  // Ticking one again is a choice, and a warned one, down to the confirmation.
+  await person(page, "Bruno Costa").check()
+  await expect(person(page, "Bruno Costa")).toHaveAccessibleDescription(
+    "Paid in the last 24 hours. Ticked again, this pays them a second time.",
+  )
+  await payButton(page).click()
+  const dialog = page.getByRole("dialog", { name: /^Pay 2 people/ })
+  await expect(dialog.getByRole("alert")).toContainText(
+    "Paid in the last 24 hours and ticked again: Bruno Costa. This pays them a second time.",
+  )
+  await expect(
+    dialog.getByRole("button", { name: "Pay again and sign" }),
+  ).toBeVisible()
 })

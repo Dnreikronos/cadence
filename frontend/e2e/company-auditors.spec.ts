@@ -58,7 +58,7 @@ test("refuses to invite someone who is already an auditor", async ({
   page,
   watch,
 }) => {
-  watch.allowStatus(409)
+  watch.allowStatus(409, /\/company\/auditors$/)
 
   const dialog = await invite(page, ana)
 

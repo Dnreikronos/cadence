@@ -43,12 +43,18 @@ test("asks for a valid amount before sending anything", async ({ page }) => {
   await section.getByLabel("Amount to make private (USDC)").fill("99999")
   await section.getByRole("button", { name: "Make private" }).click()
 
-  await expect(section.getByRole("alert")).toBeVisible()
+  await expect(section.getByRole("alert")).toHaveText(
+    "That is more public USDC than you hold",
+  )
+  // Had a deposit gone out anyway, one of these would have moved.
+  await expect(section).toContainText("$12,500.00")
+  await expect(section).toContainText("$84,000.00")
   await expect(sidebar(page)).toContainText("$84,000.00")
+  await expect(section.getByRole("status")).toBeEmpty()
 })
 
 test("a failed transaction can be retried", async ({ page, watch }) => {
-  watch.allowStatus(409)
+  watch.allowStatus(409, /\/wrap\/confirm$/)
   const section = await openDeposit(page)
   await setMock(page, "instant", "tx-failed")
 
@@ -75,7 +81,7 @@ test("an unactivated company wallet is told so, and nothing is deposited", async
   page,
   watch,
 }) => {
-  watch.allowStatus(409)
+  watch.allowStatus(409, /\/wrap$/)
   const section = await openDeposit(page)
   await setMock(page, "instant", "setup-required")
 
@@ -90,4 +96,42 @@ test("an unactivated company wallet is told so, and nothing is deposited", async
     0,
   )
   await expect(sidebar(page)).toContainText("$84,000.00")
+})
+
+test("a payment that arrived mid-flight leaves the deposit waiting, and trying again finishes it", async ({
+  page,
+  watch,
+}) => {
+  watch.allowStatus(409, /\/accounts\/apply-pending\/confirm$/)
+  const section = await openDeposit(page)
+  await setMock(page, "instant", "credit-mismatch")
+
+  await section.getByLabel("Amount to make private (USDC)").fill("1000")
+  await section.getByRole("button", { name: "Make private" }).click()
+
+  // The deposit itself went through; making it available is what failed, and the screen
+  // says so instead of offering the deposit again.
+  const alert = section.getByRole("alert")
+  await expect(alert).toContainText(
+    "A payment arrived while we were updating your balance. Try again.",
+  )
+  await expect(alert).toContainText("The deposit went through.")
+  await expect(alert).toContainText("trying again only finishes that.")
+  await expect(section).toContainText("$11,500.00")
+  await expect(sidebar(page)).toContainText("$84,000.00")
+  // The amount is not left in the field to be sent twice.
+  await expect(section.getByLabel("Amount to make private (USDC)")).toHaveValue(
+    "",
+  )
+
+  await clearMock(page)
+  await setMock(page, "instant")
+  await alert.getByRole("button", { name: "Try again" }).click()
+
+  await expect(section.getByRole("status")).toContainText(
+    "is now in your private balance",
+  )
+  await expect(sidebar(page)).toContainText("$85,000.00")
+  // Nothing was wrapped a second time.
+  await expect(section).toContainText("$11,500.00")
 })
