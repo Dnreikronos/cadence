@@ -190,6 +190,9 @@ Statuses and routes are part of the proposal.
 | 409 | `credit_counter_mismatch` | `POST /accounts/apply-pending/confirm`. |
 | 409 | `key_already_enrolled` | `POST /keys/enroll`. |
 | 409 | `person_already_active`, `person_removed` | `POST /company/people/:person_id/invite`, see [Invites](#invites-). |
+| 404 | `auditor_not_found` | `DELETE /company/auditors/:auditor_id`, when the id is not an auditor or pending invite of the caller's company. |
+| 409 | `auditor_already_invited` | `POST /company/auditors`, for an address with a pending invite, see [Auditors](#auditors-). |
+| 409 | `auditor_already_active` | `POST /company/auditors`, for an address that already audits the company. |
 
 The review findings below propose three more (`run_in_progress`,
 `idempotency_key_reused`, `invalid_cursor`); they are not part of the shapes yet.
@@ -663,6 +666,105 @@ Requirement: rate limits per person, per company and per recipient email address
 so the route cannot be used to send mail to someone else or to flood one inbox. The
 budgets are an [open question](#open-questions).
 
+### Auditors 🟡
+
+The admin manages who may read every payment amount of the company (#85). It is a
+service route for the same reason as the invites: it needs the service role (see
+[finding 9](#design-review-findings-to-resolve-before-building)). These three routes
+are for the **admin role only**; any other role gets `403 forbidden_role`. They
+decrypt nothing and write no row to the decryption audit log, and **no response
+carries an amount**.
+
+| Route | Returns |
+|---|---|
+| `GET /company/auditors` | `{ "items": [ <auditor> ], "next_cursor": "<opaque> \| null" }`, newest invite first, paged like the other reads |
+| `POST /company/auditors` | the new `<auditor>`, with `201` |
+| `DELETE /company/auditors/:auditor_id` | `200` with `{ "status": "revoked" }` |
+
+An auditor:
+
+```json
+{
+  "id": "<uuid>",
+  "email": "ana.ribeiro@example.com",
+  "status": "invited | active | invite-expired",
+  "invited_at": "2026-10-02T09:00:00Z"
+}
+```
+
+`POST /company/auditors` takes `{ "email": "<address>" }` and creates an invite. The
+address must match `^[^@\s]+@[^@\s]+$` and be at most 320 characters, the same rule as
+the invites table (`20261001000000_tenancy.sql:27`); anything else, an unknown field
+included, is `400 invalid_request`. The web app checks the same rule before it sends.
+As with [Invites](#invites-), the response never contains the invite token or link.
+
+- `409 auditor_already_invited` when the address already has a pending invite, and
+  `409 auditor_already_active` when it already audits the company. Addresses are
+  compared without regard to case. This draft assumes a pending invite that has
+  expired (`invite-expired`) does not block a new one: the new invite replaces it.
+- `DELETE` revokes an active auditor or withdraws a pending invite. An id that is
+  not in the caller's company is `404 auditor_not_found`, never `403`, so a response
+  never confirms that it exists, and a second `DELETE` of the same id is also `404`.
+  It answers `200 { "status": "revoked" }` and not `204`, so that every route in this
+  contract returns a JSON body that the client validates; a client treats an empty
+  `204` as a contract error.
+- **Blocked: `DELETE` fails CORS preflight**, like `PUT` (see
+  [Conventions](#conventions)). This document does not change the shape; the choice
+  between allowing `DELETE` and a `POST` is in [Open questions](#open-questions).
+
+### Access log 🟡
+
+`GET /audit/access-log` (#88) is the audit trail the Rust service writes for every
+decrypted read (#49), shown to the auditor: who decrypted what for the company the
+auditor audits. The company is the caller's own (see
+[finding 9](#design-review-findings-to-resolve-before-building)), so there is no
+company id in the path. **Auditor role only**; any other role gets `403 forbidden_role`.
+It is paged like the other reads (`?limit=50&cursor=<opaque>`), newest first, and
+returns `{ "items": [ <entry> ], "next_cursor": "<opaque> | null" }`.
+
+```json
+{
+  "id": "<uuid>",
+  "at": "2026-10-03T18:00:00Z",
+  "actor": { "kind": "service | company | recipient | auditor", "label": "Ana Ribeiro" },
+  "action": "read_payments | read_balance | export_csv",
+  "scope": "Company payments"
+}
+```
+
+- `actor.label` is a display name chosen by the service, and `scope` is a short
+  description of what was read. Both are plain words. **An entry never holds an
+  amount, and never a payment id** that would let someone match it to one.
+- Reading the log is not a decryption, so it writes no audit row itself.
+  Whether it should is an [open question](#open-questions).
+
+### Account status 🟡
+
+`GET /me/status` (#80, [finding 10](#design-review-findings-to-resolve-before-building))
+lets the activation screen resume after an interruption. **Recipient role only**; any
+other role gets `403 forbidden_role`. It returns four booleans and nothing else:
+
+```json
+{
+  "wallet_linked": true,
+  "key_enrolled": true,
+  "account_configured": false,
+  "pending_credits": false
+}
+```
+
+- `wallet_linked`: the caller has a linked wallet
+  ([finding 4](#design-review-findings-to-resolve-before-building)).
+  `key_enrolled`: `POST /keys/enroll` succeeded for it. `account_configured`: the
+  confidential token account exists and is configured, after
+  `POST /accounts/configure/confirm`. `pending_credits`: credits are waiting to be
+  applied with `POST /accounts/apply-pending`.
+- The steps are independent flags, not a position in a sequence, so a client does not
+  infer order from them.
+- It reads setup state only: it decrypts no amount, so it writes no audit row and the
+  web app may call it when a screen opens. `pending_credits` is meant to say only
+  whether the public credit counter is ahead of the applied one, never how much.
+
 ## What the web app guarantees in return
 
 - It sends amounts only as base-unit strings, and only to the routes above.
@@ -694,6 +796,13 @@ handler, including each failure that changes the UI:
   `transaction_mismatch`, `credit_counter_mismatch`, `forbidden_role`.
 - `401`, `429` with `Retry-After`, and `503` with `auth_unavailable`.
 - Slow responses, so the progress states are exercised.
+- The auditor routes with one active and one invited auditor, both conflicts, and
+  an expired invite that a new one replaces; an access log of 25 rows, so paging is
+  exercisable; and an account status derived from the mock's own state. Enrolling a
+  key links the wallet, confirming `configure` sets `account_configured`, and
+  credits that a run payment left pending set `pending_credits`. The mock also has a
+  reset for that status alone (`resetAccountStatus`, and `cadenceMock.resetAccountStatus()`
+  in the browser).
 
 A handler returns an error body with **only** `{ "error": code }`, so a mock cannot
 teach a screen to depend on a field the real service will not send. A mock that
@@ -704,8 +813,10 @@ real service until the header is exposed.
 
 A design review of the proposed routes found the problems below. **Everything in
 this section is a proposal. None of it is reflected in the shapes above, in the
-client or in the mock service (#110).** Each item gives the problem, why it is real,
-and the suggested change. The backend owner decides.
+client or in the mock service (#110), except the three routes added on 2026-10-04
+that findings 9 and 10 ask for: [Auditors](#auditors-), the
+[access log](#access-log-) and [account status](#account-status-).** Each item gives
+the problem, why it is real, and the suggested change. The backend owner decides.
 
 1. **A payroll run cannot prepare its payments together.**
    *Problem.* `POST /runs` returns N independent unsigned transactions at once.
@@ -921,6 +1032,14 @@ These need an answer from the backend owner before the 🟡 routes are built.
 23. **CORS: `PUT` and `Retry-After`.** Will CORS allow `PUT`, or does
     `PUT /company/people/:person_id/amount` become a `POST`? Will the service send
     `Access-Control-Expose-Headers: Retry-After`?
+24. **Auditor invites and revocation.** `DELETE /company/auditors/:auditor_id` fails
+    CORS preflight like `PUT`: allow `DELETE`, or make it a `POST`? Does an expired
+    invite get replaced by a new one (this draft) or revived, and are addresses
+    compared without regard to case? Is `200 { "status": "revoked" }` acceptable, or
+    should it be `204`?
+25. **Access log scope.** Is every audit row of #49 shown, or only the ones whose
+    subject is the auditor's company? How long is the log kept, and does reading it
+    (or an export) write an audit row of its own?
 
 ## Revisions
 
@@ -935,3 +1054,10 @@ These need an answer from the backend owner before the 🟡 routes are built.
   [design review findings](#design-review-findings-to-resolve-before-building) as
   proposals that leave the shapes unchanged. Reworded Q10, extended the open
   questions to 23, and fixed the ADR B13 justification.
+- 2026-10-04: added three 🟡 proposals the remaining screens need, all additive:
+  [Auditors](#auditors-) (`GET`, `POST` and `DELETE /company/auditors`, #85), the
+  [access log](#access-log-) (`GET /audit/access-log`, #88) and
+  [account status](#account-status-) (`GET /me/status`, #80), with the codes
+  `auditor_already_invited`, `auditor_already_active` and `auditor_not_found`, and
+  open questions 24 and 25. The client and the mock implement them. No existing
+  route changed.
