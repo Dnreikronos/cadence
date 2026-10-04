@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { queryKeys } from "./keys"
 
+const ana = { email: "ana@solaris.test", company: "Solaris" }
+const bruno = { email: "bruno@solaris.test", company: "Solaris" }
+
 const startsWith = (key: readonly unknown[], prefix: readonly unknown[]) =>
   prefix.every((part, index) => key[index] === part)
 
@@ -15,8 +18,8 @@ describe("queryKeys", () => {
       [queryKeys.people.list(), queryKeys.people.all],
       [queryKeys.people.detail("a"), queryKeys.people.all],
       [queryKeys.people.amounts(), queryKeys.people.all],
-      [queryKeys.balance.company(), queryKeys.balance.all],
-      [queryKeys.balance.me(), queryKeys.balance.all],
+      [queryKeys.balance.company(ana), queryKeys.balance.all],
+      [queryKeys.balance.me(ana), queryKeys.balance.all],
       [queryKeys.deposit.info(), queryKeys.deposit.all],
       [queryKeys.payments.company(), queryKeys.payments.all],
       [queryKeys.payments.me(), queryKeys.payments.all],
@@ -36,8 +39,17 @@ describe("queryKeys", () => {
       queryKeys.payments.company({ cursor: "b" }),
     )
     expect(queryKeys.payments.company()).not.toEqual(queryKeys.payments.me())
-    expect(queryKeys.balance.company()).not.toEqual(queryKeys.balance.me())
+    expect(queryKeys.balance.company(ana)).not.toEqual(
+      queryKeys.balance.me(ana),
+    )
     expect(queryKeys.runs.detail("a")).not.toEqual(queryKeys.runs.detail("b"))
+  })
+
+  it("keeps one viewer's balance apart from another's", () => {
+    expect(queryKeys.balance.me(ana)).not.toEqual(queryKeys.balance.me(bruno))
+    expect(queryKeys.balance.me(ana)).not.toEqual(
+      queryKeys.balance.me({ ...ana, company: "Acme" }),
+    )
   })
 
   it("is stable for the same input", () => {

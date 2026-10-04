@@ -18,7 +18,7 @@ export function RoleShell({
   email: string
   children: React.ReactNode
 }) {
-  const balance = useShellBalance(role)
+  const balance = useShellBalance(role, { email, company: company.name })
   return (
     <WalletProvider role={role}>
       <AppShell role={role} company={company} email={email} balance={balance}>

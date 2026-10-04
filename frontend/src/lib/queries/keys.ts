@@ -1,5 +1,8 @@
 import type { PageQuery } from "@/lib/api/client"
 
+// Who a cached answer belongs to. Balances are private, so their keys carry it.
+export type ViewerScope = { email: string; company: string }
+
 const people = ["people"] as const
 const balance = ["balance"] as const
 const deposit = ["deposit"] as const
@@ -22,11 +25,14 @@ export const queryKeys = {
     // Per-person amounts live in the proof service.
     amounts: (query: PageQuery = {}) => [...people, "amounts", query] as const,
   },
-  // Private balances: the company's and the signed-in recipient's.
+  // Private balances: the company's and the signed-in recipient's, per viewer, so
+  // an answer cached for one person is never read by another on the same tab.
   balance: {
     all: balance,
-    company: () => [...balance, "company"] as const,
-    me: () => [...balance, "me"] as const,
+    company: (viewer: ViewerScope) =>
+      [...balance, "company", viewer.company, viewer.email] as const,
+    me: (viewer: ViewerScope) =>
+      [...balance, "me", viewer.company, viewer.email] as const,
   },
   // The public USDC the company holds and can make private.
   deposit: {
