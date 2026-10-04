@@ -1,6 +1,7 @@
 import type { ApiClient } from "@/lib/api/client"
 import { ApiError, messageFor } from "@/lib/api/errors"
 import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import { SentApplyError } from "@/lib/me/apply-pending"
 import type { bindSignAndConfirm } from "@/lib/wallet/sign-and-confirm"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import type { MakePrivateStep } from "./types"
@@ -10,11 +11,18 @@ import type { MakePrivateStep } from "./types"
 // went out and its outcome is unknown: sending another could deposit twice.
 export type Resume = "wrap" | "apply" | "check"
 
+// An apply that went out and was not seen through: what the screen needs to ask the
+// service about it again without preparing anything. `signature` is null when `submit`
+// itself failed, so there is nothing to ask about.
+export type SentApply = { request_id: string; signature: string | null }
+
 export class MakePrivateError extends Error {
   constructor(
     readonly step: MakePrivateStep,
     readonly resume: Resume,
     cause: unknown,
+    // Set for a sent apply, whose `cause` is then a `SentApplyError`.
+    readonly sent: SentApply | null = null,
   ) {
     super("Making the deposit private failed", { cause })
     this.name = "MakePrivateError"
@@ -66,6 +74,11 @@ export async function runMakePrivate({
   let step: MakePrivateStep = from === "wrap" ? "preparing" : "applying"
   let wrapped = from === "apply"
   let submitted = false
+  // The apply step follows the same rule as `/me` (`applyPending`): once it is past
+  // "signing" a failure may have gone out, and is a `SentApplyError`.
+  let applyId: string | null = null
+  let applyPast = false
+  let applySignature: string | null = null
   try {
     if (!wrapped) {
       onStep(step)
@@ -102,6 +115,7 @@ export async function runMakePrivate({
     step = "applying"
     onStep(step)
     const prepared = await api.accounts.applyPending(wallet, { signal })
+    applyId = prepared.request_id
     await signAndConfirm(
       prepared,
       (signature) =>
@@ -109,11 +123,38 @@ export async function runMakePrivate({
           { request_id: prepared.request_id, signature },
           { signal },
         ),
-      undefined,
-      { signal },
+      (signStep) => {
+        // Before `submit` runs, not after it returns: a submit that throws may
+        // still have reached the network.
+        if (signStep !== "signing") applyPast = true
+      },
+      {
+        signal,
+        onSubmitted: (signature) => {
+          applySignature = signature
+        },
+      },
     )
     onConfirmed?.("apply")
   } catch (error) {
+    // The network dropping the apply is the one failure that is not a sent one.
+    const dropped = error instanceof ApiError && lostForGood.has(error.code)
+    // A timeout carries the signature of a transaction that was submitted.
+    const timedOut = error instanceof ConfirmTimeoutError
+    if (applyId && !dropped && (applyPast || timedOut)) {
+      const sent = {
+        request_id: applyId,
+        signature:
+          applySignature ??
+          (timedOut ? (error as ConfirmTimeoutError).signature : null),
+      }
+      throw new MakePrivateError(
+        step,
+        "check",
+        new SentApplyError(sent.signature, error),
+        sent,
+      )
+    }
     throw new MakePrivateError(
       step,
       resumeFor(error, wrapped, submitted),
@@ -136,8 +177,13 @@ function resumeFor(
   return submitted && !lost ? "check" : "wrap"
 }
 
+// What the person reads after an apply that may have gone through. It never says "try again".
+export const sentApplyMessage =
+  "Making your deposit available may already have gone through, so we won't send another attempt yet. Check your balances."
+
 export function failureMessage(error: unknown): string {
   const cause = error instanceof MakePrivateError ? error.cause : error
+  if (cause instanceof SentApplyError) return sentApplyMessage
   if (cause instanceof ConfirmTimeoutError) {
     return "The network hasn't confirmed this yet. Check your balances before trying again."
   }

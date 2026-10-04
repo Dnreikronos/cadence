@@ -104,6 +104,7 @@ export function useMakePrivate(wallet: string) {
     applyPending: () => controller.applyPending(),
     retry: () => controller.retry(),
     check: () => controller.check(),
+    checkAgain: () => controller.checkAgain(),
     dismiss: () => controller.dismiss(),
   }
 }
