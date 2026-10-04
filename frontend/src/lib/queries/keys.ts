@@ -63,7 +63,8 @@ export const queryKeys = {
   // What the signed-in recipient still has to do before they can be paid.
   status: {
     all: status,
-    me: () => [...status, "me"] as const,
+    me: (viewer: ViewerScope) =>
+      [...status, "me", viewer.company, viewer.email] as const,
   },
   // Receipts are built from payments, but cached on their own.
   receipts: {

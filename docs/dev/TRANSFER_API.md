@@ -14,13 +14,13 @@ and encrypted-key migrations. Provision LOGIN/passwords through deployment
 secret management for `cadence_transfer_service` and `cadence_key_service`.
 The runtime verifies the actual connected role and uses separate credentials.
 
-| Setting | Purpose |
-|---|---|
-| `PROOF_SUPABASE_URL` | This project's Supabase HTTPS origin |
-| `PROOF_SUPABASE_API_KEY` | Public API key for Supabase Auth |
+| Setting                       | Purpose                                                  |
+| ----------------------------- | -------------------------------------------------------- |
+| `PROOF_SUPABASE_URL`          | This project's Supabase HTTPS origin                     |
+| `PROOF_SUPABASE_API_KEY`      | Public API key for Supabase Auth                         |
 | `PROOF_TRANSFER_DATABASE_URL` | Direct Postgres connection as `cadence_transfer_service` |
-| `PROOF_KEY_DATABASE_URL` | Direct Postgres connection as `cadence_key_service` |
-| `PROOF_RPC_URL` | Devnet RPC with transaction v1 support |
+| `PROOF_KEY_DATABASE_URL`      | Direct Postgres connection as `cadence_key_service`      |
+| `PROOF_RPC_URL`               | Devnet RPC with transaction v1 support                   |
 
 Transfer routes return `503 transfer_unavailable` when both database settings
 are absent. Partial configuration fails startup. Auth-only Supabase settings
@@ -66,7 +66,7 @@ the confidential key derivation message. Never reuse a derivation signature.
 The wallet association cannot be reassigned through the API, and another user
 cannot claim an existing link. Following requests omit `wallet_signature`.
 
-Supply the AES balance key derived alongside the *enrolled* ElGamal key by the
+Supply the AES balance key derived alongside the _enrolled_ ElGamal key by the
 canonical Solana SDK. Vault retains only the ElGamal secret; generating another
 AES key breaks balance authentication. Serve the API over HTTPS and keep these
 fields out of proxy/access logs, browser analytics and client error reports.
@@ -89,7 +89,10 @@ make the transaction fail. Returning bytes does not submit a payment.
 Use the same authenticated user and send:
 
 ```json
-{"request_id": "<prepared request ID>", "signature": "<submitted transaction signature>"}
+{
+  "request_id": "<prepared request ID>",
+  "signature": "<submitted transaction signature>"
+}
 ```
 
 The RPC read uses base64, finalized commitment and
@@ -107,16 +110,16 @@ an existing signature or slot. The backend never signs or submits transactions.
 Every response error is fixed JSON: `{"error":"<code>"}`. Rejected JSON,
 including unknown fields and oversize bodies, cannot echo request values.
 
-| Status | Examples |
-|---|---|
-| 400 | `invalid_request`, `invalid_account`, `invalid_amount`, `invalid_balance_key`, `invalid_request_id`, `invalid_signature` |
-| 401 | `authentication_required` |
-| 403 | `wallet_access_denied` |
-| 404 | `transfer_not_found` |
-| 409 | `wallet_link_required`, `transfer_requires_devnet`, `sender_account_missing`, `recipient_account_missing`, `invalid_confidential_state`, `proof_generation_failed`, `transaction_not_finalized`, `transaction_failed`, `transaction_mismatch`, `transfer_already_confirmed` |
-| 429 | `transfer_rate_limited`, with `Retry-After: 60` |
-| 503 | `transfer_unavailable`, `auth_unavailable`, `key_storage_unavailable`, `transfer_storage_unavailable`, `rpc_unavailable`, `transfer_timeout` |
-| 500 | `internal_error` |
+| Status | Examples                                                                                                                                                                                                                                                                    |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `invalid_request`, `invalid_account`, `invalid_amount`, `invalid_balance_key`, `invalid_request_id`, `invalid_signature`                                                                                                                                                    |
+| 401    | `authentication_required`                                                                                                                                                                                                                                                   |
+| 403    | `wallet_access_denied`                                                                                                                                                                                                                                                      |
+| 404    | `transfer_not_found`                                                                                                                                                                                                                                                        |
+| 409    | `wallet_link_required`, `transfer_requires_devnet`, `sender_account_missing`, `recipient_account_missing`, `invalid_confidential_state`, `proof_generation_failed`, `transaction_not_finalized`, `transaction_failed`, `transaction_mismatch`, `transfer_already_confirmed` |
+| 429    | `transfer_rate_limited`, with `Retry-After: 60`                                                                                                                                                                                                                             |
+| 503    | `transfer_unavailable`, `auth_unavailable`, `key_storage_unavailable`, `transfer_storage_unavailable`, `rpc_unavailable`, `transfer_timeout`                                                                                                                                |
+| 500    | `internal_error`                                                                                                                                                                                                                                                            |
 
 Bodies are limited to 8 KiB. Per process, the two transfer routes share 120
 requests/minute globally, 30 per direct peer, eight concurrent HTTP requests,

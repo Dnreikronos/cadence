@@ -167,7 +167,7 @@ export type RevealRiskLevel = (typeof revealRiskLevels)[number]
 
 export const unwrapPreparedSchema = preparedSchema.extend({
   reveal_risk: z.object({
-    level: z.enum(revealRiskLevels),
+    level: z.enum(revealRiskLevels).catch("exact"),
     // Payment ids and dates only. Never an amount.
     matches: z.array(z.object({ payment_id: id, paid_at: timestamp })),
   }),
