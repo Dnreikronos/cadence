@@ -252,11 +252,13 @@ function CardBalance({ balance }: { balance: ShellBalance }) {
         </div>
       ) : (
         <>
-          <AmountDisplay
-            amount={balance.amount}
-            state={balance.state}
-            className="mt-1.5 text-[14px]"
-          />
+          <div aria-live="polite" className="mt-1.5">
+            <AmountDisplay
+              amount={balance.amount}
+              state={balance.state}
+              className="text-[14px]"
+            />
+          </div>
           <p className="mt-1 text-[11px] text-ink-muted">
             Sealed on-chain. The public cannot read it.
           </p>
