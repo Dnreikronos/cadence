@@ -1,8 +1,16 @@
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, it } from "vitest"
+import { Dialog } from "@base-ui/react/dialog"
+import { describe, expect, it, vi } from "vitest"
 import type { PaymentItem } from "@/lib/api/schemas"
-import { ReceiptBody } from "./receipt-dialog"
+import {
+  ReceiptBody,
+  ReceiptContent,
+  receiptPopupProps,
+} from "./receipt-dialog"
+
+// The real config is read from the environment at import.
+vi.mock("@/lib/api/mode", () => ({ apiConfig: { mode: "real", baseUrl: "" } }))
 
 const signature = "5SigMockSignature1111111111111111111111111111"
 const runId = "c1000000-0000-4000-8000-000000000009"
@@ -26,14 +34,35 @@ function render(
   props: {
     role?: "admin" | "recipient" | "auditor"
     cluster?: "devnet" | "mainnet"
+    hasAuditor?: boolean
+    company?: string
+    mock?: boolean
   } = {},
 ) {
   return renderToStaticMarkup(
     createElement(ReceiptBody, {
       role: props.role ?? "admin",
       cluster: props.cluster ?? "devnet",
+      mock: props.mock ?? false,
+      hasAuditor: props.hasAuditor,
+      company: props.company,
       payment: { ...base, ...payment },
     }),
+  )
+}
+
+// The popup is rendered inside an open dialog root, without the portal.
+function renderPopup(payment: Partial<PaymentItem> = {}) {
+  return renderToStaticMarkup(
+    createElement(
+      Dialog.Root,
+      { open: true },
+      createElement(ReceiptContent, {
+        role: "admin",
+        payment: { ...base, ...payment },
+        onClose() {},
+      }),
+    ),
   )
 }
 
@@ -85,10 +114,10 @@ describe("ReceiptBody", () => {
   })
 
   it("names the readers of the amount for the viewer's role, Cadence among them", () => {
-    expect(render({}, { role: "admin" })).toContain(
+    expect(render({}, { role: "admin", hasAuditor: false })).toContain(
       "Your company, the recipient and Cadence can read this amount",
     )
-    expect(render({}, { role: "recipient" })).toContain(
+    expect(render({}, { role: "recipient", hasAuditor: false })).toContain(
       "You, the company that paid you and Cadence can read this amount",
     )
   })
@@ -122,5 +151,136 @@ describe("ReceiptBody", () => {
     })
     expect(html).toContain("x".repeat(200))
     expect(html).toMatch(/class="[^"]*wrap-break-word[^"]*"[^>]*>x{200}/)
+  })
+
+  it("keeps the explorer link to signatures of the right length and alphabet", () => {
+    const valid88 = "5".repeat(88)
+    expect(render({ signature: valid88 })).toContain(
+      `href="https://explorer.solana.com/tx/${valid88}?cluster=devnet"`,
+    )
+    for (const signature of ["A".repeat(31), "A".repeat(129)]) {
+      const html = render({ signature })
+      expect(html, String(signature.length)).toContain(signature)
+      expect(html, String(signature.length)).not.toContain(
+        "explorer.solana.com",
+      )
+    }
+  })
+
+  describe("who can read the amount", () => {
+    it("never says an encrypted amount can be read by the public", () => {
+      const html = render()
+      expect(html).toContain("ciphertext")
+      expect(html).toContain("Who can see this amount")
+    })
+
+    it("says only that a transparent amount is public, with no ciphertext and no readers popover", () => {
+      const html = render({ transparent: true })
+      expect(html).toContain("its amount is public on-chain")
+      expect(html).not.toContain("ciphertext")
+      expect(html).not.toContain("The public cannot")
+      expect(html).not.toContain("can read this amount")
+      expect(html).not.toContain("Who can see this amount")
+    })
+
+    it("names the auditor when there is one", () => {
+      expect(render({}, { hasAuditor: true })).toContain(
+        "Your company, the recipient, your auditor and Cadence can read this amount",
+      )
+      expect(render({}, { hasAuditor: false })).toContain(
+        "Your company, the recipient and Cadence can read this amount",
+      )
+    })
+
+    it("does not claim there is no auditor while that is not known", () => {
+      const html = render({}, { hasAuditor: undefined })
+      expect(html).toContain(
+        "Your company, the recipient, anyone your company has designated and Cadence can read this amount",
+      )
+      expect(
+        render({}, { role: "recipient", hasAuditor: undefined }),
+      ).toContain("anyone the company has designated")
+    })
+  })
+
+  describe("company", () => {
+    it("names who paid, for a reader whose item names only the payee", () => {
+      for (const role of ["admin", "auditor"] as const) {
+        const html = render({}, { role, company: "Solaris" })
+        expect(html, role).toContain("Paid by")
+        expect(html, role).toContain("Solaris")
+        expect(html, role).toContain("Paid to")
+      }
+    })
+
+    it("leaves it out for a recipient, whose counterparty already is the company", () => {
+      const html = render(
+        { counterparty: { ...base.counterparty, name: "Solaris" } },
+        { role: "recipient", company: "Solaris" },
+      )
+      expect(html.match(/Solaris/g)).toHaveLength(1)
+    })
+
+    it("adds no line when it is not given", () => {
+      expect(render()).not.toContain("Paid by")
+    })
+  })
+
+  describe("test data line for print", () => {
+    it("marks devnet and mock builds, so a paper copy cannot pass for a real one", () => {
+      expect(render({}, { cluster: "devnet" })).toContain("Devnet: test funds")
+      const mock = render({}, { cluster: "devnet", mock: true })
+      expect(mock).toContain("Mock data")
+      expect(mock).toContain("Devnet: test funds")
+      // Drawn on paper only.
+      expect(mock).toMatch(/class="[^"]*\bhidden\b[^"]*print:block[^"]*"/)
+    })
+
+    it("prints nothing extra on mainnet with the real service", () => {
+      const html = render({}, { cluster: "mainnet", mock: false })
+      expect(html).not.toContain("test funds")
+      expect(html).not.toContain("Mock data")
+    })
+  })
+})
+
+describe("ReceiptContent", () => {
+  it("marks the popup for the print styles, which lay it out on paper", () => {
+    expect(receiptPopupProps["data-receipt-print"]).toBe(true)
+    const classes = receiptPopupProps.className.split(" ")
+    for (const paper of ["print:static", "print:w-full", "print:shadow-none"]) {
+      expect(classes, paper).toContain(paper)
+    }
+  })
+
+  it("hides every copy button and the explorer link on paper", () => {
+    const html = renderPopup({ run_id: runId })
+    const copyButtons = html.match(/aria-label="Copy [^"]+"/g) ?? []
+    expect(copyButtons).toHaveLength(3)
+    const insideHidden =
+      html.match(/<span class="print:hidden"><button[^>]*aria-label="Copy /g) ??
+      []
+    expect(insideHidden).toHaveLength(copyButtons.length)
+    expect(html).toMatch(/<a href="https:\/\/explorer[^>]*print:hidden/)
+    // Close and Download are not part of the receipt either.
+    expect(html).toMatch(/print:hidden"><button[^>]*>Close/)
+  })
+
+  it("says what the payment is without claiming it was sent when it was not", () => {
+    expect(renderPopup()).toContain("Encrypted transfer.")
+    expect(renderPopup({ transparent: true })).toContain(
+      "Ordinary transfer, public on-chain.",
+    )
+    for (const status of ["pending", "failed"] as const) {
+      const html = renderPopup({ status, signature: null })
+      expect(html, status).not.toMatch(/\bSent\b/)
+      expect(html, status).not.toContain("Encrypted transfer.")
+    }
+    expect(renderPopup({ status: "pending" })).toContain(
+      "Waiting for the network to confirm.",
+    )
+    expect(renderPopup({ status: "failed" })).toContain(
+      "This payment did not go through.",
+    )
   })
 })

@@ -3,15 +3,19 @@
 import { useState } from "react"
 import { Dialog } from "@base-ui/react/dialog"
 import { ExternalLink, Printer, X } from "lucide-react"
+import { apiConfig } from "@/lib/api/mode"
 import type { PaymentItem } from "@/lib/api/schemas"
 import type { Role } from "@/lib/auth/guard"
 import { cluster as appCluster, type ClusterName } from "@/lib/solana/cluster"
 import { unitsToUsd, formatBaseUnits } from "@/lib/money"
+import { printWithTitle } from "@/lib/receipts/print"
 import {
   counterpartyLabel,
   explorerTxUrl,
   formatPaidAt,
+  receiptSummary,
   receiptTitle,
+  testDataNotice,
 } from "@/lib/receipts/receipt"
 import { AmountDisplay } from "@/components/ui/amount-display"
 import { buttonVariants } from "@/components/ui/button"
@@ -22,24 +26,31 @@ import { TransparentBadge } from "@/components/ui/transparent-badge"
 import { WhoCanSee, whoCanSee } from "@/components/ui/who-can-see"
 
 export type ReceiptDialogProps = {
-  // Who is reading. It decides the label of the counterparty ("Paid to" for a
-  // company or an auditor, "Paid by" for a recipient) and who can read the amount.
+  // Who is reading. The item is the same for everyone, the role changes the words:
+  // - admin: the payee is the counterparty, "Paid to".
+  // - auditor: the same payee-only item as the admin, "Paid to"; pass `company`
+  //   to also show who paid.
+  // - recipient: the counterparty is the paying company, "Paid by".
   role: Role
   // The payment to show, from any payments list. Null keeps the dialog closed.
   payment: PaymentItem | null
   onClose: () => void
-  // Whether the company has an auditor, for the "who can see" sentence.
+  // Whether the company has an auditor, for the "who can read this amount"
+  // sentence. Undefined means not known yet, and the sentence then says "anyone
+  // the company has designated" rather than claiming there is none.
   hasAuditor?: boolean
+  // The paying company's name, as a "Paid by" line. For an admin or an auditor,
+  // whose item names only the payee; a recipient's counterparty already is the company.
+  company?: string
 }
 
 // A receipt for one payment, built only from the payment item: no request of its own.
 // "Download receipt" opens the browser's print dialog, whose "Save as PDF" is the
 // download; while the dialog is open, `@media print` (globals.css) prints it alone.
 export function ReceiptDialog({
-  role,
   payment,
   onClose,
-  hasAuditor = false,
+  ...rest
 }: ReceiptDialogProps) {
   // Keep showing the last payment while the dialog fades out.
   const [shown, setShown] = useState(payment)
@@ -52,96 +63,100 @@ export function ReceiptDialog({
     >
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-ink/30 transition-opacity duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0 print:hidden" />
-        <Dialog.Popup
-          data-receipt-print
-          className="fixed top-1/2 left-1/2 z-50 max-h-[calc(100svh-2rem)] w-[calc(100vw-2rem)] max-w-md -translate-1/2 overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-frame transition-[opacity,transform] duration-200 ease-out outline-none data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0 motion-reduce:transition-none print:static print:max-h-none print:w-full print:max-w-none print:translate-none print:overflow-visible print:border-0 print:p-0 print:shadow-none"
-        >
-          <Wordmark className="mb-4 hidden print:flex" />
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <Dialog.Title className="text-lead font-medium text-ink">
-                Payment receipt
-              </Dialog.Title>
-              <Dialog.Description className="mt-1 text-ui/normal text-ink-muted">
-                {shown?.transparent
-                  ? "Sent as an ordinary transfer."
-                  : "Sent as an encrypted transfer."}
-              </Dialog.Description>
-            </div>
-            <Dialog.Close
-              aria-label="Close"
-              className="-mt-1 -mr-1.5 grid size-8 shrink-0 place-items-center rounded-lg text-ink-muted hover:bg-canvas hover:text-ink print:hidden"
-            >
-              <X className="size-4" />
-            </Dialog.Close>
-          </div>
-
-          {shown && (
-            <ReceiptBody
-              role={role}
-              payment={shown}
-              hasAuditor={hasAuditor}
-              className="mt-5"
-            />
-          )}
-
-          {shown && (
-            <div className="mt-5 flex flex-wrap justify-end gap-2 print:hidden">
-              <button
-                type="button"
-                onClick={onClose}
-                className={buttonVariants({ variant: "secondary" })}
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  printReceipt(
-                    receiptTitle(shown.counterparty.name, shown.paid_at),
-                  )
-                }
-                className={buttonVariants()}
-              >
-                <Printer className="size-4" />
-                Download receipt
-              </button>
-            </div>
-          )}
-        </Dialog.Popup>
+        {shown && <ReceiptPopup payment={shown} onClose={onClose} {...rest} />}
       </Dialog.Portal>
     </Dialog.Root>
   )
 }
 
-// The page title names the PDF the browser offers to save, so it is set for the
-// print and put back afterwards.
-function printReceipt(title: string) {
-  const previous = document.title
-  const restore = () => {
-    document.title = previous
-    window.removeEventListener("afterprint", restore)
-  }
-  document.title = title
-  window.addEventListener("afterprint", restore)
-  window.print()
+// What marks the popup for `@media print` (globals.css) and lays it out on paper.
+export const receiptPopupProps = {
+  "data-receipt-print": true,
+  className:
+    "fixed top-1/2 left-1/2 z-50 max-h-[calc(100svh-2rem)] w-[calc(100vw-2rem)] max-w-md -translate-1/2 overflow-y-auto rounded-xl border border-line bg-surface p-5 shadow-frame transition-[opacity,transform] duration-200 ease-out outline-none data-ending-style:scale-[0.98] data-ending-style:opacity-0 data-starting-style:scale-[0.98] data-starting-style:opacity-0 motion-reduce:transition-none print:static print:max-h-none print:w-full print:max-w-none print:translate-none print:overflow-visible print:border-0 print:p-0 print:shadow-none",
 }
 
-// The receipt itself, apart from the dialog around it.
+function ReceiptPopup(
+  props: Omit<ReceiptDialogProps, "payment"> & { payment: PaymentItem },
+) {
+  return (
+    <Dialog.Popup {...receiptPopupProps}>
+      <ReceiptContent {...props} />
+    </Dialog.Popup>
+  )
+}
+
+// Everything inside the popup, apart from the popup and the portal so a test can render it.
+export function ReceiptContent({
+  payment,
+  onClose,
+  ...rest
+}: Omit<ReceiptDialogProps, "payment"> & { payment: PaymentItem }) {
+  return (
+    <>
+      <Wordmark className="mb-4 hidden print:flex" />
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <Dialog.Title className="text-lead font-medium text-ink">
+            Payment receipt
+          </Dialog.Title>
+          <Dialog.Description className="mt-1 text-ui/normal text-ink-muted">
+            {receiptSummary(payment)}
+          </Dialog.Description>
+        </div>
+        <Dialog.Close
+          aria-label="Close"
+          className="-mt-1 -mr-1.5 grid size-8 shrink-0 place-items-center rounded-lg text-ink-muted hover:bg-canvas hover:text-ink print:hidden"
+        >
+          <X className="size-4" />
+        </Dialog.Close>
+      </div>
+
+      <ReceiptBody payment={payment} className="mt-5" {...rest} />
+
+      <div className="mt-5 flex flex-wrap justify-end gap-2 print:hidden">
+        <button
+          type="button"
+          onClick={onClose}
+          className={buttonVariants({ variant: "secondary" })}
+        >
+          Close
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            printWithTitle(
+              receiptTitle(payment.counterparty.name, payment.paid_at),
+            )
+          }
+          className={buttonVariants()}
+        >
+          <Printer className="size-4" />
+          Download receipt
+        </button>
+      </div>
+    </>
+  )
+}
+
+// The receipt itself, apart from the dialog around it. `cluster` and `mock`
+// default to the running build and decide the test-data line printed on it.
 export function ReceiptBody({
   role,
   payment,
-  hasAuditor = false,
+  hasAuditor,
+  company,
   cluster = appCluster.name,
+  mock = apiConfig.mode === "mock",
   className,
-}: {
-  role: Role
+}: Omit<ReceiptDialogProps, "payment" | "onClose"> & {
   payment: PaymentItem
-  hasAuditor?: boolean
   cluster?: ClusterName
+  mock?: boolean
   className?: string
 }) {
   const explorer = explorerTxUrl(payment.signature, cluster)
+  const testData = testDataNotice(cluster, mock)
   return (
     <article aria-label="Payment receipt" className={className}>
       <div className="rounded-lg border border-line bg-surface-subtle p-4 print:border-ink/30">
@@ -151,9 +166,12 @@ export function ReceiptBody({
             amount={unitsToUsd(payment.amount)}
             className="text-amount"
           />
-          <span className="print:hidden">
-            <WhoCanSee viewerRole={role} hasAuditor={hasAuditor} />
-          </span>
+          {/* Its readers are listed only for an encrypted amount: a transparent one is public. */}
+          {!payment.transparent && (
+            <span className="print:hidden">
+              <WhoCanSee viewerRole={role} hasAuditor={hasAuditor} />
+            </span>
+          )}
         </div>
         <p className="mt-0.5 font-mono text-caption text-ink-muted">
           {formatBaseUnits(BigInt(payment.amount))} USDC
@@ -166,6 +184,13 @@ export function ReceiptBody({
             {payment.counterparty.name}
           </span>
         </Row>
+        {company && role !== "recipient" && (
+          <Row label="Paid by">
+            <span className="font-medium wrap-break-word text-ink">
+              {company}
+            </span>
+          </Row>
+        )}
         <Row label="Status">
           <span className="flex flex-wrap items-center gap-1.5">
             <StatusPill status={payment.status} />
@@ -210,10 +235,14 @@ export function ReceiptBody({
 
       <p className="mt-4 border-t border-line pt-3 text-caption/normal text-ink-muted">
         {payment.transparent
-          ? "This payment was sent as an ordinary transfer, so its amount is public on-chain. "
-          : ""}
-        {whoCanSee(role, hasAuditor)}
+          ? "This payment was sent as an ordinary transfer, so its amount is public on-chain."
+          : whoCanSee(role, hasAuditor)}
       </p>
+      {testData && (
+        <p className="mt-3 hidden border border-ink/40 px-2 py-1 text-center font-mono text-caption font-semibold uppercase print:block">
+          {testData}
+        </p>
+      )}
     </article>
   )
 }
