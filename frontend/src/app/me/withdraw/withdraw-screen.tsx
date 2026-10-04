@@ -306,7 +306,7 @@ function WithdrawCard({
               aria-describedby={error ? `${id}-error` : undefined}
               className={cn(
                 fieldClass,
-                "h-10 pr-14 font-mono tabular-nums read-only:opacity-50 disabled:opacity-50",
+                "h-10 pr-14 font-mono tabular-nums read-only:bg-surface-subtle read-only:text-ink-muted disabled:opacity-50",
               )}
             />
             <button
