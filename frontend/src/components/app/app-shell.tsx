@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Dialog } from "@base-ui/react/dialog"
+import { useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, Lock, LogOut, Menu, X } from "lucide-react"
 import type { Role } from "@/lib/auth/guard"
 import { cn } from "@/lib/utils"
@@ -18,7 +19,13 @@ import {
 import { isActive, navByRole, roleLabels } from "./nav"
 
 export type ShellCompany = { name: string }
-export type ShellBalance = { amount?: number; state: AmountState }
+// `error` replaces the amount with a note that it could not load; `onRetry` adds a button.
+export type ShellBalance = {
+  amount?: number
+  state: AmountState
+  error?: boolean
+  onRetry?: () => void
+}
 
 export function AppShell({
   role,
@@ -136,6 +143,7 @@ function BarTop({
 }
 
 function UserMenu({ email }: { email: string }) {
+  const queryClient = useQueryClient()
   return (
     <Popover>
       <PopoverTrigger className="ml-auto flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-ui text-ink-muted hover:bg-canvas hover:text-ink">
@@ -153,7 +161,14 @@ function UserMenu({ email }: { email: string }) {
         <p className="truncate text-label text-ink-muted">Signed in as</p>
         <p className="-mt-1.5 truncate font-medium text-ink">{email}</p>
         {/* Clears the Supabase session; the Turnkey session joins it with the wallet (#77). */}
-        <form action={signOut} className="border-t border-line pt-2">
+        {/* The cache is the viewer's data: the next sign-in must not see it. */}
+        <form
+          action={() => {
+            queryClient.clear()
+            return signOut()
+          }}
+          className="border-t border-line pt-2"
+        >
           <button
             type="submit"
             className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-ink-muted hover:bg-canvas hover:text-ink"
@@ -222,14 +237,31 @@ function CardBalance({ balance }: { balance: ShellBalance }) {
       <p className="flex items-center gap-1.5 text-label text-ink-muted">
         <Lock className="size-3" /> Private balance
       </p>
-      <AmountDisplay
-        amount={balance.amount}
-        state={balance.state}
-        className="mt-1.5 text-[14px]"
-      />
-      <p className="mt-1 text-[11px] text-ink-muted">
-        Sealed on-chain. The public cannot read it.
-      </p>
+      {balance.error ? (
+        <div role="alert" className="mt-1.5 text-ui/normal text-danger-fg">
+          <p>Could not load your balance.</p>
+          {balance.onRetry && (
+            <button
+              type="button"
+              onClick={balance.onRetry}
+              className="mt-1 underline underline-offset-2 hover:text-ink"
+            >
+              Try again
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          <AmountDisplay
+            amount={balance.amount}
+            state={balance.state}
+            className="mt-1.5 text-[14px]"
+          />
+          <p className="mt-1 text-[11px] text-ink-muted">
+            Sealed on-chain. The public cannot read it.
+          </p>
+        </>
+      )}
     </div>
   )
 }
