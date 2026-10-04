@@ -5,6 +5,7 @@ import type { Receipt } from "@/lib/api/schemas"
 import type { SignStep } from "@/lib/api/sign"
 import { mockWalletFor } from "./mock"
 import { bindSignAndConfirm } from "./sign-and-confirm"
+import { settleWallet } from "./settle"
 import {
   WalletUnavailableError,
   realModeReason,
@@ -115,5 +116,29 @@ describe("bindSignAndConfirm", () => {
     )
     expect(onStep).not.toHaveBeenCalled()
     expect(confirm).not.toHaveBeenCalled()
+  })
+})
+
+describe("settleWallet", () => {
+  it("passes a loaded wallet through", async () => {
+    const wallet = mockWalletFor("admin")
+    expect(await settleWallet(Promise.resolve(wallet))).toBe(wallet)
+  })
+
+  it("turns a failed load into an unavailable wallet with the reason", async () => {
+    const wallet = await settleWallet(
+      Promise.reject(new Error("Loading chunk 42 failed")),
+    )
+    expect(wallet).toMatchObject({ status: "unavailable", loading: false })
+    expect(wallet.reason).toMatch(/failed to load: Loading chunk 42 failed/)
+    await expect(
+      wallet.signer.signTransaction(Uint8Array.of(1)),
+    ).rejects.toThrow(/failed to load/)
+  })
+
+  it("copes with a rejection that is not an Error", async () => {
+    const wallet = await settleWallet(Promise.reject("offline"))
+    expect(wallet.status).toBe("unavailable")
+    expect(wallet.reason).toMatch(/failed to load/)
   })
 })

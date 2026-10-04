@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react"
 import { apiConfig } from "@/lib/api/mode"
 import type { Role } from "@/lib/auth/guard"
 import { bindSignAndConfirm } from "./sign-and-confirm"
+import { settleWallet } from "./settle"
 import { realModeReason, unavailableWallet, type Wallet } from "./types"
 
 // The literal check on the mode is what lets Next inline it, as in lib/api/index.ts:
@@ -13,7 +14,7 @@ function loadMockWallet(role: Role): Promise<Wallet> | null {
     process.env.NEXT_PUBLIC_API_MODE !== "real" &&
     apiConfig.mode === "mock"
   ) {
-    return import("./mock").then((m) => m.mockWalletFor(role))
+    return settleWallet(import("./mock").then((m) => m.mockWalletFor(role)))
   }
   return null
 }
