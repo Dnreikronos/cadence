@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { AccountStatus } from "@/lib/api/schemas"
+import { StepNotConfirmedError } from "./errors"
 import {
   activationReducer,
   activationSteps,
@@ -59,6 +60,22 @@ async function play(
     },
   })
   return { state: current, events }
+}
+
+// A run whose runners all succeed, ended by a read of what the service says.
+async function play2(done: StepsDone, verify: () => Promise<StepsDone>) {
+  let state = activationReducer(initialState(status()), { type: "begun" })
+  const events: ActivationEvent[] = []
+  await runActivation({
+    done,
+    runners: runners().set,
+    verify,
+    dispatch: (event) => {
+      events.push(event)
+      state = activationReducer(state, event)
+    },
+  })
+  return { state, events }
 }
 
 describe("doneFromStatus", () => {
@@ -239,6 +256,42 @@ describe("runActivation", () => {
       },
     })
     expect(order).toEqual(["before", "completed"])
+  })
+
+  it("is complete only when the last read says every step is done", async () => {
+    const complete: StepsDone = { wallet: true, key: true, account: true }
+    const ok = await play2(complete, async () => complete)
+    expect(ok.state.phase).toBe("done")
+
+    // Every runner succeeded, but the service reports the key step as not done.
+    const partial = { ...complete, key: false }
+    const bad = await play2(none, async () => partial)
+    expect(bad.state.phase).toBe("failed")
+    expect(bad.state.failure?.step).toBe("key")
+    expect(bad.state.failure?.error).toBeInstanceOf(StepNotConfirmedError)
+    // What the run believed is replaced by what the service said.
+    expect(bad.state.done).toEqual(partial)
+    expect(bad.events.map((e) => e.type)).not.toContain("completed")
+  })
+
+  it("fails the run, not completes it, when the last read cannot be made", async () => {
+    const down = await play2(none, async () => {
+      throw new Error("down")
+    })
+    expect(down.state.phase).toBe("failed")
+    expect(down.state.failure?.step).toBe("account")
+  })
+
+  it("does not run beforeComplete for a run that did not verify", async () => {
+    const before = vi.fn(async () => {})
+    await runActivation({
+      done: none,
+      runners: runners().set,
+      dispatch: () => {},
+      verify: async () => none,
+      beforeComplete: before,
+    })
+    expect(before).not.toHaveBeenCalled()
   })
 
   it("stays silent when the person has left", async () => {

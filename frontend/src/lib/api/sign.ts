@@ -9,7 +9,10 @@ export type Signer = {
   // Signs the exact wire bytes and returns the signed wire bytes.
   signTransaction: (transaction: Uint8Array) => Promise<Uint8Array>
   // Signs a message and returns the 64-byte ed25519 signature. Activation uses it
-  // for the key-derivation message; a wallet that cannot sign messages omits it.
+  // for the key-derivation message only; a wallet that cannot sign messages omits it.
+  // The bytes of a transaction message are bytes too, so a real signer must refuse
+  // anything that is not the canonical key-derivation message: signing arbitrary bytes
+  // here would be signing a transaction without `signTransaction`'s checks.
   signMessage?: (message: Uint8Array) => Promise<Uint8Array>
 }
 

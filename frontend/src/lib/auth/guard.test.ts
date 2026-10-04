@@ -40,12 +40,20 @@ describe("guard", () => {
     })
   })
 
-  it.each(["/activated", "/activate/x"])(
-    "does not guard %s, which is not the page",
+  it.each(["/activate/", "/activate/x"])(
+    "guards %s like /activate itself",
     (path) => {
-      expect(guard(path, null)).toEqual({ kind: "next" })
+      expect(guard(path, "auditor")).toEqual({
+        kind: "redirect",
+        to: "/audit",
+      })
+      expect(guard(path, "recipient")).toEqual({ kind: "next" })
     },
   )
+
+  it("does not guard a path that only starts with the same letters", () => {
+    expect(guard("/activated", null)).toEqual({ kind: "next" })
+  })
 
   it("sends a recipient away from /company to their own area, not back to sign-in", () => {
     expect(guard("/company", "recipient")).toEqual({

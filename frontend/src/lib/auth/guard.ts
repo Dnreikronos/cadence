@@ -14,12 +14,23 @@ export function homeFor(role: Role): string {
 }
 
 // Pages outside a role's home prefix that still belong to that role.
-const rolePages: Record<string, Role> = { "/activate": "recipient" }
+const rolePages: Record<Role, string[]> = {
+  admin: [],
+  recipient: ["/activate"],
+  auditor: [],
+}
 
 export function requiredRole(pathname: string): Role | null {
-  if (Object.hasOwn(rolePages, pathname)) return rolePages[pathname]
   for (const [role, prefix] of Object.entries(homes) as [Role, string][]) {
     if (pathname === prefix || pathname.startsWith(`${prefix}/`)) return role
+    // Like a home prefix, so `/activate/` and anything under it are guarded too.
+    if (
+      rolePages[role].some(
+        (p) => pathname === p || pathname.startsWith(`${p}/`),
+      )
+    ) {
+      return role
+    }
   }
   return null
 }

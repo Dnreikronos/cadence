@@ -30,5 +30,9 @@ let submitted = 0
 
 export async function mockSubmit() {
   submitted += 1
-  return `MockSignature${submitted}`.padEnd(44, "1")
+  // No "0": it is not a base58 character, and the client refuses such a signature.
+  return `MockSignature${String(submitted).replaceAll("0", "A")}`.padEnd(
+    44,
+    "1",
+  )
 }

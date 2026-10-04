@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { base58FromBytes } from "../base58"
 import { signatureSchema } from "../schemas"
 import { ME_WALLET } from "./db"
-import { mockSignature, mockSigner } from "./signer"
+import { mockSignature, mockSigner, mockSubmit } from "./signer"
 
 const message = new TextEncoder().encode("a message to sign")
 
@@ -31,6 +31,14 @@ describe("mockSigner.signMessage", () => {
       await mockSigner(ME_WALLET).signMessage!(message),
     )
     expect(signatureSchema.safeParse(signature).success).toBe(true)
+  })
+})
+
+describe("mockSubmit", () => {
+  it("returns a signature the contract accepts, every time", async () => {
+    for (let i = 0; i < 25; i++) {
+      expect(signatureSchema.safeParse(await mockSubmit()).success).toBe(true)
+    }
   })
 })
 

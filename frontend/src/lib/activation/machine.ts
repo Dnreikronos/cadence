@@ -1,4 +1,5 @@
 import type { AccountStatus } from "@/lib/api/schemas"
+import { StepNotConfirmedError } from "./errors"
 
 // Activation in the order a person goes through it. The service reports each as an
 // independent flag, so the order lives here, not in the status.
@@ -42,6 +43,8 @@ export type ActivationState = {
 
 export type ActivationEvent =
   | { type: "synced"; done: StepsDone }
+  // What the service says now, replacing what this run believed.
+  | { type: "verified"; done: StepsDone }
   | { type: "begun" }
   | { type: "started"; step: ActivationStep }
   | { type: "finished"; step: ActivationStep }
@@ -65,6 +68,8 @@ export function activationReducer(
   switch (event.type) {
     case "synced":
       return { ...state, done: mergeDone(state.done, event.done) }
+    case "verified":
+      return { ...state, done: event.done }
     case "begun":
       return { ...state, phase: "running", current: null, failure: null }
     case "started":
@@ -96,13 +101,17 @@ export async function runActivation({
   runners,
   dispatch,
   signal,
+  verify,
   beforeComplete,
 }: {
   done: StepsDone
   runners: StepRunners
   dispatch: (event: ActivationEvent) => void
   signal?: AbortSignal
-  // Awaited once every step is done, before the run is reported complete.
+  // Asked once every step ran: what the service reports as done. The run is complete
+  // only if that is every step; otherwise it stops at the first one still missing.
+  verify?: () => Promise<StepsDone>
+  // Awaited once the run is verified, before it is reported complete.
   beforeComplete?: () => Promise<void>
 }): Promise<void> {
   for (const step of activationSteps) {
@@ -119,6 +128,27 @@ export async function runActivation({
     }
     if (signal?.aborted) return
     dispatch({ type: "finished", step })
+  }
+  if (verify) {
+    let fresh: StepsDone
+    try {
+      fresh = await verify()
+    } catch (error) {
+      if (signal?.aborted) return
+      dispatch({ type: "failed", step: "account", error })
+      return
+    }
+    if (signal?.aborted) return
+    dispatch({ type: "verified", done: fresh })
+    const missing = nextStep(fresh)
+    if (missing) {
+      dispatch({
+        type: "failed",
+        step: missing,
+        error: new StepNotConfirmedError(),
+      })
+      return
+    }
   }
   await beforeComplete?.()
   if (signal?.aborted) return
