@@ -37,3 +37,47 @@ jobs:
       - run: pnpm build
         env:
           NEXT_PUBLIC_API_MODE: mock
+
+  # End-to-end tests of the merged screens in a real browser, against the production
+  # build in demo mode (the mock API, no Supabase). See "End-to-end tests" in
+  # frontend/README.md.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      # No install scripts, and no browser download: the runner's Google Chrome is used.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # Next's own recommendation: the build cache keyed on the lockfile, then the sources.
+      - uses: actions/cache@v4
+        with:
+          path: frontend/.next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}-${{ hashFiles('frontend/src/**', 'frontend/public/**', 'frontend/*.config.*') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}-
+      # The demo build the suite serves (mock API, no Supabase), with a marker the suite checks.
+      - run: pnpm e2e:build
+      # The build is done: the config only serves it, with `next start`.
+      - run: pnpm e2e
+        env:
+          E2E_SKIP_BUILD: '1'
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          # The HTML report, and the traces recorded on the retry of a failed test.
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7
