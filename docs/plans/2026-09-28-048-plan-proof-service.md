@@ -12,8 +12,7 @@ not add proof endpoints, key storage, transaction submission, or signing.
 - Require `PROOF_RPC_URL` (HTTP or HTTPS) and `BUILD_SHA` (a full Git SHA).
   Reject missing, empty, or invalid values before binding a socket. Do not log
   the RPC URL, which may contain a provider credential.
-- Default `PROOF_BIND_ADDR` to `0.0.0.0:3000` and `PROOF_RPC_TIMEOUT_MS` to
-  5000. Reject invalid addresses and timeouts outside 1–60000 ms.
+- Default `PROOF_BIND_ADDR` to `0.0.0.0:3000` and `PROOF_RPC_TIMEOUT_MS` to 5000. Reject invalid addresses and timeouts outside 1–60000 ms.
 - `GET /health` calls Solana `getHealth`. Return HTTP 200 with `status: "ok"`,
   `build_sha`, and `rpc_reachable: true` only for a valid `"ok"` response.
   Return HTTP 503 with the same build identity, `status: "unavailable"`, and

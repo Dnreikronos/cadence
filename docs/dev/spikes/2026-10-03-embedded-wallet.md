@@ -1,7 +1,7 @@
 # Embedded wallet in the browser (#77)
 
-Issue [#77](https://github.com/Dnreikronos/cadence/issues/77). #51 answered *which*
-provider (Turnkey); this answers *how it plugs into the browser*.
+Issue [#77](https://github.com/Dnreikronos/cadence/issues/77). #51 answered _which_
+provider (Turnkey); this answers _how it plugs into the browser_.
 
 **Verdict: go, conditional on** a hosted Supabase project that accepts an RS256
 signing key, a real v1 transfer signed by a user session and confirmed on devnet, the
@@ -25,16 +25,16 @@ committed scripts were not re-run (see "Not done").
 Run in the browser (Next 15 App Router, `@turnkey/react-wallet-kit` 2.5.2) and, for
 the timings, in Node as well.
 
-| Step | Result |
-|---|---|
-| Supabase session to Turnkey login | works, no separate Turnkey login |
-| Wallet kit in a client component | works with `organizationId` only, no Auth Proxy |
-| Sign the v1 transaction (2,395 bytes, version byte 0x81) | returned a signed transaction, 0.5 s (the signature was not verified against the message) |
-| 20 signatures in a row, one session | 20 of 20 returned a signed transaction, 6.4 s in the browser (4.9 s in Node, median 244 ms), silent |
-| `signMessage` | ok, returns `r`, `s`, `v`; the signature verified against the address in Node |
-| Renew the session | ok, a new one-hour session |
-| Parent API key signing for the user | refused (`request not authorized`) |
-| Who is in a user's sub-organization | one user, created from the OIDC identity |
+| Step                                                     | Result                                                                                              |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Supabase session to Turnkey login                        | works, no separate Turnkey login                                                                    |
+| Wallet kit in a client component                         | works with `organizationId` only, no Auth Proxy                                                     |
+| Sign the v1 transaction (2,395 bytes, version byte 0x81) | returned a signed transaction, 0.5 s (the signature was not verified against the message)           |
+| 20 signatures in a row, one session                      | 20 of 20 returned a signed transaction, 6.4 s in the browser (4.9 s in Node, median 244 ms), silent |
+| `signMessage`                                            | ok, returns `r`, `s`, `v`; the signature verified against the address in Node                       |
+| Renew the session                                        | ok, a new one-hour session                                                                          |
+| Parent API key signing for the user                      | refused (`request not authorized`)                                                                  |
+| Who is in a user's sub-organization                      | one user, created from the OIDC identity                                                            |
 
 That the parent holds no credential in the sub-organization rests on the signing
 refusal above. The check that was meant to show it listed the users before the login,
