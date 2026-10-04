@@ -37,7 +37,7 @@ Workers convert to reais on the exchange where they are already a customer. Cade
 - **The BRL last mile.** Pix access requires SPI participation and currency conversion requires câmbio authorization; both are licensed activities and we hold neither licence. See ADR Fork 1. This is the largest scope cut and the one most likely to be challenged.
 - **An exchange integration.** Documenting or linking the off-ramp is fine. Integrating makes us a party to the conversion, which is the line the whole design exists to stay behind.
 - **A USD fiat on-ramp.** Employers fund in USDC.
-- **Brazilian domestic payroll.** *Folha* carries FGTS, INSS and eSocial obligations and sells to a different buyer.
+- **Brazilian domestic payroll.** _Folha_ carries FGTS, INSS and eSocial obligations and sells to a different buyer.
 - **Our own wallet.** Embedded wallets come from a provider.
 - **Anonymity.** Only amounts and balances are encrypted. Account addresses, the mint and account owners stay public, so the fact that a given employer paid a given worker remains visible. User-facing copy must say this plainly.
 - **A custom on-chain program in v1.**
@@ -61,21 +61,21 @@ Workers convert to reais on the exchange where they are already a customer. Cade
 
 ## Requirements
 
-| # | Requirement | Done when |
-|---|---|---|
-| R1 | An employer funds one run and every listed worker receives USDC | A mainnet run of ≥3 workers completes from a single approval, and all three confirm receipt |
-| R2 | Per-worker amounts are encrypted on-chain | A block explorer and a third-party RPC both return ciphertext for the transfer amount; our dashboard shows cleartext to the worker |
-| R3 | A confidential transfer executes in one transaction | The transfer lands as a single v1 transaction under 4,096 bytes, resolving to one confirmed signature rather than a chain |
-| R4 | A designated auditor can decrypt amounts without worker or employer action | An auditor-key holder decrypts a test transfer; a non-holder with identical RPC access cannot |
-| R5 | Balance display does not block the UI | The dashboard reads the AES `decryptable_available_balance`; balance renders under 300ms on a mid-range Android device |
-| R6 | Cadence holds no BRL, converts no currency, and initiates no Pix payment | A written description of the money flow shows the worker's own exchange account as the only conversion point, reviewed by a Brazilian fintech lawyer |
-| R7 | The product degrades safely if confidentiality is unavailable | With the proof program simulated unavailable, a run still completes using transparent transfers |
-| R8 | A worker onboards without seeing wallet mechanics | A user who has never used crypto completes onboarding unassisted — observed, not self-reported |
-| R9 | Both sides can produce a payment record | Employer and worker can each export a run with amounts, dates and counterparties |
-| R10 | The cash-out step does not lose people | ≥70% of paid workers complete a first cash-out; measured by asking them, since we cannot see the exchange leg |
-| R11 | Real people are using it | ≥30 completed mainnet payments across ≥10 distinct workers, with total volume reportable |
-| R12 | No tenant can read another tenant's data | A worker session attempting to read another worker's rows fails; an employer session attempting to read another employer's roster fails. Both covered by tests that run on every migration |
-| R13 | No plaintext amount is stored off-chain | A dump of every Postgres table contains no column holding a readable payroll amount |
+| #   | Requirement                                                                | Done when                                                                                                                                                                                  |
+| --- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| R1  | An employer funds one run and every listed worker receives USDC            | A mainnet run of ≥3 workers completes from a single approval, and all three confirm receipt                                                                                                |
+| R2  | Per-worker amounts are encrypted on-chain                                  | A block explorer and a third-party RPC both return ciphertext for the transfer amount; our dashboard shows cleartext to the worker                                                         |
+| R3  | A confidential transfer executes in one transaction                        | The transfer lands as a single v1 transaction under 4,096 bytes, resolving to one confirmed signature rather than a chain                                                                  |
+| R4  | A designated auditor can decrypt amounts without worker or employer action | An auditor-key holder decrypts a test transfer; a non-holder with identical RPC access cannot                                                                                              |
+| R5  | Balance display does not block the UI                                      | The dashboard reads the AES `decryptable_available_balance`; balance renders under 300ms on a mid-range Android device                                                                     |
+| R6  | Cadence holds no BRL, converts no currency, and initiates no Pix payment   | A written description of the money flow shows the worker's own exchange account as the only conversion point, reviewed by a Brazilian fintech lawyer                                       |
+| R7  | The product degrades safely if confidentiality is unavailable              | With the proof program simulated unavailable, a run still completes using transparent transfers                                                                                            |
+| R8  | A worker onboards without seeing wallet mechanics                          | A user who has never used crypto completes onboarding unassisted — observed, not self-reported                                                                                             |
+| R9  | Both sides can produce a payment record                                    | Employer and worker can each export a run with amounts, dates and counterparties                                                                                                           |
+| R10 | The cash-out step does not lose people                                     | ≥70% of paid workers complete a first cash-out; measured by asking them, since we cannot see the exchange leg                                                                              |
+| R11 | Real people are using it                                                   | ≥30 completed mainnet payments across ≥10 distinct workers, with total volume reportable                                                                                                   |
+| R12 | No tenant can read another tenant's data                                   | A worker session attempting to read another worker's rows fails; an employer session attempting to read another employer's roster fails. Both covered by tests that run on every migration |
+| R13 | No plaintext amount is stored off-chain                                    | A dump of every Postgres table contains no column holding a readable payroll amount                                                                                                        |
 
 ## Constraints
 
@@ -91,23 +91,23 @@ Workers convert to reais on the exchange where they are already a customer. Cade
 
 ## Risks
 
-| Risk | Likelihood | If it happens | Mitigation |
-|---|---|---|---|
-| Orchestrating transfers is judged a VASP activity under Res. 519/520 | Medium, high impact | The structure needs rebuilding or cannot operate | Legal review before mainnet volume beyond demo amounts; choose the wallet provider on custody model (ADR B6) |
-| Workers drop off at the cash-out step | Medium | The product is technically complete and commercially dead | R10 measures it explicitly; if it fails, the partner path (ADR A5) stops being an upgrade and becomes necessary |
-| `token-wrap` fork costs more than estimated | Medium | Confidential path slips | Fall back to stock `token-wrap`, shipping without an auditor key and stating the gap |
-| Embedded-wallet provider chokes on confidential-transfer instructions | Medium | Signing fails for the core flow | Spike before committing; direct keypair signing is the fallback |
-| `disable_zk_elgamal_proof_program` activates | Low | Confidential transfers stop network-wide | R7 — transparent fallback is a requirement, not a contingency |
-| Judges read "no BRL delivery" as an incomplete product | Medium | Weaker scoring | Frame the cut as judgment, with Res. 561 and the licensing walls named; a team that knows why it stopped there beats one that did not know the line existed |
-| Amounts-only confidentiality is oversold | Medium | Trust damage, and a judge will probe it | Explicit copy in-product and in the pitch; listed under Not building for that reason |
+| Risk                                                                  | Likelihood          | If it happens                                             | Mitigation                                                                                                                                                  |
+| --------------------------------------------------------------------- | ------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Orchestrating transfers is judged a VASP activity under Res. 519/520  | Medium, high impact | The structure needs rebuilding or cannot operate          | Legal review before mainnet volume beyond demo amounts; choose the wallet provider on custody model (ADR B6)                                                |
+| Workers drop off at the cash-out step                                 | Medium              | The product is technically complete and commercially dead | R10 measures it explicitly; if it fails, the partner path (ADR A5) stops being an upgrade and becomes necessary                                             |
+| `token-wrap` fork costs more than estimated                           | Medium              | Confidential path slips                                   | Fall back to stock `token-wrap`, shipping without an auditor key and stating the gap                                                                        |
+| Embedded-wallet provider chokes on confidential-transfer instructions | Medium              | Signing fails for the core flow                           | Spike before committing; direct keypair signing is the fallback                                                                                             |
+| `disable_zk_elgamal_proof_program` activates                          | Low                 | Confidential transfers stop network-wide                  | R7 — transparent fallback is a requirement, not a contingency                                                                                               |
+| Judges read "no BRL delivery" as an incomplete product                | Medium              | Weaker scoring                                            | Frame the cut as judgment, with Res. 561 and the licensing walls named; a team that knows why it stopped there beats one that did not know the line existed |
+| Amounts-only confidentiality is oversold                              | Medium              | Trust damage, and a judge will probe it                   | Explicit copy in-product and in the pitch; listed under Not building for that reason                                                                        |
 
 ## Open questions
 
 Resolved 2026-09-27: **Q1** — João has used Token-2022 before, Rust-side, so the `token-wrap` fork proceeds. **Q4** — three teammates on the frontend, backing João on the backend as needed; numbering below is left unchanged so earlier references still resolve.
 
-| # | Question | Owner | Needed by |
-|---|---|---|---|
-| Q2 | Does orchestrating non-custodial transfers constitute a VASP activity under Res. 519/520? Client-side signing (ADR B9) narrows this but does not close it | João | Before mainnet volume beyond demo amounts |
-| Q3 | Who holds the auditor key long-term, with no partner to hand it to? Per-employer mints is the privacy-maximal answer, and it also forces proof generation back to the client — a transfer-path rewrite, not a key rotation | João | Before the mint is created |
-| Q5 | Real measured all-in cost of the incumbent rails, from actual payslips | TODO(João): assign | Before any external deck |
-| Q6 | Which exchanges do our first ten workers already use? Determines what the cash-out screen says | TODO(João): assign | Before the first user test |
+| #   | Question                                                                                                                                                                                                                   | Owner              | Needed by                                 |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------------------- |
+| Q2  | Does orchestrating non-custodial transfers constitute a VASP activity under Res. 519/520? Client-side signing (ADR B9) narrows this but does not close it                                                                  | João               | Before mainnet volume beyond demo amounts |
+| Q3  | Who holds the auditor key long-term, with no partner to hand it to? Per-employer mints is the privacy-maximal answer, and it also forces proof generation back to the client — a transfer-path rewrite, not a key rotation | João               | Before the mint is created                |
+| Q5  | Real measured all-in cost of the incumbent rails, from actual payslips                                                                                                                                                     | TODO(João): assign | Before any external deck                  |
+| Q6  | Which exchanges do our first ten workers already use? Determines what the cash-out screen says                                                                                                                             | TODO(João): assign | Before the first user test                |

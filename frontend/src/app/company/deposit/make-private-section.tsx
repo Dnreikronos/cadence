@@ -10,7 +10,9 @@ import { WhoCanSee } from "@/components/ui/who-can-see"
 import { describeUsdc } from "@/lib/deposit/controller"
 import { formatBaseUnits, toBaseUnits } from "@/lib/deposit/schema"
 import { makePrivateSteps, stepLabels } from "@/lib/deposit/types"
+import { hasActiveAuditor } from "@/lib/people/view"
 import { unitsToUsd } from "@/lib/money"
+import { useAuditors } from "@/lib/queries/auditors"
 import {
   useCompanyBalance,
   useMakePrivate,
@@ -25,6 +27,9 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
   const flow = useMakePrivate(wallet)
   const publicUsdc = usePublicUsdc(wallet)
   const privateBalance = useCompanyBalance(wallet)
+  const auditors = useAuditors()
+  // Unknown (loading or failed) reads as the longer sentence, never "no auditor".
+  const hasAuditor = hasActiveAuditor(auditors.data)
   const [amount, setAmount] = useState("")
   const [error, setError] = useState<string>()
   const sectionRef = useRef<HTMLElement>(null)
@@ -117,7 +122,11 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
           staleText="Couldn't refresh. This may be out of date."
           onRetry={() => privateBalance.refetch()}
           adornment={
-            <WhoCanSee viewerRole="admin" hasAuditor={false} scope="balance" />
+            <WhoCanSee
+              viewerRole="admin"
+              hasAuditor={hasAuditor}
+              scope="balance"
+            />
           }
         />
       </dl>

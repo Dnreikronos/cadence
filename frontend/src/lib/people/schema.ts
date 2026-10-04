@@ -25,3 +25,12 @@ export const personSchema = z.object({
       "Use at most two decimal places",
     ),
 })
+
+// Dollars to base units. Exact: the schema allows two decimals at most, so the
+// cents are a whole number and the units are cents times 10,000.
+export function dollarsToUnits(dollars: number): string {
+  return (BigInt(Math.round(dollars * 100)) * 10_000n).toString()
+}
+
+// Amount aside, for an edit whose current amount is not known.
+export const personFieldsSchema = personSchema.omit({ monthlyAmount: true })

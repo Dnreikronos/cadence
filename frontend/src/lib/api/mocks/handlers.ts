@@ -664,8 +664,7 @@ export const handlers = [
       const { data, error } = await parse(request, s.setAmountRequestSchema)
       if (error) return error
       const id = String(params.personId)
-      if (!seedPeople.some((p) => p.id === id))
-        return fail(404, "person_not_found")
+      if (!db.people.has(id)) return fail(404, "person_not_found")
       db.amounts.set(id, BigInt(data.amount))
       return HttpResponse.json({ person_id: id, amount: data.amount })
     },
@@ -675,7 +674,7 @@ export const handlers = [
     async ({ request, params }) => {
       const stopped = await guard(request, "admin")
       if (stopped) return stopped
-      if (!seedPeople.some((p) => p.id === String(params.personId))) {
+      if (!db.people.has(String(params.personId))) {
         return fail(404, "person_not_found")
       }
       return HttpResponse.json({

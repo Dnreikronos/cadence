@@ -28,7 +28,7 @@ describe("queryKeys", () => {
       [queryKeys.runs.detail("r"), queryKeys.runs.all],
       [queryKeys.auditors.list(), queryKeys.auditors.all],
       [queryKeys.accessLog.list(), queryKeys.accessLog.all],
-      [queryKeys.status.me(), queryKeys.status.all],
+      [queryKeys.status.me(ana), queryKeys.status.all],
       [queryKeys.receipts.list(), queryKeys.receipts.all],
       [queryKeys.receipts.detail("p"), queryKeys.receipts.all],
     ] as const
@@ -50,6 +50,13 @@ describe("queryKeys", () => {
     expect(queryKeys.balance.me(ana)).not.toEqual(queryKeys.balance.me(bruno))
     expect(queryKeys.balance.me(ana)).not.toEqual(
       queryKeys.balance.me({ ...ana, company: "Acme" }),
+    )
+  })
+
+  it("keeps one viewer's account status apart from another's", () => {
+    expect(queryKeys.status.me(ana)).not.toEqual(queryKeys.status.me(bruno))
+    expect(queryKeys.status.me(ana)).not.toEqual(
+      queryKeys.status.me({ ...ana, company: "Acme" }),
     )
   })
 
