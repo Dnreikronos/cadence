@@ -7,6 +7,8 @@ pub enum AppError {
     UnwrapNotFound,
     #[error("{0}")]
     UnwrapUnavailable(&'static str),
+    #[error("unwrap rate limit exceeded")]
+    UnwrapRateLimited,
     #[error("reveal risk requires acknowledgement")]
     RevealRisk(crate::solana::reveal_risk::RevealRisk),
     #[error("run not found")]
@@ -48,6 +50,7 @@ impl AppError {
         match self {
             Self::UnwrapNotFound => StatusCode::NOT_FOUND,
             Self::UnwrapUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+            Self::UnwrapRateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::RevealRisk(_) => StatusCode::CONFLICT,
             Self::RunNotFound => StatusCode::NOT_FOUND,
             Self::RunUnavailable => StatusCode::SERVICE_UNAVAILABLE,
@@ -72,6 +75,14 @@ impl IntoResponse for AppError {
             return (
                 StatusCode::CONFLICT,
                 Json(json!({"error": "reveal_risk_not_acknowledged", "reveal_risk": risk})),
+            )
+                .into_response();
+        }
+        if matches!(self, Self::UnwrapRateLimited) {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                [("retry-after", "60")],
+                Json(json!({"error": "unwrap_rate_limited"})),
             )
                 .into_response();
         }

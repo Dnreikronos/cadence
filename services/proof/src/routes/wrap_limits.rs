@@ -69,7 +69,7 @@ impl Limits {
     }
 }
 pub async fn enforce(State(limits): State<Arc<Limits>>, request: Request, next: Next) -> Response {
-    enforce_request(limits, request, next, false).await
+    enforce_request(limits, request, next, Operation::Wrap).await
 }
 
 pub async fn enforce_transfer(
@@ -77,21 +77,33 @@ pub async fn enforce_transfer(
     request: Request,
     next: Next,
 ) -> Response {
-    enforce_request(limits, request, next, true).await
+    enforce_request(limits, request, next, Operation::Transfer).await
+}
+
+pub async fn enforce_unwrap(
+    State(limits): State<Arc<Limits>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    enforce_request(limits, request, next, Operation::Unwrap).await
+}
+#[derive(Clone, Copy)]
+enum Operation {
+    Wrap,
+    Transfer,
+    Unwrap,
 }
 
 async fn enforce_request(
     limits: Arc<Limits>,
     request: Request,
     next: Next,
-    transfer: bool,
+    operation: Operation,
 ) -> Response {
-    let rate_limited = || {
-        if transfer {
-            crate::error::AppError::TransferRateLimited
-        } else {
-            crate::error::AppError::RateLimited
-        }
+    let rate_limited = || match operation {
+        Operation::Wrap => crate::error::AppError::RateLimited,
+        Operation::Transfer => crate::error::AppError::TransferRateLimited,
+        Operation::Unwrap => crate::error::AppError::UnwrapRateLimited,
     };
     let peer = request
         .extensions()
@@ -103,11 +115,17 @@ async fn enforce_request(
     let Ok(_permit) = limits.active.try_acquire() else {
         return rate_limited().into_response();
     };
-    if transfer {
+    if !matches!(operation, Operation::Wrap) {
         tokio::time::timeout(Duration::from_secs(30), next.run(request))
             .await
             .unwrap_or_else(|_| {
-                crate::error::AppError::TransferUnavailable("transfer_timeout").into_response()
+                match operation {
+                    Operation::Unwrap => {
+                        crate::error::AppError::UnwrapUnavailable("unwrap_timeout")
+                    }
+                    _ => crate::error::AppError::TransferUnavailable("transfer_timeout"),
+                }
+                .into_response()
             })
     } else {
         next.run(request).await
