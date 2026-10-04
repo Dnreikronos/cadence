@@ -12,6 +12,8 @@ import { WhoCanSee } from "@/components/ui/who-can-see"
 import type { RunCreated } from "@/lib/api/schemas"
 import { randomUuid } from "@/lib/api/uuid"
 import { unitsToUsd } from "@/lib/money"
+import { refetchFailed } from "@/lib/queries/refetch-failed"
+import { useRestoreFocus } from "@/lib/restore-focus"
 import {
   useCompanyBalance,
   useCreateRun,
@@ -44,6 +46,7 @@ import {
   type Choices,
   type PayrollPerson,
 } from "@/lib/runs/plan"
+import { createLatch } from "@/lib/runs/latch"
 import { holdsUnconfirmed } from "@/lib/runs/progress"
 import { useLeaveGuard } from "@/lib/runs/use-leave-guard"
 import { useRunSigner } from "@/lib/runs/use-run-signer"
@@ -82,6 +85,10 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
   const [createError, setCreateError] = useState<string | null>(null)
   // One idempotency key per attempt, kept across clicks and retries of the same list.
   const attempt = useRef<AttemptKey | null>(null)
+  // Taken before the request starts: a double click is two handlers in a row, and neither
+  // `create.isPending` nor state has changed yet when the second one runs.
+  const [latch] = useState(createLatch)
+  const [starting, setStarting] = useState(false)
 
   const roster = useMemo(() => splitRoster(people.data ?? []), [people.data])
   const recentlyPaid = recent.data ?? nobody
@@ -94,6 +101,9 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
   const wallet = signer.wallet
 
   const headingRef = useRef<HTMLHeadingElement>(null)
+  // Closing the confirmation returns focus to the button that opened it; once the run is
+  // created that button is gone, and the progress heading takes it.
+  const restore = useRestoreFocus(() => headingRef.current)
   useEffect(() => {
     // The roster the button lived in is gone: bring focus to the progress.
     if (created) headingRef.current?.focus()
@@ -153,7 +163,13 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
         error={people.error}
         title="Couldn't load your people"
         description={runMessage(people.error)}
-        onRetry={() => people.refetch()}
+        // One "Try again" clears everything that failed: the check of who was paid in
+        // the last 24 hours and the balance sit behind this list, and would otherwise
+        // show their own alert once it loads.
+        onRetry={() => {
+          people.refetch()
+          refetchFailed([recent, balance])
+        }}
       />
     )
   }
@@ -181,6 +197,7 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
   }
 
   function openReview() {
+    restore.remember()
     setReview({
       recipients,
       total,
@@ -192,6 +209,12 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
 
   function startRun() {
     if (!wallet.address || !review) return
+    if (!latch.tryEnter()) return
+    setStarting(true)
+    const done = () => {
+      latch.release()
+      setStarting(false)
+    }
     const key = attemptKey(
       attempt.current,
       fingerprintOf(wallet.address, review.recipients),
@@ -203,10 +226,12 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
       request = buildRunRequest(wallet.address, review.recipients, key.key)
     } catch {
       setCreateError("This run isn't valid. Check who is ticked and try again.")
+      done()
       return
     }
     setCreateError(null)
     create.mutate(request, {
+      onSettled: done,
       onSuccess: (run) => {
         // Sign only what was asked for: the same people, once each.
         if (!createdMatches(request, run)) {
@@ -215,6 +240,7 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
           )
           return
         }
+        restore.originRemoved()
         setCreated(run)
         setConfirming(false)
         void signer.start(run)
@@ -225,7 +251,7 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
 
   function closeDialog(open: boolean) {
     // A run being created cannot be abandoned from here: its result would be lost.
-    if (open || create.isPending) return
+    if (open || create.isPending || starting) return
     setConfirming(false)
     setCreateError(null)
   }
@@ -304,9 +330,10 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
         recipients={review?.recipients ?? []}
         repaid={review?.repaid ?? []}
         total={review?.total ?? "0"}
-        pending={create.isPending}
+        pending={create.isPending || starting}
         error={createError}
         onConfirm={startRun}
+        finalFocus={restore.finalFocus}
       />
     </div>
   )

@@ -19,6 +19,7 @@ export function ConfirmRunDialog({
   pending,
   error,
   onConfirm,
+  finalFocus,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -29,11 +30,13 @@ export function ConfirmRunDialog({
   pending: boolean
   error: string | null
   onConfirm: () => void
+  finalFocus?: () => HTMLElement | boolean
 }) {
   return (
     <Modal
       open={open}
       onOpenChange={onOpenChange}
+      finalFocus={finalFocus}
       title={payLabel(recipients.length, total)}
       description="Payments are sent encrypted on-chain, so the public can't read the amounts. You, each recipient, any auditor you invited and Cadence can. A payment that has to go as an ordinary transfer is marked Transparent, and its amount is public."
     >
