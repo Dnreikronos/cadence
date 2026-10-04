@@ -169,12 +169,15 @@ async function confirmHandler(request: Request, kind: string) {
   if (scenarios.has("tx-failed")) return fail(409, "transaction_failed")
   record.polls += 1
   if (stillPending(record.polls)) return fail(409, "transaction_not_finalized")
-  if (kind === "accounts/apply-pending" && scenarios.has("credit-mismatch")) {
-    return fail(409, "credit_counter_mismatch")
-  }
   const rejected = applyEffect(kind, record.wallet, record.amount)
   if (rejected) return rejected
   record.receipt = receiptFor(data.request_id, data.signature)
+  // The service compares the credit counter after the apply, so this answer can
+  // come for an apply that did land: confirming the same signature again returns
+  // its receipt.
+  if (kind === "accounts/apply-pending" && scenarios.has("credit-mismatch")) {
+    return fail(409, "credit_counter_mismatch")
+  }
   return HttpResponse.json(record.receipt)
 }
 
