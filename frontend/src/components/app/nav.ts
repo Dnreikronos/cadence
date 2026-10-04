@@ -55,6 +55,13 @@ export const roleLabels: Record<Role, string> = {
   auditor: "Auditor",
 }
 
+// Where "back" goes from a page that is not there: the role's own home.
+export const homeLinks: Record<Role, { href: string; label: string }> = {
+  admin: { href: "/company", label: "Back to payments" },
+  recipient: { href: "/me", label: "Back to your balance" },
+  auditor: { href: "/audit", label: "Back to payments" },
+}
+
 export function isActive(item: NavItem, pathname: string) {
   if (item.exact) return pathname === item.href
   return pathname === item.href || pathname.startsWith(`${item.href}/`)

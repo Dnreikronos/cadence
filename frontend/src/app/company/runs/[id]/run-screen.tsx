@@ -16,6 +16,22 @@ import { useLeaveGuard } from "@/lib/runs/use-leave-guard"
 import { useRunSigner } from "@/lib/runs/use-run-signer"
 import { RunProgress } from "../run-progress"
 
+export function RunNotFound() {
+  return (
+    <EmptyState
+      className="max-w-3xl"
+      icon={SearchX}
+      title="Run not found"
+      description="This payroll run doesn't exist, or it belongs to another company."
+      action={
+        <Link href="/company" className={buttonVariants()}>
+          Back to payments
+        </Link>
+      }
+    />
+  )
+}
+
 export function RunScreen({ runId }: { runId: string }) {
   const run = useRun(runId)
   const people = usePeople()
@@ -34,21 +50,8 @@ export function RunScreen({ runId }: { runId: string }) {
   }
   if (!data) {
     // A run of another company is also a 404, so the page says only that it isn't here.
-    if (isApiError(run.error) && run.error.status === 404) {
-      return (
-        <EmptyState
-          className="max-w-3xl"
-          icon={SearchX}
-          title="Run not found"
-          description="This payroll run doesn't exist, or it belongs to another company."
-          action={
-            <Link href="/company" className={buttonVariants()}>
-              Back to payments
-            </Link>
-          }
-        />
-      )
-    }
+    if (isApiError(run.error) && run.error.status === 404)
+      return <RunNotFound />
     return (
       <ApiErrorState
         error={run.error}
