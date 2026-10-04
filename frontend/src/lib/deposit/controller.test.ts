@@ -52,6 +52,7 @@ function setup(
     saved?: Submission | null
     wallet?: Partial<Wallet>
     storage?: "available" | "unavailable"
+    pendingUnits?: string
     signAndConfirm?: Deps["signAndConfirm"]
   } = {},
 ) {
@@ -110,6 +111,7 @@ function setup(
     refresh,
     toast,
     store,
+    pendingUnits: () => options.pendingUnits,
     now: () => clock,
     sleep,
   }
@@ -620,6 +622,33 @@ describe("MakePrivateController", () => {
         "Something went wrong. Try again.",
       )
     })
+  })
+
+  it("remembers a credit that was already pending, since applying it makes it available too", async () => {
+    const { controller, toast } = setup({ pendingUnits: "200000000" })
+
+    await controller.deposit("1000000")
+
+    expect(controller.getState()).toEqual({
+      status: "done",
+      amount: "1000000",
+      earlierPending: "200000000",
+    })
+    expect(toast).toHaveBeenCalledWith(
+      "1 USDC is now private, with your earlier pending deposit",
+    )
+  })
+
+  it("does not claim an earlier credit when none was pending", async () => {
+    for (const pendingUnits of [undefined, "0"]) {
+      const { controller } = setup({ pendingUnits })
+      await controller.deposit("1000000")
+      expect(controller.getState()).not.toHaveProperty("earlierPending", "0")
+      expect(controller.getState()).toEqual({
+        status: "done",
+        amount: "1000000",
+      })
+    }
   })
 
   it("applies a pending credit on its own, leaving no amount in the message", async () => {

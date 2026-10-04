@@ -57,6 +57,10 @@ export function useMakePrivate(wallet: string) {
       void invalidateBalances(queryClient)
       void queryClient.invalidateQueries({ queryKey: queryKeys.deposit.all })
     },
+    pendingUnits: () =>
+      queryClient.getQueryData<{ pending: string }>(
+        queryKeys.balance.companyWallet(wallet),
+      )?.pending,
     toast: (message) => toast.success(message),
     store: {
       read: () => readSubmission(SUBMISSION_KIND),
