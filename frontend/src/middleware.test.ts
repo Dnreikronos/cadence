@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const config = vi.hoisted(() => ({
+  broken: false,
   mode: "mock",
   supabaseConfigured: false,
   isMainnet: false,
@@ -12,6 +13,7 @@ const getUser = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api/mode", () => ({
   apiConfig: {
     get mode() {
+      if (config.broken) throw new Error("NEXT_PUBLIC_API_MODE must be set")
       return config.mode
     },
   },
@@ -19,6 +21,7 @@ vi.mock("@/lib/api/mode", () => ({
 vi.mock("@/lib/solana/cluster", () => ({
   cluster: {
     get isMainnet() {
+      if (config.broken) throw new Error("bad cluster")
       return config.isMainnet
     },
   },
@@ -47,6 +50,7 @@ function outcome(response: NextResponse) {
 
 beforeEach(() => {
   Object.assign(config, {
+    broken: false,
     mode: "mock",
     supabaseConfigured: false,
     isMainnet: false,
@@ -156,5 +160,26 @@ describe("demo cookie everywhere else is ignored", () => {
       throw new Error("Set NEXT_PUBLIC_SUPABASE_URL")
     })
     expect(outcome(await visit("/sign-in", "admin"))).toBe("next")
+  })
+})
+
+describe("a configuration that throws", () => {
+  beforeEach(() => {
+    config.broken = true
+    createMiddlewareClient.mockImplementation(() => {
+      throw new Error("Set NEXT_PUBLIC_SUPABASE_URL")
+    })
+    vi.spyOn(console, "error").mockImplementation(() => {})
+  })
+
+  it("still serves public pages", async () => {
+    expect(outcome(await visit("/"))).toBe("next")
+    expect(outcome(await visit("/sign-in", "admin"))).toBe("next")
+  })
+
+  it("turns the demo off for guarded pages, as before the demo existed", async () => {
+    expect(outcome(await visit("/company", "admin"))).toBe(
+      "/sign-in?next=%2Fcompany",
+    )
   })
 })

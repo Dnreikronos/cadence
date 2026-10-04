@@ -6,6 +6,7 @@ const config = vi.hoisted(() => ({
   isMainnet: false,
 }))
 const store = vi.hoisted(() => ({ set: vi.fn(), delete: vi.fn() }))
+const requestHeaders = vi.hoisted(() => ({ current: new Headers() }))
 const supabaseSignOut = vi.hoisted(() => vi.fn())
 const redirect = vi.hoisted(() =>
   vi.fn((to: string) => {
@@ -35,7 +36,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }))
 vi.mock("next/headers", () => ({
   cookies: async () => store,
-  headers: async () => new Headers(),
+  headers: async () => requestHeaders.current,
 }))
 vi.mock("next/navigation", () => ({ redirect }))
 
@@ -58,6 +59,7 @@ beforeEach(() => {
   store.delete.mockClear()
   supabaseSignOut.mockClear()
   redirect.mockClear()
+  requestHeaders.current = new Headers()
 })
 
 describe("signInAsDemo", () => {
@@ -82,6 +84,22 @@ describe("signInAsDemo", () => {
       )
     },
   )
+
+  it("marks the cookie secure only when the request came over https", async () => {
+    const secureOf = async (headers: Record<string, string>) => {
+      store.set.mockClear()
+      requestHeaders.current = new Headers(headers)
+      await expect(signInAsDemo(form({ role: "admin" }))).rejects.toThrow()
+      return store.set.mock.calls[0][2].secure
+    }
+    expect(await secureOf({})).toBe(false)
+    expect(await secureOf({ origin: "http://192.168.0.5:3000" })).toBe(false)
+    expect(await secureOf({ "x-forwarded-proto": "http" })).toBe(false)
+    expect(await secureOf({ "x-forwarded-proto": "https" })).toBe(true)
+    expect(await secureOf({ origin: "https://preview.example.test" })).toBe(
+      true,
+    )
+  })
 
   it("goes where the visitor was headed, if their role may", async () => {
     await expect(
@@ -118,15 +136,28 @@ describe("signInAsDemo", () => {
 
 describe("signOut", () => {
   it("clears the demo cookie and returns to sign-in", async () => {
-    await expect(signOut()).rejects.toThrow("redirect:/sign-in")
+    await expect(signOut()).rejects.toThrow(/^redirect:\/sign-in$/)
     expect(store.delete).toHaveBeenCalledWith("cadence-demo-role")
     expect(supabaseSignOut).not.toHaveBeenCalled()
   })
 
   it("ends the Supabase session when it is configured, and clears the cookie too", async () => {
     config.supabaseConfigured = true
-    await expect(signOut()).rejects.toThrow("redirect:/")
+    await expect(signOut()).rejects.toThrow(/^redirect:\/$/)
     expect(supabaseSignOut).toHaveBeenCalledOnce()
+    expect(store.delete).toHaveBeenCalledWith("cadence-demo-role")
+  })
+
+  it("goes home in real mode without Supabase, still clearing the demo cookie", async () => {
+    config.mode = "real"
+    await expect(signOut()).rejects.toThrow(/^redirect:\/$/)
+    expect(store.delete).toHaveBeenCalledWith("cadence-demo-role")
+    expect(supabaseSignOut).not.toHaveBeenCalled()
+  })
+
+  it("goes home on mainnet without Supabase, still clearing the demo cookie", async () => {
+    config.isMainnet = true
+    await expect(signOut()).rejects.toThrow(/^redirect:\/$/)
     expect(store.delete).toHaveBeenCalledWith("cadence-demo-role")
   })
 })

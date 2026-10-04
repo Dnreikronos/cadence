@@ -14,7 +14,7 @@ export type CurrentViewer = { email: string; membership: Membership }
 // The middleware ends any session without a membership, so there is no third state.
 export const currentViewer = cache(async (): Promise<CurrentViewer | null> => {
   // The demo viewer stands in for a sign-in only where the demo is enabled.
-  if (isDemoEnabled()) {
+  if (await isDemoEnabled()) {
     const role = parseDemoRole((await cookies()).get(DEMO_COOKIE)?.value)
     return role && demoViewer(role)
   }

@@ -7,7 +7,7 @@ import { createMiddlewareClient } from "@/lib/supabase/middleware"
 
 export async function middleware(request: NextRequest) {
   // Demo configuration has no Supabase to ask: the cookie is the session.
-  if (isDemoEnabled()) {
+  if (await isDemoEnabled()) {
     const role = parseDemoRole(request.cookies.get(DEMO_COOKIE)?.value)
     return decide(request, role, NextResponse.next())
   }

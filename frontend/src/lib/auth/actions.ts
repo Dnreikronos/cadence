@@ -120,7 +120,8 @@ export async function signOut() {
   // The demo viewer has no Supabase session: its cookie is all there is to end.
   const store = await cookies()
   store.delete(DEMO_COOKIE)
-  if (!isSupabaseConfigured()) redirect(isDemoEnabled() ? "/sign-in" : "/")
+  if (!isSupabaseConfigured())
+    redirect((await isDemoEnabled()) ? "/sign-in" : "/")
   const supabase = await createClient()
   await supabase.auth.signOut()
   redirect("/")
