@@ -61,7 +61,7 @@ details are easy to over-read, so they are stated exactly:
 | Cluster          | Devnet only today. On another cluster `/wrap` and `/wrap/confirm` fail with `wrap_requires_devnet`. Only `/transfer` and `/transfer/confirm` remap it to `transfer_requires_devnet` (`client.rs:68`, `transfer.rs:335-340`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Rate limits      | Fixed 60 s windows, held in memory per service instance and reset on restart. The wrap routes and the transfer routes each have their own limiter, so a wrap call does not spend transfer quota. Per window and limiter: 120 requests in total, 30 per direct socket peer, and (prepare only) 10 per `company_wallet`. Forwarded IP headers are ignored, so behind a proxy all users share the proxy's peer quota. These are **not** windows: at most 8 requests in flight per limiter, and on `/transfer` at most 4 proof workers. Every limit returns `429` with `Retry-After: 60` and the route's `wrap_rate_limited` or `transfer_rate_limited` code, concurrency caps included. A confirm call spends the same peer and global quota as a prepare call, so polling uses budget. The runs routes use the transfer codes, have their own 120 and 30 per window and share the four proof workers with `/transfer` (see [`RUNS_API.md`](RUNS_API.md)). `/transfer` and `/transfer/confirm` also give up after 30 s with `503 transfer_timeout` (`wrap_limits.rs:41-115`, `transfer.rs:89`). `/health` is not limited. |
 | `Retry-After`    | CORS sets no `expose_headers`, and `Retry-After` is not a CORS-safelisted response header, so cross-origin browser code reads `null` for it. Until the backend exposes it, the web app waits a fixed 60 s on any `429` whose `Retry-After` it cannot read (60 is the only value the service sends) and does not auto-retry in a loop: `ApiError.retryAfter` is 60 then, or the header's value when it is readable (the mock sends it from the same origin, so it is readable there only). **Backend request:** add `Access-Control-Expose-Headers: Retry-After`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Caching          | `Cache-Control: no-store` on every response that carries an amount. The web app fetches every request, downloads included, with `cache: "no-store"` and keeps amounts in memory only (React Query's cache; nothing is written to `localStorage`, and the persisted submission records hold no amount). The service sets no `Cache-Control` on any route today (the only response header it sets itself is `Retry-After`), so this is a backend request.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Caching          | `Cache-Control: no-store` on every response that carries an amount. The web app fetches every request, downloads included, with `cache: "no-store"` and keeps amounts in memory only (React Query's cache; nothing is written to `localStorage`, and the persisted submission records hold no amount except a withdrawal's, kept in `sessionStorage` until its outcome is final). The service sets no `Cache-Control` on any route today (the only response header it sets itself is `Retry-After`), so this is a backend request.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Request checks   | The client parses every request body with a strict schema before it leaves the browser, so an unknown field or a malformed value throws in the browser and nothing is sent. Amounts: `1` to `2^48 - 1`, digits only, no leading zero (a read may be `"0"`). Wallets, accounts and `company_wallet`: base58, 32 to 44 characters; the curve is not checked. Request signatures (`signature`, `wallet_signature`): base58, 43 to 88 characters. `request_id`: 64 lowercase hex. `aes_key`: base64 of exactly 16 bytes (22 characters, a last one of `A`, `Q`, `g` or `w`, then `==`). `setup` artifacts: base64. A path segment that is not a GUID is refused before the call, so `..` or `/` never reaches a path. Responses are checked too: one that does not match its schema is a `ContractError`, not an `ApiError`.                                                                                                                                                                                                                                                                                               |
 | Retryable errors | `ApiError.isRetryable` is true for `transaction_not_finalized`, any `429`, `502` to `504` (so `503` too) and `network_error` (the browser could not reach the server). It is false for `500`, every other `4xx` and a `ContractError`. Confirm polling and the screens' "Try again" use that one flag. React Query retries a failed read once, and never a `4xx`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Compatibility    | Additive only. See [Evolving the contract](#evolving-the-contract).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -424,19 +424,43 @@ the evidence equally:
 | Deposit, wrap step (`/company/deposit`) | no new wrap until the earlier one is reconciled; "Check my balances"                                                                                               | yes: a submission record in `sessionStorage` (this tab)                          |
 | Deposit, apply step                     | only a timed-out apply stops at "Check my balances"; any other failure offers "finish making it available", an apply that cannot wrap twice                        | no                                                                               |
 | Apply pending (`/me`)                   | no retry; the button locks while the saved signature is re-confirmed; "Check my balance", "Check again"                                                            | yes: a submission record                                                         |
-| Withdraw (`/me/withdraw`)               | no retry, and the same amount is held back until the page is reloaded                                                                                              | **no**: the held amounts live in the mutation cache, and signing out clears them |
-| Payroll payment (`/company/runs/...`)   | that payment is never retried; "Check again" re-confirms with its signature, and a payment with no signature only says to check the company's payments and balance | **no**: signatures live in component state                                       |
+| Withdraw (`/me/withdraw`)               | no retry, and the same amount is held back until a lookup of its saved signature settles it; the form waits while it runs                                          | yes: a list of held withdrawals in `sessionStorage`, per viewer (this tab)       |
+| Payroll payment (`/company/runs/...`)   | that payment is never retried; "Check again" re-confirms with its signature, and a payment with no signature only says to check the company's payments and balance | yes: the run attempt and each payment that reached the submit step, per viewer   |
 | Activation, account step (`/activate`)  | the next try settles the saved transaction instead of preparing a second one                                                                                       | no: an in-memory map per wallet                                                  |
 
 A submission record is `{ kind, request_id, signature | null, last_valid_block_height,
 wallet, at }`, one per kind, under `cadence:submission:<kind>` in `sessionStorage`
 (`frontend/src/lib/submissions.ts`). It holds no secret and no amount, is written just
 before `submit` runs (signature `null`) and updated when the network returns the
-signature, and is cleared once the outcome is final. **Persisting a submission for
-withdraw and for payroll is not done yet. It is a prerequisite for real signing**: a
-reload or a closed tab today forgets a transaction that may have landed, and a
-payroll payment that was not signed in the session that created its run cannot be
-signed later at all (nothing returns its transaction again).
+signature, and is cleared once the outcome is final. The four flows that move money
+(deposit, apply pending, withdraw and payroll) now keep that evidence, so a reload
+finds out what became of a transaction before anything is sent. Withdraw and payroll
+keep a list, under `cadence:submissions:<kind>:<viewer>` (the viewer is a hash of the
+company and email, the same identity the balance keys use, so two people on one tab
+never read each other's records and signing out clears none of them):
+
+- A withdrawal record is `{ amount_units, request_id?, signature?,
+  last_valid_block_height?, at }`, one per amount. It **does** hold the amount, which is
+  what keeps the same amount from being withdrawn twice, so it is dropped as soon as the
+  outcome is final. On mount, each one with a signature is re-confirmed; it is released
+  when the network confirmed it, refused it (`transaction_failed`), or the service said
+  it was not on chain 90 seconds after the send, and otherwise stays held (a lookup
+  that fails, a `404`, or no signature to ask with).
+- Payroll keeps the run attempt `{ idempotency_key, fingerprint, run_id?, created_at }`
+  (the fingerprint is a hash of the wallet and the sorted person ids with their amounts)
+  and, for each payment that reached the submit step, `{ payment_id, run_id, person_id,
+  request_id, signature | null, last_valid_block_height, at }`. The same list sent again
+  within a day reuses the saved key, so the service answers with the run it already made;
+  a run the browser had been given before, or one with payments that may have been sent,
+  is shown and never signed again. Each saved payment with a signature is re-confirmed
+  (`POST /runs/:run_id/payments/:payment_id/confirm`) and shown as checking, and its
+  person is not payable in a new run until it is settled. A payment that never reached
+  the submit step is not paid: its transaction existed only in the page that created the
+  run, so it cannot be signed after a reload, and the screen says to start a new run
+  for them only. The attempt is cleared once no payment of its run is in doubt.
+
+All of it is per tab: `sessionStorage` is gone when the tab closes, and where storage is
+unavailable the screens behave as they did before, in memory only.
 
 ## Routes
 
@@ -917,7 +941,9 @@ A payment item:
 
 Amounts are strings of base units in these success responses, because the caller
 is authorized to read them. They stay out of errors, logs, analytics and any
-cache the browser persists. The web app keeps them in memory only.
+cache the browser persists. The web app keeps them in memory only, with one exception:
+a withdrawal that may have been sent keeps its amount in `sessionStorage` (this tab,
+per viewer) until its outcome is final, so the same amount cannot be sent twice.
 
 An auditor with a grant on company A who asks for company B gets `404`.
 
@@ -1133,7 +1159,8 @@ other role gets `403 forbidden_role`. It returns four booleans and nothing else:
   retryable.
 - It never prepares a replacement for a transaction that may have been broadcast
   (see [The sent-failure rule](#the-sent-failure-rule)); where it keeps evidence of a
-  send it keeps only ids, a signature, a block height and a wallet address.
+  send it keeps only ids, a signature, a block height and a wallet address, and for a
+  withdrawal the amount, in `sessionStorage` until the outcome is final.
 - It ignores unknown response fields and maps unknown enum values to their safest
   class, with the one known gap in
   [Evolving the contract](#evolving-the-contract).
