@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { z } from "zod"
 import {
   clearSubmission,
+  createRecordList,
   readSubmission,
   recordSubmission,
+  stableHash,
+  viewerScopeId,
   type SubmissionStorage,
 } from "./submissions"
 
@@ -120,5 +124,132 @@ describe("submissions", () => {
 
   it("returns the record it tried to save even when storage refuses", () => {
     expect(recordSubmission(record, throwing)).toEqual(record)
+  })
+})
+
+describe("stableHash", () => {
+  it("is stable, short and holds nothing of what it was made from", () => {
+    const id = stableHash("Solaris", "ana@example.com")
+    expect(id).toBe(stableHash("Solaris", "ana@example.com"))
+    expect(id).toMatch(/^[0-9a-f]{16}$/)
+    expect(id).not.toContain("ana")
+  })
+
+  it("tells viewers apart, and one split of the same text from another", () => {
+    const a = { company: "Solaris", email: "ana@example.com" }
+    expect(viewerScopeId(a)).toBe(viewerScopeId({ ...a }))
+    expect(viewerScopeId(a)).not.toBe(viewerScopeId({ ...a, email: "b@x.io" }))
+    expect(viewerScopeId(a)).not.toBe(viewerScopeId({ ...a, company: "Other" }))
+    expect(stableHash("ab", "c")).not.toBe(stableHash("a", "bc"))
+  })
+})
+
+describe("createRecordList", () => {
+  const schema = z.object({ id: z.string().min(1), n: z.number() })
+  type Item = z.infer<typeof schema>
+  const make = (storage: SubmissionStorage | null, scope = "s1") =>
+    createRecordList<Item>({
+      kind: "things",
+      scope,
+      schema,
+      same: (a, b) => a.id === b.id,
+      storage,
+    })
+
+  it("reads back what another list over the same storage wrote, as after a reload", () => {
+    const storage = fakeStorage()
+    const first = make(storage)
+    first.upsert({ id: "a", n: 1 })
+    first.upsert({ id: "b", n: 2 })
+    expect(make(storage).read()).toEqual([
+      { id: "a", n: 1 },
+      { id: "b", n: 2 },
+    ])
+  })
+
+  it("replaces the record that matches and keeps the rest in order", () => {
+    const list = make(fakeStorage())
+    list.upsert({ id: "a", n: 1 })
+    list.upsert({ id: "b", n: 2 })
+    list.upsert({ id: "a", n: 3 })
+    expect(list.read()).toEqual([
+      { id: "a", n: 3 },
+      { id: "b", n: 2 },
+    ])
+  })
+
+  it("removes by predicate, and drops the key once the list is empty", () => {
+    const storage = fakeStorage()
+    const list = make(storage)
+    list.upsert({ id: "a", n: 1 })
+    list.upsert({ id: "b", n: 2 })
+    list.remove((item) => item.id === "a")
+    expect(list.read()).toEqual([{ id: "b", n: 2 }])
+    list.remove((item) => item.id === "b")
+    expect(list.read()).toEqual([])
+    expect(storage.items.size).toBe(0)
+  })
+
+  it("returns the same array until something changes, and tells listeners when it does", () => {
+    const list = make(fakeStorage())
+    const listener = vi.fn()
+    const stop = list.subscribe(listener)
+    expect(list.read()).toBe(list.read())
+    list.upsert({ id: "a", n: 1 })
+    expect(listener).toHaveBeenCalledTimes(1)
+    const before = list.read()
+    list.remove((item) => item.id === "none")
+    expect(list.read()).toBe(before)
+    expect(listener).toHaveBeenCalledTimes(1)
+    stop()
+    list.upsert({ id: "b", n: 2 })
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the valid entries and drops the others", () => {
+    const storage = fakeStorage()
+    storage.items.set(
+      "cadence:submissions:things:s1",
+      JSON.stringify([{ id: "a", n: 1 }, { id: "", n: 2 }, "x", { id: "b" }]),
+    )
+    expect(make(storage).read()).toEqual([{ id: "a", n: 1 }])
+  })
+
+  it("reads an empty list from a value that is not a list or not JSON", () => {
+    for (const bad of ["not json", "{}", "null", "7"]) {
+      const storage = fakeStorage()
+      storage.items.set("cadence:submissions:things:s1", bad)
+      expect(make(storage).read()).toEqual([])
+    }
+  })
+
+  it("keeps each scope apart, so one viewer never reads another's records", () => {
+    const storage = fakeStorage()
+    make(storage, "ana").upsert({ id: "a", n: 1 })
+    expect(make(storage, "bob").read()).toEqual([])
+    make(storage, "bob").upsert({ id: "b", n: 2 })
+    expect(make(storage, "ana").read()).toEqual([{ id: "a", n: 1 }])
+  })
+
+  it("works without storage, in memory for as long as the list lives", () => {
+    for (const storage of [null, throwing]) {
+      const list = make(storage)
+      expect(list.read()).toEqual([])
+      expect(() => list.upsert({ id: "a", n: 1 })).not.toThrow()
+      expect(list.read()).toEqual([{ id: "a", n: 1 }])
+      list.remove(() => true)
+      expect(list.read()).toEqual([])
+      // A new list over it (a reload) finds nothing.
+      expect(make(storage).read()).toEqual([])
+    }
+  })
+
+  it("does not touch the single record a flow keeps under its own kind", () => {
+    const storage = fakeStorage()
+    recordSubmission(record, storage)
+    const list = make(storage)
+    list.upsert({ id: "a", n: 1 })
+    list.remove(() => true)
+    expect(readSubmission("wrap", storage)).toEqual(record)
   })
 })

@@ -15,7 +15,9 @@ export type Reconciled = "confirmed" | "failed" | "unknown"
 export const EXPIRY_MS = 90_000
 
 type Input = {
-  record: Submission
+  // What the check reads of a record: withdrawals and payroll payments keep their own
+  // shapes and pass these three.
+  record: Pick<Submission, "request_id" | "signature" | "at">
   // Only the confirm call is used, so another transaction's confirm can stand in.
   api: { wrap: Pick<ApiClient["wrap"], "confirm"> }
   signal?: AbortSignal

@@ -15,11 +15,15 @@ import { WhoCanSee } from "@/components/ui/who-can-see"
 import type { ViewerScope } from "@/lib/queries/keys"
 import { useMyBalance } from "@/lib/queries/balance"
 import {
-  useSentWithdrawal,
+  useHeldWithdrawals,
   useWithdraw,
+  useWithdrawCheck,
   useWithdrawInFlight,
+  useWithdrawingAmounts,
+  type WithdrawCheck,
 } from "@/lib/queries/withdraw"
 import { formatBaseUnits, formatUnits, unitsToUsd } from "@/lib/money"
+import { useUnloadGuard } from "@/lib/use-unload-guard"
 import { useWallet } from "@/lib/wallet/context"
 import {
   failureOf,
@@ -33,6 +37,7 @@ import {
   type Phase,
   type WithdrawState,
 } from "@/lib/withdraw/flow"
+import { heldCheckMessage } from "@/lib/withdraw/held"
 import { acknowledgePrompt, riskView } from "@/lib/withdraw/risk"
 import { maxWithdrawUnits, toWithdrawUnits } from "@/lib/withdraw/schema"
 import { cn } from "@/lib/utils"
@@ -43,7 +48,12 @@ export function WithdrawScreen({ viewer }: { viewer: ViewerScope }) {
   const wallet = useWallet()
   const balance = useMyBalance(viewer)
   const inFlight = useWithdrawInFlight()
-  const sent = useSentWithdrawal()
+  const running = useWithdrawingAmounts()
+  const sent = useHeldWithdrawals(viewer).filter(
+    (held) => !running.includes(held.amount),
+  )
+  // Withdrawals sent earlier are looked up here, so it runs whatever the balance does.
+  const check = useWithdrawCheck(viewer)
 
   if (wallet.loading || balance.isPending) {
     return (
@@ -67,9 +77,14 @@ export function WithdrawScreen({ viewer }: { viewer: ViewerScope }) {
             onRetry={() => balance.refetch()}
           />
           {inFlight && <InFlightNotice />}
+          {check.checking && <CheckingNotice />}
           <div className="space-y-3">
             {sent.map((held) => (
-              <HeldNotice key={held.amount} held={held} />
+              <HeldNotice
+                key={held.amount}
+                held={held}
+                onCheckAgain={check.checking ? undefined : check.checkAgain}
+              />
             ))}
           </div>
         </>
@@ -90,6 +105,8 @@ export function WithdrawScreen({ viewer }: { viewer: ViewerScope }) {
             />
           )}
           <WithdrawCard
+            viewer={viewer}
+            check={check}
             available={BigInt(balance.data.available)}
             pending={BigInt(balance.data.pending)}
             stale={balance.isError}
@@ -102,18 +119,23 @@ export function WithdrawScreen({ viewer }: { viewer: ViewerScope }) {
 }
 
 function WithdrawCard({
+  viewer,
+  check,
   available,
   pending,
   stale,
 }: {
+  viewer: ViewerScope
+  check: WithdrawCheck
   available: bigint
   pending: bigint
   // The balance could not be refreshed: `available` is the last one read.
   stale: boolean
 }) {
   const id = useId()
-  const withdraw = useWithdraw()
-  const sent = useSentWithdrawal()
+  const withdraw = useWithdraw(viewer)
+  const sent = useHeldWithdrawals(viewer)
+  const running = useWithdrawingAmounts()
   const [state, dispatch] = useReducer(
     withdrawReducer,
     sent,
@@ -129,12 +151,22 @@ function WithdrawCard({
   const refocus = useRef(false)
 
   const isBusy = state.stage === "working"
+  const checking = check.checking
   const hasFunds = available > 0n
   const stage = state.stage
 
-  // Ones that finished unresolved while this screen was closed. A no-op once they are held.
+  // Closing the tab after the transaction went out would leave the person unsure what
+  // became of it: the record is kept, but they would lose the answer.
+  useUnloadGuard(
+    (state.stage === "working" &&
+      (state.phase === "submitting" || state.phase === "confirming")) ||
+      checking,
+  )
+
+  // The held list is the kept one: ones sent while this screen was closed or before a
+  // reload join it, and ones a lookup settled leave it. A no-op while they agree.
   useEffect(() => {
-    dispatch({ type: "hold", held: sent })
+    dispatch({ type: "sync-held", held: sent })
   }, [sent])
 
   // Move focus to what just appeared, so a keyboard or screen-reader user lands on it.
@@ -155,7 +187,7 @@ function WithdrawCard({
   }
 
   function start() {
-    if (isBusy || inFlight) return
+    if (isBusy || inFlight || checking) return
     const parsed = toWithdrawUnits(amount, available)
     if (!parsed.ok) {
       setError(parsed.message)
@@ -164,7 +196,7 @@ function WithdrawCard({
     const units = parsed.units.toString()
     // Seeded here, not left to the effect above, so a failure that landed this very
     // render is already counted.
-    const current = withdrawReducer(state, { type: "hold", held: sent })
+    const current = withdrawReducer(state, { type: "sync-held", held: sent })
     const next = withdrawReducer(current, { type: "submit", amount: units })
     if (next.stage !== "working") {
       if (state.stage === "needs-acknowledgement") {
@@ -181,7 +213,8 @@ function WithdrawCard({
     }
     setError(undefined)
     setAckError(undefined)
-    dispatch({ type: "hold", held: sent })
+    check.dismiss()
+    dispatch({ type: "sync-held", held: sent })
     dispatch({ type: "submit", amount: units })
     withdraw.mutate(
       {
@@ -217,11 +250,15 @@ function WithdrawCard({
   const isHeld =
     typed.ok && state.held.some((h) => h.amount === typed.units.toString())
 
+  // Not the one running now: it is held from the moment it is sent, but is not yet one
+  // that "may have gone through".
+  const shown = state.held.filter((held) => !running.includes(held.amount))
+
   if (inFlight && state.stage === "form") {
     return (
       <>
         <InFlightNotice />
-        {state.held.map((held) => (
+        {shown.map((held) => (
           <HeldNotice key={held.amount} held={held} />
         ))}
       </>
@@ -254,6 +291,17 @@ function WithdrawCard({
         Move USDC from your private balance to your wallet, where it is an
         ordinary public balance.
       </p>
+
+      {checking && <CheckingNotice className="mt-4" />}
+      {check.settled.map((settled) => (
+        <p
+          key={settled.amount}
+          role="status"
+          className="mt-4 text-ui/normal text-ink"
+        >
+          {heldCheckMessage(settled)}
+        </p>
+      ))}
 
       <dl className="mt-4 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2">
         <div className="bg-surface-subtle p-4">
@@ -302,7 +350,7 @@ function WithdrawCard({
               inputMode="decimal"
               autoComplete="off"
               placeholder="0.00"
-              disabled={!hasFunds}
+              disabled={!hasFunds || checking}
               readOnly={isBusy}
               value={amount}
               onChange={(event) => edit(event.target.value)}
@@ -315,7 +363,7 @@ function WithdrawCard({
             />
             <button
               type="button"
-              disabled={!hasFunds}
+              disabled={!hasFunds || checking}
               // Max would fill the last balance read, which may be from before a withdrawal.
               aria-disabled={isBusy || stale || undefined}
               title={
@@ -333,7 +381,7 @@ function WithdrawCard({
           {state.stage !== "needs-acknowledgement" && (
             <button
               type="submit"
-              disabled={!hasFunds}
+              disabled={!hasFunds || checking}
               aria-disabled={isBusy || isHeld || undefined}
               aria-describedby={isHeld ? `${id}-held` : undefined}
               className={cn(
@@ -389,13 +437,14 @@ function WithdrawCard({
         {state.stage === "working" && <Progress state={state} />}
       </div>
 
-      {state.held.length > 0 && (
+      {shown.length > 0 && (
         <div id={`${id}-held`} className="space-y-3">
-          {state.held.map((held) => (
+          {shown.map((held) => (
             <HeldNotice
               key={held.amount}
               held={held}
               summary={heldDetail(state, held) === "summary"}
+              onCheckAgain={checking ? undefined : check.checkAgain}
               isAlert={
                 state.stage === "failed" &&
                 state.failure.sent &&
@@ -513,17 +562,21 @@ function Acknowledge({
   )
 }
 
-// A withdrawal that may already have gone through. It stays until the page reloads, and
-// the reducer will not send the same amount again meanwhile.
+// A withdrawal that may already have gone through. It stays, also across a reload, until
+// the network confirms or refuses it, and the reducer will not send the same amount again
+// meanwhile.
 function HeldNotice({
   held,
   isAlert = false,
   summary = false,
+  onCheckAgain,
 }: {
   held: Held
   isAlert?: boolean
   // One line, while a newer attempt is the thing to read.
   summary?: boolean
+  // Looks the withdrawal up again with its saved signature; nothing is sent.
+  onCheckAgain?: () => void
 }) {
   if (summary) {
     return (
@@ -562,11 +615,37 @@ function HeldNotice({
           </div>
         )}
         <p>
-          Another amount can still be withdrawn. To withdraw this amount again,
-          first check your balance, then reload this page.
+          Another amount can still be withdrawn.{" "}
+          {held.signature
+            ? "This amount stays on hold until the network confirms or refuses this withdrawal, also if you reload."
+            : "This amount stays on hold until you close this tab, because there is nothing to look it up with. Check your balance and history first."}
         </p>
+        {held.signature && onCheckAgain && (
+          <button
+            type="button"
+            onClick={onCheckAgain}
+            className={buttonVariants({ variant: "secondary", size: "sm" })}
+          >
+            Check again
+          </button>
+        )}
       </div>
     </div>
+  )
+}
+
+function CheckingNotice({ className }: { className?: string }) {
+  return (
+    <p
+      role="status"
+      className={cn(
+        "flex items-center gap-2 text-ui/normal text-ink-muted",
+        className,
+      )}
+    >
+      <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
+      Checking your last withdrawal. You can withdraw again once it is settled.
+    </p>
   )
 }
 
