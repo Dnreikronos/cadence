@@ -612,6 +612,169 @@ describe("MakePrivateController", () => {
       expect(refresh).toHaveBeenCalledTimes(1)
     })
 
+    describe("an apply that went out and failed with an unreadable answer", () => {
+      // The wrap confirms; the apply's confirm answers 500, so it is a sent failure
+      // with its signature saved.
+      async function sentApply() {
+        const harness = setup()
+        harness.api.accounts.confirmApplyPending.mockRejectedValue(
+          new ApiError(500, "internal_error"),
+        )
+        await harness.controller.deposit("1000000")
+        return harness
+      }
+
+      it("offers a check, never a second apply, and the check carries the signature", async () => {
+        const { controller, api, wallet } = await sentApply()
+
+        expect(failed(controller.getState())).toMatchObject({
+          step: "applying",
+          resume: "check",
+          retryable: false,
+          recheck: true,
+        })
+        expect(failed(controller.getState()).message).toMatch(
+          /may already have gone through/,
+        )
+        // Nothing starts another apply or another wrap from here.
+        await controller.retry()
+        await controller.applyPending()
+        expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
+        expect(api.wrap.prepare).toHaveBeenCalledTimes(1)
+        expect(wallet.submit).toHaveBeenCalledTimes(2)
+      })
+
+      it("settles as done when asking again confirms the same transaction", async () => {
+        const { controller, api, refresh, toast, seen, wallet } =
+          await sentApply()
+        api.accounts.confirmApplyPending.mockResolvedValue(receipt("b"))
+        refresh.mockClear()
+
+        await controller.checkAgain()
+
+        expect(api.accounts.confirmApplyPending).toHaveBeenLastCalledWith(
+          { request_id: prepared("b").request_id, signature: SIG },
+          expect.anything(),
+        )
+        expect(seen.slice(-2)).toEqual(["checking", "done"])
+        expect(controller.getState()).toEqual({
+          status: "done",
+          amount: "1000000",
+        })
+        expect(toast).toHaveBeenCalledWith("1 USDC is now private")
+        expect(refresh).toHaveBeenCalled()
+        // Asking prepared and signed nothing.
+        expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
+        expect(wallet.submit).toHaveBeenCalledTimes(2)
+      })
+
+      it("offers another apply only once the network says the first one failed", async () => {
+        const { controller, api } = await sentApply()
+        api.accounts.confirmApplyPending.mockRejectedValue(
+          new ApiError(409, "transaction_failed"),
+        )
+
+        await controller.checkAgain()
+
+        expect(failed(controller.getState())).toMatchObject({
+          step: "applying",
+          resume: "apply",
+          retryable: true,
+          recheck: false,
+        })
+        api.accounts.confirmApplyPending.mockResolvedValue(receipt("b"))
+        await controller.retry()
+        expect(controller.getState().status).toBe("done")
+        expect(api.accounts.applyPending).toHaveBeenCalledTimes(2)
+      })
+
+      it("stays a check when the answer is still unclear, and when the service cannot be asked", async () => {
+        const { controller, api } = await sentApply()
+        api.accounts.confirmApplyPending.mockRejectedValue(
+          new ApiError(404, "request_not_found"),
+        )
+
+        await controller.checkAgain()
+
+        expect(failed(controller.getState())).toMatchObject({
+          resume: "check",
+          retryable: false,
+          recheck: true,
+        })
+
+        api.accounts.confirmApplyPending.mockRejectedValue(
+          new TypeError("network down"),
+        )
+        await controller.checkAgain()
+
+        expect(failed(controller.getState())).toMatchObject({
+          resume: "check",
+          retryable: false,
+          recheck: true,
+        })
+        await controller.retry()
+        expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
+      })
+
+      it("keeps asking while the network has not finalized it, then calls it failed after the blockhash window", async () => {
+        const { controller, api } = await sentApply()
+        api.accounts.confirmApplyPending.mockRejectedValue(
+          new ApiError(409, "transaction_not_finalized"),
+        )
+
+        await controller.checkAgain()
+
+        // It was never seen on the chain, and a signed transaction cannot land after its
+        // blockhash: another apply may be prepared.
+        expect(
+          api.accounts.confirmApplyPending.mock.calls.length,
+        ).toBeGreaterThan(2)
+        expect(failed(controller.getState())).toMatchObject({
+          resume: "apply",
+          retryable: true,
+        })
+      })
+
+      it("is forgotten by dismissing, and by checking the balances", async () => {
+        const first = await sentApply()
+        first.controller.dismiss()
+        expect(first.controller.getState()).toEqual({ status: "idle" })
+        await first.controller.checkAgain()
+        expect(first.api.accounts.confirmApplyPending).toHaveBeenCalledTimes(1)
+
+        const second = await sentApply()
+        await second.controller.check()
+        expect(second.controller.getState()).toEqual({ status: "idle" })
+        await second.controller.checkAgain()
+        expect(second.api.accounts.confirmApplyPending).toHaveBeenCalledTimes(1)
+      })
+    })
+
+    it("an apply whose submit threw has no signature to ask about: only the balances", async () => {
+      let submits = 0
+      const { controller, api } = setup({
+        wallet: {
+          submit: vi.fn(async () => {
+            if (++submits === 1) return SIG
+            throw new Error("RPC timed out after broadcast")
+          }),
+        },
+      })
+
+      await controller.deposit("1000000")
+
+      expect(failed(controller.getState())).toMatchObject({
+        step: "applying",
+        resume: "check",
+        retryable: false,
+        recheck: false,
+      })
+      await controller.checkAgain()
+      await controller.retry()
+      expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
+      expect(api.accounts.confirmApplyPending).not.toHaveBeenCalled()
+    })
+
     it("a non-flow error still ends in a failed state, not an unhandled rejection", async () => {
       const { controller, api } = setup()
       api.wrap.prepare.mockImplementation(() => {

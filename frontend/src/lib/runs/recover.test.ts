@@ -13,7 +13,15 @@ import {
 } from "./evidence"
 import { payOne, paySequence, type RunApi, type RunContext } from "./executor"
 import { sentWithoutSignatureMessage } from "./messages"
-import { holdsUnconfirmed, localReducer, type LocalRows } from "./progress"
+import {
+  holdsUnconfirmed,
+  localReducer,
+  mergeRow,
+  type LocalRows,
+} from "./progress"
+import { createHeldStore } from "./held"
+import { runEvents } from "./sign-again"
+import { holdChecking, type PayrollPerson } from "./plan"
 import { hydrateLocal, reconcilePayment, recoverOne } from "./recover"
 
 function fakeStorage(): SubmissionStorage {
@@ -420,5 +428,99 @@ describe("a run reloaded mid-way", () => {
     expect(hydrateLocal(runEvidence(viewer, storage).payments.read())).toEqual({
       [guid(1)]: { status: "unknown", message: sentWithoutSignatureMessage },
     })
+  })
+})
+
+// Persisted evidence together with the held transactions of a cancelled signature, the way
+// the signer hook wires them.
+describe("evidence beside held transactions", () => {
+  const prepared = (n: number): RunPaymentPrepared => ({
+    payment_id: guid(n),
+    person_id: guid(100 + n),
+    request_id: String(n).padStart(64, "0"),
+    transaction: "AQID",
+    transaction_version: 1,
+    required_signers: ["wallet"],
+    recent_blockhash: "hash",
+    last_valid_block_height: 500,
+  })
+  function wired() {
+    const evidence = runEvidence(viewer, fakeStorage())
+    const held = createHeldStore()
+    let local: LocalRows = {}
+    const events = recordEvidence(
+      runEvents(held, (action) => (local = localReducer(local, action))),
+      evidence,
+      RUN,
+    )
+    const context = (sign: RunContext["sign"]): RunContext => ({
+      runId: RUN,
+      sign,
+      api: { confirmPayment: vi.fn(), retryPayment: vi.fn() },
+      events,
+    })
+    return { evidence, held, local: () => local, context }
+  }
+
+  it("a cancelled signature keeps the transaction held and leaves no record: nothing was sent", async () => {
+    const { evidence, held, local, context } = wired()
+    held.hold(prepared(1))
+    await payOne(
+      context(async (_p, _c, onStep) => {
+        onStep?.("signing")
+        throw Object.assign(new Error("no"), {
+          name: "UserRejectedRequestError",
+        })
+      }),
+      prepared(1),
+    )
+    expect(local()[guid(1)].status).toBe("cancelled")
+    expect(held.has(guid(1))).toBe(true)
+    expect(evidence.payments.read()).toEqual([])
+  })
+
+  it("a send keeps the record and drops the held transaction, so it is never signed again", async () => {
+    const { evidence, held, local, context } = wired()
+    held.hold(prepared(1))
+    await payOne(
+      context(async (_p, _c, onStep, extra) => {
+        onStep?.("submitting")
+        extra?.onSubmitted?.("sig-1")
+        throw new Error("connection dropped")
+      }),
+      prepared(1),
+    )
+    expect(held.has(guid(1))).toBe(false)
+    expect(local()[guid(1)]).toMatchObject({ status: "waiting", stalled: true })
+    expect(evidence.payments.read()).toEqual([
+      expect.objectContaining({ payment_id: guid(1), signature: "sig-1" }),
+    ])
+  })
+
+  it("a saved payment stays checking, and its person unpayable, whatever status the service reports", () => {
+    const rows = hydrateLocal([saved(1)])
+    for (const status of ["pending", "signed", "failed", "settled-somehow"]) {
+      expect(
+        mergeRow(rows[guid(1)], { status, failure: null }).status,
+      ).not.toBe("confirmed")
+    }
+    expect(
+      mergeRow(rows[guid(1)], { status: "settled-somehow", failure: null })
+        .status,
+    ).toBe("waiting")
+    const people = [1, 2].map(
+      (n) =>
+        ({
+          id: guid(100 + n),
+          name: `P${n}`,
+          email: "x@y.z",
+          kind: "employee",
+          activation: "active",
+          amount: "1",
+        }) satisfies PayrollPerson,
+    )
+    expect(
+      holdChecking(people, new Set([guid(101)])).payable.map((p) => p.id),
+    ).toEqual([guid(102)])
   })
 })

@@ -1,7 +1,11 @@
-import type { PaymentItem } from "@/lib/api/schemas"
+import {
+  knownPaymentStatus,
+  type PaymentItem,
+  type PaymentItemStatus,
+} from "@/lib/api/schemas"
 import { unitsToUsd } from "@/lib/money"
 
-type ItemStatus = PaymentItem["status"]
+type ItemStatus = PaymentItemStatus
 
 export type PaymentFilters = { status: ItemStatus | "all"; search: string }
 
@@ -35,7 +39,7 @@ export function filterPayments(
   const needle = search.trim().toLowerCase()
   return items.filter(
     (item) =>
-      (status === "all" || item.status === status) &&
+      (status === "all" || knownPaymentStatus(item.status) === status) &&
       (needle === "" || item.counterparty.name.toLowerCase().includes(needle)),
   )
 }
@@ -56,7 +60,7 @@ export function auditRow(item: PaymentItem): AuditRow {
     id: item.payment_id,
     name: item.counterparty.name,
     usd: unitsToUsd(item.amount),
-    status: item.status,
+    status: knownPaymentStatus(item.status),
     transparent: item.transparent,
     paidAt: item.paid_at,
     signature: item.signature,

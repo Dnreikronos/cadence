@@ -508,6 +508,15 @@ function Failure({
               <RotateCw className="size-3.5" /> Check my balances
             </button>
           )}
+          {state.recheck && (
+            <button
+              type="button"
+              onClick={() => void flow.checkAgain()}
+              className={buttonVariants({ variant: "secondary", size: "sm" })}
+            >
+              <RotateCw className="size-3.5" /> Check again
+            </button>
+          )}
           {state.resume !== "check" && (
             <button
               type="button"

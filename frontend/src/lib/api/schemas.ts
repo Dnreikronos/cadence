@@ -98,6 +98,16 @@ export const transferPreparedSchema = preparedSchema.extend({
 })
 export type TransferPrepared = z.infer<typeof transferPreparedSchema>
 
+// The known values, which stay in the type for autocompletion, and any other
+// string, so a value added later is not a ContractError (additive-only).
+type Open<T extends string> = T | (string & Record<never, never>)
+function open<const T extends readonly [string, ...string[]]>(values: T) {
+  return z.union([
+    z.enum(values),
+    z.string().min(1) as z.ZodType<Open<T[number]>>,
+  ])
+}
+
 // ---- Payroll runs -----------------------------------------------------------
 
 export const runRequestSchema = z.strictObject({
@@ -133,6 +143,21 @@ export const paymentStatuses = [
 ] as const
 export type PaymentStatus = (typeof paymentStatuses)[number]
 
+export function isKnownRunPaymentStatus(
+  status: string,
+): status is PaymentStatus {
+  return (paymentStatuses as readonly string[]).includes(status)
+}
+
+// An unknown status of a payment in a run is read as pending: it never claims a
+// payment is confirmed, and no retry is offered for it. A run screen goes further and
+// shows it as unrecognized (`mergeRow`), since it may mean the payment is in flight.
+export function knownRunPaymentStatus(status: string): PaymentStatus {
+  return (paymentStatuses as readonly string[]).includes(status)
+    ? (status as PaymentStatus)
+    : "pending"
+}
+
 export const runSchema = z.object({
   run_id: id,
   created_at: timestamp,
@@ -140,7 +165,7 @@ export const runSchema = z.object({
     z.object({
       payment_id: id,
       person_id: id,
-      status: z.enum(paymentStatuses),
+      status: open(paymentStatuses),
       transparent: z.boolean(),
       // A stable code when failed, never a message with values.
       failure: z.string().nullable(),
@@ -195,12 +220,23 @@ export const balanceSchema = z.object({
 })
 export type Balance = z.infer<typeof balanceSchema>
 
+export const paymentItemStatuses = ["pending", "confirmed", "failed"] as const
+export type PaymentItemStatus = (typeof paymentItemStatuses)[number]
+
+// What a screen shows and decides on for a payment in a list. An unknown status is
+// pending: never confirmed, never failed, so nothing is claimed or offered for it.
+export function knownPaymentStatus(status: string): PaymentItemStatus {
+  return (paymentItemStatuses as readonly string[]).includes(status)
+    ? (status as PaymentItemStatus)
+    : "pending"
+}
+
 export const paymentItemSchema = z.object({
   payment_id: id,
   run_id: id.nullable(),
   counterparty: z.object({ id, name: z.string() }),
   amount: unitsSchema,
-  status: z.enum(["pending", "confirmed", "failed"]),
+  status: open(paymentItemStatuses),
   transparent: z.boolean(),
   paid_at: timestamp,
   signature: z.string().nullable(),
@@ -235,24 +271,16 @@ export const emailSchema = z
   .max(320)
   .regex(/^[^@\s]+@[^@\s]+$/)
 
-// The known values, which stay in the type for autocompletion, and any other
-// string, so a value added later is not a ContractError (additive-only).
-type Open<T extends string> = T | (string & Record<never, never>)
-function open<const T extends readonly [string, ...string[]]>(values: T) {
-  return z.union([
-    z.enum(values),
-    z.string().min(1) as z.ZodType<Open<T[number]>>,
-  ])
-}
-
 export const auditorStatuses = ["invited", "active", "invite-expired"] as const
 export type AuditorStatus = (typeof auditorStatuses)[number]
 
+export function isKnownAuditorStatus(status: string): status is AuditorStatus {
+  return (auditorStatuses as readonly string[]).includes(status)
+}
+
 // An unknown status is shown as a pending invite: it never claims access.
 export function knownAuditorStatus(status: string): AuditorStatus {
-  return (auditorStatuses as readonly string[]).includes(status)
-    ? (status as AuditorStatus)
-    : "invited"
+  return isKnownAuditorStatus(status) ? status : "invited"
 }
 
 export const auditorSchema = z.object({

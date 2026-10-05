@@ -1,12 +1,20 @@
 import type { Signer } from "../sign"
+import { scenarios } from "./scenario"
 
 // Stand-ins for the Turnkey signer (#77) and the RPC submit, so a screen can run
 // the whole prepare, sign, confirm flow before either exists.
 export function mockSigner(address: string): Signer {
   return {
     address,
-    signTransaction: async (transaction) =>
-      Uint8Array.from([...transaction, 1]),
+    signTransaction: async (transaction) => {
+      // The scenario "sign-cancelled": the person turns the prompt down.
+      if (scenarios.has("sign-cancelled")) {
+        throw Object.assign(new Error("The signature was cancelled"), {
+          name: "UserRejectedRequestError",
+        })
+      }
+      return Uint8Array.from([...transaction, 1])
+    },
     signMessage: async (message) => mockSignature(address, message),
   }
 }

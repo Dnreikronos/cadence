@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
 import type { ApiClient } from "@/lib/api/client"
 import { base64FromBytes } from "@/lib/api/base64"
-import { ApiError } from "@/lib/api/errors"
+import { ApiError, ContractError } from "@/lib/api/errors"
 import { COMPANY_WALLET } from "@/lib/api/mocks/db"
 import { mockSigner } from "@/lib/api/mocks/signer"
 import type { Receipt } from "@/lib/api/schemas"
 import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import { SentApplyError } from "@/lib/me/apply-pending"
 import { bindSignAndConfirm } from "@/lib/wallet/sign-and-confirm"
 import { WalletUnavailableError, type Wallet } from "@/lib/wallet/types"
 import {
@@ -14,6 +15,7 @@ import {
   MakePrivateError,
   needsSetup,
   runMakePrivate,
+  sentApplyMessage,
 } from "./make-private"
 import type { MakePrivateStep } from "./types"
 
@@ -403,6 +405,191 @@ describe("runMakePrivate", () => {
       const error = await failure(run())
 
       expect(error).toMatchObject({ step: "applying", resume: "apply" })
+    })
+  })
+
+  // The apply step follows the sent-failure rule of `/me` (`applyPending`): past
+  // "signing", every failure but the network dropping the transaction may have gone out.
+  describe("the apply step after it was handed to the network", () => {
+    const SIG_B = "5SigMockSignature2222222222222222222222222222"
+
+    // The wrap goes out and confirms; the apply's submit is the test's.
+    function applyWallet(second: () => Promise<string>) {
+      let submits = 0
+      return walletWith({
+        submit: vi.fn(async () => {
+          submits += 1
+          return submits === 1 ? SIG : second()
+        }),
+      })
+    }
+
+    async function sentFailure(promise: Promise<unknown>) {
+      const error = await failure(promise)
+      expect(error.cause).toBeInstanceOf(SentApplyError)
+      expect(error).toMatchObject({ step: "applying", resume: "check" })
+      expect(canRetry(error)).toBe(false)
+      expect(failureMessage(error)).toBe(sentApplyMessage)
+      expect(failureMessage(error)).not.toMatch(/try again/i)
+      return error
+    }
+
+    it("is a sent failure with no signature when submit throws, and prepares nothing again", async () => {
+      const wallet = applyWallet(async () => {
+        throw new Error("RPC timed out after broadcast")
+      })
+      const { api, run } = setup(wallet)
+
+      const error = await sentFailure(run())
+
+      expect(error.sent).toEqual({
+        request_id: prepared("b").request_id,
+        signature: null,
+      })
+      expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
+      expect(api.wrap.prepare).toHaveBeenCalledTimes(1)
+    })
+
+    it("is a sent failure with the saved signature when confirming answers 500", async () => {
+      const wallet = applyWallet(async () => SIG_B)
+      const { api, run } = setup(wallet)
+      api.accounts.confirmApplyPending.mockRejectedValue(
+        new ApiError(500, "internal_error"),
+      )
+
+      const error = await sentFailure(run())
+
+      expect(error.sent).toEqual({
+        request_id: prepared("b").request_id,
+        signature: SIG_B,
+      })
+      expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
+    })
+
+    it("is a sent failure when confirming answers something that is not the contract", async () => {
+      const wallet = applyWallet(async () => SIG_B)
+      const { api, run } = setup(wallet)
+      api.accounts.confirmApplyPending.mockRejectedValue(
+        new ContractError("/accounts/apply-pending/confirm", "bad shape"),
+      )
+
+      const error = await sentFailure(run())
+
+      expect(error.sent?.signature).toBe(SIG_B)
+    })
+
+    it("is a sent failure when the confirm times out, keeping the signature that was saved", async () => {
+      const { api, run } = setup(walletWith())
+      api.accounts.confirmApplyPending.mockRejectedValue(
+        new ConfirmTimeoutError(SIG_B),
+      )
+
+      // The timeout comes from the confirm call, as `signAndConfirm` rethrows it.
+      const error = await sentFailure(run())
+
+      expect(error.sent?.signature).toBe(SIG)
+    })
+
+    it("is a sent failure for a timeout from the signing flow itself", async () => {
+      let calls = 0
+      const signAndConfirm = vi.fn(
+        async (_prepared, confirm, onStep, extra) => {
+          if (++calls === 1) {
+            onStep?.("signing")
+            onStep?.("submitting")
+            extra.onSubmitted?.(SIG)
+            return confirm(SIG)
+          }
+          onStep?.("signing")
+          onStep?.("submitting")
+          extra.onSubmitted?.(SIG_B)
+          onStep?.("confirming")
+          throw new ConfirmTimeoutError(SIG_B)
+        },
+      )
+      const { api, run } = setup()
+
+      const error = await sentFailure(
+        run({ signAndConfirm: signAndConfirm as never }),
+      )
+
+      expect(error.sent).toEqual({
+        request_id: prepared("b").request_id,
+        signature: SIG_B,
+      })
+      expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
+    })
+
+    it("is a sent failure for any other answer once confirming has started", async () => {
+      for (const failureOf of [
+        new ApiError(409, "credit_counter_mismatch"),
+        new ApiError(409, "transaction_mismatch"),
+        new ApiError(404, "request_not_found"),
+        new TypeError("not a response"),
+      ]) {
+        const { api, run } = setup(applyWallet(async () => SIG_B))
+        api.accounts.confirmApplyPending.mockRejectedValue(failureOf)
+        const error = await sentFailure(run())
+        expect(error.sent?.signature).toBe(SIG_B)
+      }
+    })
+
+    it("still says nothing went out when the network dropped the apply", async () => {
+      const { api, run } = setup(applyWallet(async () => SIG_B))
+      api.accounts.confirmApplyPending.mockRejectedValue(
+        new ApiError(409, "transaction_failed"),
+      )
+
+      const error = await failure(run())
+
+      expect(error).toMatchObject({ step: "applying", resume: "apply" })
+      expect(error.sent).toBeNull()
+      expect(error.cause).not.toBeInstanceOf(SentApplyError)
+      expect(canRetry(error)).toBe(true)
+    })
+
+    it("still allows a retry for a failure before the apply was submitted", async () => {
+      // Preparing it, and a signature the person refuses, send nothing.
+      const prepare = setup()
+      prepare.api.accounts.applyPending.mockRejectedValue(
+        new ApiError(503, "rpc_unavailable"),
+      )
+      const preparing = await failure(prepare.run())
+      expect(preparing).toMatchObject({ step: "applying", resume: "apply" })
+      expect(preparing.sent).toBeNull()
+      expect(canRetry(preparing)).toBe(true)
+
+      let signs = 0
+      const refused = setup(
+        walletWith({
+          signer: {
+            address: COMPANY_WALLET,
+            // The wrap is signed; the apply is not.
+            signTransaction: async (bytes) => {
+              if (++signs === 2) throw new Error("rejected in the wallet")
+              return bytes
+            },
+          },
+        }),
+      )
+      const signing = await failure(refused.run())
+      expect(signing).toMatchObject({ step: "applying", resume: "apply" })
+      expect(signing.sent).toBeNull()
+      expect(canRetry(signing)).toBe(true)
+      expect(refused.wallet.submit).toHaveBeenCalledTimes(1)
+    })
+
+    it("treats an apply started on its own (nothing pending after a wrap) the same way", async () => {
+      const { api, wallet, run } = setup(walletWith())
+      api.accounts.confirmApplyPending.mockRejectedValue(
+        new ApiError(500, "internal_error"),
+      )
+
+      const error = await sentFailure(run({ from: "apply", amount: "" }))
+
+      expect(error.sent?.signature).toBe(SIG)
+      expect(api.wrap.prepare).not.toHaveBeenCalled()
+      expect(wallet.submit).toHaveBeenCalledTimes(1)
     })
   })
 })

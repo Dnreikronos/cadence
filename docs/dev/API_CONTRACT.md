@@ -200,20 +200,20 @@ Which route emits what, where it is not obvious:
 
 Statuses and routes are part of the proposal.
 
-| Status | Code                                      | Where                                                                                                                                                                                                                                                                                |
-| ------ | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 403    | `forbidden_role`                          | Any `/me`, `/company`, `/audit` route called outside the caller's role.                                                                                                                                                                                                              |
-| 404    | `run_not_found`                           | The mock's `GET /runs/:run_id`, when the run is not the caller's (the implemented service has the code too, see [Codes in use](#codes-in-use-)).                                                                                                                                     |
-| 404    | `payment_not_found`                       | `POST /runs/:run_id/payments/:payment_id/confirm` and `/retry`, when the payment is not in that run.                                                                                                                                                                                 |
-| 404    | `person_not_found`                        | `POST /runs`, `PUT /company/people/:person_id/amount` and `POST /company/people/:person_id/invite`, when `person_id` is not in the caller's company.                                                                                                                                 |
-| 404    | `auditor_not_found`                       | `POST /company/auditors/:auditor_id/revoke`, when the id is not an auditor or pending invite of the caller's company.                                                                                                                                                                |
-| 409    | `recipient_not_activated`                 | `POST /runs` and the retry route, for a person without an activated account.                                                                                                                                                                                                         |
-| 409    | `reveal_risk_not_acknowledged`            | `POST /unwrap`, see [Unwrap](#unwrap-private-usdc-to-public-with-the-reveal-risk-flag-).                                                                                                                                                                                             |
-| 409    | `credit_counter_mismatch`                 | `POST /accounts/apply-pending/confirm`. It can come for an apply that did land: see [Accounts](#accounts-configure-and-apply-pending-).                                                                                                                                              |
-| 409    | `key_already_enrolled`                    | `POST /keys/enroll`.                                                                                                                                                                                                                                                                 |
-| 409    | `person_already_active`, `person_removed` | `POST /company/people/:person_id/invite`, see [Invites](#invites-).                                                                                                                                                                                                                  |
-| 409    | `auditor_already_invited`                 | `POST /company/auditors`, for an address with a pending invite, see [Auditors](#auditors-).                                                                                                                                                                                          |
-| 409    | `auditor_already_active`                  | `POST /company/auditors`, for an address that already audits the company.                                                                                                                                                                                                            |
+| Status | Code                                      | Where                                                                                                                                                                                                                                                                                                 |
+| ------ | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 403    | `forbidden_role`                          | Any `/me`, `/company`, `/audit` route called outside the caller's role.                                                                                                                                                                                                                               |
+| 404    | `run_not_found`                           | The mock's `GET /runs/:run_id`, when the run is not the caller's (the implemented service has the code too, see [Codes in use](#codes-in-use-)).                                                                                                                                                      |
+| 404    | `payment_not_found`                       | `POST /runs/:run_id/payments/:payment_id/confirm` and `/retry`, when the payment is not in that run.                                                                                                                                                                                                  |
+| 404    | `person_not_found`                        | `POST /runs`, `PUT /company/people/:person_id/amount` and `POST /company/people/:person_id/invite`, when `person_id` is not in the caller's company.                                                                                                                                                  |
+| 404    | `auditor_not_found`                       | `POST /company/auditors/:auditor_id/revoke`, when the id is not an auditor or pending invite of the caller's company.                                                                                                                                                                                 |
+| 409    | `recipient_not_activated`                 | `POST /runs` and the retry route, for a person without an activated account.                                                                                                                                                                                                                          |
+| 409    | `reveal_risk_not_acknowledged`            | `POST /unwrap`, see [Unwrap](#unwrap-private-usdc-to-public-with-the-reveal-risk-flag-).                                                                                                                                                                                                              |
+| 409    | `credit_counter_mismatch`                 | `POST /accounts/apply-pending/confirm`. It can come for an apply that did land: see [Accounts](#accounts-configure-and-apply-pending-).                                                                                                                                                               |
+| 409    | `key_already_enrolled`                    | `POST /keys/enroll`.                                                                                                                                                                                                                                                                                  |
+| 409    | `person_already_active`, `person_removed` | `POST /company/people/:person_id/invite`, see [Invites](#invites-).                                                                                                                                                                                                                                   |
+| 409    | `auditor_already_invited`                 | `POST /company/auditors`, for an address with a pending invite, see [Auditors](#auditors-).                                                                                                                                                                                                           |
+| 409    | `auditor_already_active`                  | `POST /company/auditors`, for an address that already audits the company.                                                                                                                                                                                                                             |
 | 429    | `rate_limited`                            | The auditor, access log and account status routes, with `Retry-After: 60`. They are not payments, so they do not use `wrap_rate_limited` or `transfer_rate_limited`. Which code the other reads answer with is not decided (the mock uses `rate_limited`; `POST /runs` uses `transfer_rate_limited`). |
 
 The review findings below propose three more (`run_in_progress`,
@@ -224,19 +224,20 @@ mock also emits a few codes that are in neither list; they are under
 ### Evolving the contract
 
 - The client ignores unknown fields in a response (request bodies are strict, see
-  [Conventions](#conventions)). Four enums are tolerant, each read as its safest
+  [Conventions](#conventions)). Five enums are tolerant, each read as its safest
   class:
   - an unknown `reveal_risk.level` parses as `exact` (the warning is shown);
   - an unknown error code is handled as its status class;
   - an unknown auditor `status` is shown as a pending invite, so the auditors screen
     never claims access. The sentences that name who can read amounts count it as a
     reader instead, so they never leave one out;
-  - an unknown access-log `actor.kind` or `action` is shown as sent, as plain text.
-- **Known gap: payment and run `status` are strict.** The schemas accept only
-  `pending`, `confirmed`, `failed` on a payment item and `pending`, `signed`,
-  `confirmed`, `failed`, `expired` on a run payment. A new value fails the whole
-  response as a contract error instead of showing as `pending`. Until the client is
-  changed, adding a status is a breaking change in practice.
+  - an unknown access-log `actor.kind` or `action` is shown as sent, as plain text;
+  - an unknown payment or run-payment `status` parses (any non-empty string). Lists
+    and pills show a payment item as `pending`; a run row shows it as "Unknown",
+    offers no retry, sign again or pay again, and the run is read a bounded number of
+    times more. The 24-hour repay guard treats it as possibly paid: only `failed`, and
+    `pending` with no signature, leave a person ticked by default, so a status the service
+    adds for a payment that landed (`finalized`, say) cannot lead to a second payment.
 - Changes are additive: new fields, codes, enum values and routes may appear.
   Removing or renaming a field, changing a type or a meaning, or changing a code's
   status is a breaking change and needs a new route or a version prefix, announced
@@ -374,10 +375,14 @@ transfer_not_found`, because transfer records are looked up by `request_id` and
 ### Expiry and retries
 
 - A prepared transaction expires with its blockhash (`last_valid_block_height`).
-  After expiry the web app prepares again; it never reuses the old bytes. It
+  After expiry the web app prepares again; it never reuses expired bytes. It
   prepares again only when nothing was sent (a failure before the submit, a refused
   signature) or the network answered `transaction_failed`; otherwise see the
-  sent-failure rule below.
+  sent-failure rule below. The one reuse: a payroll payment whose signature the
+  person cancelled sent nothing, so the same unsent transaction is signed again
+  ("Sign again"), only within about 90 s of being prepared and never after a failure
+  past the submit; older than that, or after a reload, it is prepared again or a new
+  run is started.
 - A transaction may have landed even if the browser lost the response.
   **Before preparing a replacement for a payment that was already submitted,**
   reconcile: confirm the earlier `request_id` first. Preparing a fresh deposit
@@ -419,14 +424,14 @@ exception is `transaction_failed`: the network ran the transaction and refused i
 so nothing moved. Every flow that moves money applies the rule, but they do not keep
 the evidence equally:
 
-| Flow                                    | After "may have been sent"                                                                                                                                         | Evidence kept across a reload                                                    |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| Deposit, wrap step (`/company/deposit`) | no new wrap until the earlier one is reconciled; "Check my balances"                                                                                               | yes: a submission record in `sessionStorage` (this tab)                          |
-| Deposit, apply step                     | only a timed-out apply stops at "Check my balances"; any other failure offers "finish making it available", an apply that cannot wrap twice                        | no                                                                               |
-| Apply pending (`/me`)                   | no retry; the button locks while the saved signature is re-confirmed; "Check my balance", "Check again"                                                            | yes: a submission record                                                         |
-| Withdraw (`/me/withdraw`)               | no retry, and the same amount is held back until a lookup of its saved signature settles it; the form waits while it runs                                          | yes: a list of held withdrawals in `sessionStorage`, per viewer (this tab)       |
-| Payroll payment (`/company/runs/...`)   | that payment is never retried; "Check again" re-confirms with its signature, and a payment with no signature only says to check the company's payments and balance | yes: the run attempt and each payment that reached the submit step, per viewer   |
-| Activation, account step (`/activate`)  | the next try settles the saved transaction instead of preparing a second one                                                                                       | no: an in-memory map per wallet                                                  |
+| Flow                                    | After "may have been sent"                                                                                                                                                                                                                   | Evidence kept across a reload                                                    |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Deposit, wrap step (`/company/deposit`) | no new wrap until the earlier one is reconciled; "Check my balances"                                                                                                                                                                         | yes: a submission record in `sessionStorage` (this tab)                          |
+| Deposit, apply step                     | past "signing", every failure except `transaction_failed` is sent: no retry; "Check my balances", and "Check again" (re-confirms the saved signature) when there is one                                                                      | no: kept in memory for the screen only                                           |
+| Apply pending (`/me`)                   | no retry; the button locks while the saved signature is re-confirmed; "Check my balance", "Check again"                                                                                                                                      | yes: a submission record                                                         |
+| Withdraw (`/me/withdraw`)               | no retry, and the same amount is held back until a lookup of its saved signature settles it; the form waits while it runs                                                                                                                    | yes: a list of held withdrawals in `sessionStorage`, per viewer (this tab)       |
+| Payroll payment (`/company/runs/...`)   | that payment is never retried or signed again; "Check again" re-confirms with its signature, and a payment with no signature only says to check the company's payments and balance. A cancelled signature (nothing sent) may be signed again | yes: the run attempt and each payment that reached the submit step, per viewer   |
+| Activation, account step (`/activate`)  | the next try settles the saved transaction instead of preparing a second one                                                                                                                                                                 | no: an in-memory map per wallet                                                  |
 
 A submission record is `{ kind, request_id, signature | null, last_valid_block_height,
 wallet, at }`, one per kind, under `cadence:submission:<kind>` in `sessionStorage`

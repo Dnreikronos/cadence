@@ -11,7 +11,8 @@ import { Modal } from "@/components/ui/modal"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import { isApiError, messageFor } from "@/lib/api"
-import { removalCopy } from "@/lib/auditors/copy"
+import { removalCopy, removalKind } from "@/lib/auditors/copy"
+import { hasActiveAuditor } from "@/lib/people/view"
 import {
   canRetry,
   useAuditors,
@@ -42,8 +43,9 @@ export function AuditorsScreen() {
     if (!auditors.isFetching) refocus.current = null
   }, [auditors.isFetching, auditors.dataUpdatedAt])
 
-  const hasAuditor =
-    auditors.data?.rows.some((a) => a.status === "active") ?? false
+  // Unknown while the list loads or failed, and for an unknown status: the longer,
+  // safe sentence, as on the other screens.
+  const hasAuditor = hasActiveAuditor(auditors.data)
 
   const inviteButton = (
     <button
@@ -192,7 +194,7 @@ function AuditorListRow({
   onRemove: () => void
 }) {
   const invite = useInviteAuditor()
-  const copy = removalCopy(auditor.status)
+  const copy = removalCopy(removalKind(auditor))
   const rowRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (refocus.current !== auditor.email) return
@@ -215,7 +217,9 @@ function AuditorListRow({
         {auditor.email}
       </span>
       <span role="cell">
-        <ActivationPill activation={auditor.status} />
+        <ActivationPill
+          activation={auditor.unrecognized ? "unrecognized" : auditor.status}
+        />
       </span>
       <span role="cell" className="text-ui text-ink-muted">
         <span className="md:sr-only">Invited </span>
@@ -310,7 +314,7 @@ function RemoveModal({
 }) {
   const revoke = useRevokeAuditor()
   if (!auditor) return null
-  const copy = removalCopy(auditor.status)
+  const copy = removalCopy(removalKind(auditor))
 
   // The request cannot be cancelled, so the dialog stays until it answers. The
   // toast on success is the hook's, not this component's.

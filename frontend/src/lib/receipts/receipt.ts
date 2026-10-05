@@ -1,3 +1,4 @@
+import { knownPaymentStatus } from "@/lib/api/schemas"
 import type { Role } from "@/lib/auth/guard"
 import type { ClusterName } from "@/lib/solana/cluster"
 
@@ -57,11 +58,13 @@ export function receiptTitle(
 // One line under the title: what kind of payment this is, without claiming
 // that something was sent when it was not.
 export function receiptSummary(payment: {
-  status: "pending" | "confirmed" | "failed"
+  status: string
   transparent: boolean
 }): string {
-  if (payment.status === "pending") return "Waiting for the network to confirm."
-  if (payment.status === "failed") return "This payment did not go through."
+  // A status the client does not know reads as pending: nothing is claimed.
+  const status = knownPaymentStatus(payment.status)
+  if (status === "pending") return "Waiting for the network to confirm."
+  if (status === "failed") return "This payment did not go through."
   return payment.transparent
     ? "Ordinary transfer, public on-chain."
     : "Encrypted transfer."

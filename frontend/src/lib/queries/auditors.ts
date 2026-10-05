@@ -12,15 +12,22 @@ import { api } from "@/lib/api"
 import type { ApiClient } from "@/lib/api/client"
 import { isApiError, messageFor } from "@/lib/api/errors"
 import {
+  isKnownAuditorStatus,
   knownAuditorStatus,
   type Auditor,
   type AuditorStatus,
 } from "@/lib/api/schemas"
-import { removalCopy } from "@/lib/auditors/copy"
+import { removalCopy, removalKind, type RemovalKind } from "@/lib/auditors/copy"
 import { queryKeys } from "./keys"
 
 // An auditor as the screen shows it: a status the screen knows how to describe.
-export type AuditorRow = Omit<Auditor, "status"> & { status: AuditorStatus }
+export type AuditorRow = Omit<Auditor, "status"> & {
+  status: AuditorStatus
+  // Set when the service sent a status this app does not know. The row shows as a
+  // pending invite, but the sentences that name who can read amounts count it as a
+  // reader (`hasActiveAuditor`), so they never leave one out.
+  unrecognized?: true
+}
 
 export type AuditorList = {
   rows: AuditorRow[]
@@ -49,7 +56,11 @@ export async function listAllAuditors(
       { signal },
     )
     for (const item of page.items) {
-      byId.set(item.id, { ...item, status: knownAuditorStatus(item.status) })
+      byId.set(item.id, {
+        ...item,
+        status: knownAuditorStatus(item.status),
+        ...(isKnownAuditorStatus(item.status) ? {} : { unrecognized: true }),
+      })
     }
     // A cursor that does not move would read the same page for ever.
     more = !!page.next_cursor && page.next_cursor !== cursor
@@ -114,18 +125,18 @@ export function revokeAuditorMutation(
   return {
     mutationFn: async (
       auditor: AuditorRow,
-    ): Promise<{ status: AuditorStatus }> => {
+    ): Promise<{ status: RemovalKind }> => {
       // What the row is now, not when it was clicked: an invite may have been
       // accepted since, and then it is access that is revoked. Best effort.
-      let status = auditor.status
+      let status = removalKind(auditor)
       try {
         const list = await listAllAuditors(
           client,
           AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
         )
         queryClient.setQueryData(queryKeys.auditors.list(), list)
-        status =
-          list.rows.find((row) => row.id === auditor.id)?.status ?? status
+        const current = list.rows.find((row) => row.id === auditor.id)
+        if (current) status = removalKind(current)
       } catch {
         // The revoke below reports whatever is really wrong.
       }
@@ -134,7 +145,7 @@ export function revokeAuditorMutation(
       })
       return { status }
     },
-    onSuccess: (result: { status: AuditorStatus }, auditor: AuditorRow) => {
+    onSuccess: (result: { status: RemovalKind }, auditor: AuditorRow) => {
       toast.success(`${removalCopy(result.status).done} ${auditor.email}`)
       refresh(queryClient)
     },
