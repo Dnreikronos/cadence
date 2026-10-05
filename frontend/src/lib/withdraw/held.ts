@@ -13,13 +13,13 @@ import {
 import { requireDurable, type ApiMode } from "@/lib/storage-guard"
 import type { Held } from "./flow"
 
-// A withdrawal that may have gone through, kept so a reload (or signing out and back
-// in) cannot forget it and offer the same amount again. It holds the amount, which
-// the other submission records do not: this is why it lives in this tab's
-// `sessionStorage` only, per viewer, and is dropped once the outcome is known.
+// A withdrawal that may have gone through, kept so a reload, another tab or a later visit
+// cannot forget it and offer the same amount again. It holds the amount, which the other
+// submission records do not: this is why it is kept per viewer only, in the browser's
+// `localStorage`, dropped once the outcome is known and removed when the viewer signs out.
 // `request_id` and `last_valid_block_height` are there from the moment of sending;
 // the signature once the network returned one. A record without a signature
-// cannot be asked about: it stays until the tab closes.
+// cannot be asked about: it stays until it is released (or signed out, or pruned).
 export const heldRecordSchema = z.object({
   amount_units: z.string().regex(/^\d{1,20}$/),
   request_id: z.string().min(1).optional(),
@@ -52,8 +52,9 @@ export function heldRecords(
 const lists = new Map<string, HeldRecords>()
 
 // The viewer's list for this tab, the same object each time so every screen and hook
-// sees one another's writes. It also outlives the query cache, which sign-out clears:
-// the next person signing in reads their own scope and none of this one's.
+// sees one another's writes (other tabs' too: the list reads storage). It also outlives
+// the query cache, which sign-out clears: the next person signing in reads their own
+// scope and none of this one's.
 export function heldRecordsFor(viewer: Viewer) {
   const scope = viewerScopeId(viewer)
   let list = lists.get(scope)

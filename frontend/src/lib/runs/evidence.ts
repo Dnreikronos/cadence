@@ -13,9 +13,9 @@ import { requireDurable, type ApiMode } from "@/lib/storage-guard"
 import { describeFailure } from "./messages"
 import { attemptKey, type AttemptKey } from "./plan"
 
-// What a payroll run keeps in this tab's `sessionStorage`, per viewer, so a reload
-// cannot make a new run cover people who were already paid. Two kinds of record, both
-// ids, signatures and block heights (no amount, nothing secret).
+// What a payroll run keeps in the browser's `localStorage`, per viewer, so a reload or
+// another tab cannot make a new run cover people who were already paid. Two kinds of
+// record, both ids, signatures and block heights (no amount, nothing secret).
 
 // The attempt to create a run: the idempotency key it was sent with, and a fingerprint
 // of who and how much. Asking again for the same list reuses the key, so the service
@@ -87,8 +87,10 @@ export function runEvidence(
 const evidence = new Map<string, RunEvidence>()
 
 // The viewer's records for this tab, the same objects each time, so every screen sees
-// the others' writes. They outlive the query cache that sign-out clears, and are read
-// by scope: the next person to sign in on the tab finds none of this one's.
+// the others' writes (and those of other tabs, which `createRecordList` reads from
+// storage). They outlive the query cache that sign-out clears, are read by scope (the
+// next person to sign in finds none of this one's), and signing out removes them from the
+// browser (`clearViewerEvidence`).
 export function runEvidenceFor(viewer: Viewer): RunEvidence {
   const scope = viewerScopeId(viewer)
   let found = evidence.get(scope)
@@ -302,7 +304,25 @@ export function releasePerson(evidence: RunEvidence, personId: string) {
 export const unreadableMessage =
   "Unreadable saved state: some saved payments could not be read, so no run can be started until you have checked the company's payments and released them."
 
+export const unsettledMessage =
+  "Someone in this run has a payment that may have been sent and is not settled yet, perhaps from another tab. Nothing was created: check who is ticked and try again."
+
 // Whose payment may have been sent and is not settled: they are not payable until it is.
 export const unsettledPeople = (
   payments: readonly SentPayment[],
 ): ReadonlySet<string> => new Set(payments.map((payment) => payment.person_id))
+
+// What stops a run to `recipients` from being created, from what is saved right now: saved
+// state that cannot be read, or a payment that may have been sent to someone in it. Asked
+// again once the run lock is held, because another tab may have sent a payment (or left
+// state this one cannot read) since the list was chosen.
+export function runBlocker(
+  { payments }: Pick<RunEvidence, "payments">,
+  recipients: readonly { id: string }[],
+): string | null {
+  if (payments.unreadable()) return unreadableMessage
+  const open = unsettledPeople(payments.read())
+  return recipients.some((person) => open.has(person.id))
+    ? unsettledMessage
+    : null
+}

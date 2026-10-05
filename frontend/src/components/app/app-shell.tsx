@@ -10,6 +10,7 @@ import type { Role } from "@/lib/auth/guard"
 import { cn } from "@/lib/utils"
 import { AmountDisplay, type AmountState } from "@/components/ui/amount-display"
 import { signOut, signOutEverywhere } from "@/lib/auth/actions"
+import { clearViewerEvidence } from "@/lib/submissions"
 import { buttonVariants } from "@/components/ui/button"
 import { SkipLink, mainId } from "@/components/ui/skip-link"
 import {
@@ -19,7 +20,8 @@ import {
 } from "@/components/ui/popover"
 import { isActive, navByRole, roleLabels } from "./nav"
 
-export type ShellCompany = { name: string }
+// `id` is what the viewer's saved records are scoped by; the layouts and the demo give it.
+export type ShellCompany = { name: string; id?: string }
 // `error` replaces the amount with a note that it could not load; `onRetry` adds a button.
 export type ShellBalance = {
   amount?: number
@@ -143,13 +145,29 @@ function BarTop({
           {roleLabels[role]}
         </span>
       </span>
-      <UserMenu email={email} />
+      <UserMenu email={email} company={company} />
     </header>
   )
 }
 
-function UserMenu({ email }: { email: string }) {
+function UserMenu({
+  email,
+  company,
+}: {
+  email: string
+  company: ShellCompany
+}) {
   const queryClient = useQueryClient()
+  // What the viewer left in the browser (saved sends, with a withdrawal's amount) goes
+  // with the session: a shared computer keeps none of it for the next person.
+  const forget = () => {
+    queryClient.clear()
+    clearViewerEvidence({
+      email,
+      company: company.name,
+      companyId: company.id,
+    })
+  }
   return (
     <Popover>
       <PopoverTrigger className="ml-auto flex min-w-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-ui text-ink-muted hover:bg-canvas hover:text-ink">
@@ -167,11 +185,11 @@ function UserMenu({ email }: { email: string }) {
         <p className="truncate text-label text-ink-muted">Signed in as</p>
         <p className="-mt-1.5 truncate font-medium text-ink">{email}</p>
         {/* Clears the Supabase session; the Turnkey session joins it with the wallet (#77). */}
-        {/* The cache is the viewer's data: the next sign-in must not see it. */}
+        {/* The cache and the saved records are the viewer's data: the next sign-in must not see them. */}
         <div className="border-t border-line pt-2">
           <form
             action={() => {
-              queryClient.clear()
+              forget()
               return signOut()
             }}
           >
@@ -185,7 +203,7 @@ function UserMenu({ email }: { email: string }) {
           {/* Ends this account's sessions on every device, for a lost laptop or a shared computer. */}
           <form
             action={() => {
-              queryClient.clear()
+              forget()
               return signOutEverywhere()
             }}
           >
