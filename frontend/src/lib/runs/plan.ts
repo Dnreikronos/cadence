@@ -1,5 +1,4 @@
 import {
-  knownPaymentStatus,
   runRequestSchema,
   type PaymentItem,
   type RunCreated,
@@ -85,16 +84,32 @@ export function excludedNote({ person, reason }: Excluded) {
 // person paid today", so the company's own payments are the record.
 export const recentWindowMs = 24 * 60 * 60 * 1000
 
-// Ids of the people with a confirmed payment inside the window.
+// Whether a payment may have paid the person. Only a payment that is known not to have
+// moved money is left out: `failed`, and a `pending` one with no signature (nothing was
+// sent yet). Everything else counts, because skipping a payment that did land pays the
+// person twice: `confirmed`, `finalized` and `signed` and every status this app does not
+// know, which the service may have added to say that money moved.
+export function mayHaveBeenPaid(
+  payment: Pick<PaymentItem, "status"> & { signature?: string | null },
+) {
+  if (payment.status === "failed") return false
+  if (payment.status === "pending") return !!payment.signature
+  return true
+}
+
+// Ids of the people with a payment that may have paid them inside the window. The admin
+// can still tick one of them again, after the warning.
 export function recentlyPaidIds(
-  payments: readonly Pick<PaymentItem, "status" | "paid_at" | "counterparty">[],
+  payments: readonly (Pick<
+    PaymentItem,
+    "status" | "paid_at" | "counterparty"
+  > & { signature?: string | null })[],
   now: number,
   windowMs = recentWindowMs,
 ) {
   const paid = new Set<string>()
   for (const payment of payments) {
-    // An unknown status is pending, so it never counts as paid.
-    if (knownPaymentStatus(payment.status) !== "confirmed") continue
+    if (!mayHaveBeenPaid(payment)) continue
     const at = Date.parse(payment.paid_at)
     if (Number.isFinite(at) && at >= now - windowMs) {
       paid.add(payment.counterparty.id)

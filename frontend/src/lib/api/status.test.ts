@@ -100,11 +100,11 @@ describe("an unknown payment status", () => {
     expect(receiptSummary({ status: "refunded", transparent: false })).toBe(
       "Waiting for the network to confirm.",
     )
-    // It is no one's recent payment, so it cannot hide anyone from the repay guard.
+    // It may have paid the person, so the repay guard unticks them (see plan.test.ts).
     const parsed = paymentItemSchema.parse(item("refunded"))
     expect(
       recentlyPaidIds([parsed], Date.parse("2026-09-01T13:00:00Z")).size,
-    ).toBe(0)
+    ).toBe(1)
   })
 
   it("is found by the pending filter and by no other", () => {
