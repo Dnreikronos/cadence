@@ -109,7 +109,7 @@ const cases: {
   },
   {
     title: "Supplier invoices",
-    body: "Other suppliers never learn what you pay this one.",
+    body: "Other suppliers can't see what you pay this one.",
     line: "Northwind Audit",
     amount: 9500,
     icon: ReceiptText,
@@ -123,7 +123,7 @@ const cases: {
   },
   {
     title: "Treasury balance",
-    body: "Nobody watching the chain learns what you hold. Only deposits and withdrawals are public.",
+    body: "Someone watching the chain can't read your private balance. Deposits and withdrawals are public.",
     line: "Solaris · balance",
     amount: 84000,
     icon: Landmark,

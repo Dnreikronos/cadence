@@ -1,4 +1,5 @@
 import { expect, test as base } from "@playwright/test"
+import { collectCspViolations } from "./csp"
 import { knownNoise } from "./known-noise"
 
 type Watch = {
@@ -7,6 +8,9 @@ type Watch = {
   // status and the URL it is expected for; any other console error, the same status on
   // another URL, and any uncaught page error fail the test.
   allowStatus: (status: number, url: RegExp) => void
+  // Every `securitypolicyviolation` the pages of the test raised so far, one line each (see
+  // csp.ts). The test fails on any at its end.
+  cspViolations: string[]
 }
 
 const resourceError =
@@ -18,6 +22,8 @@ export const test = base.extend<{ watch: Watch }>({
     async ({ context }, use) => {
       const allowed: { status: number; url: RegExp }[] = []
       const problems: string[] = []
+
+      const cspViolations = await collectCspViolations(context)
 
       context.on("weberror", (error) => {
         problems.push(`pageerror: ${error.error().message}`)
@@ -35,8 +41,10 @@ export const test = base.extend<{ watch: Watch }>({
 
       await use({
         allowStatus: (status, url) => allowed.push({ status, url }),
+        cspViolations,
       })
 
+      expect(cspViolations, "Content-Security-Policy violations").toEqual([])
       expect(problems, "unexpected browser errors").toEqual([])
     },
     { auto: true },

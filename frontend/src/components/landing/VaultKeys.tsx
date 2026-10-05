@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Check, Globe, Lock, Minus } from "lucide-react"
+import { Check, Globe, Info, Lock, Minus } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AvatarPerson } from "@/components/ui/avatar-person"
 import { LogoMark } from "@/components/ui/logo"
@@ -161,6 +161,9 @@ export function VaultKeys() {
                   >
                     {ability.isAllowed ? (
                       <Check className="size-3" strokeWidth={2.5} />
+                    ) : ability.isInfo ? (
+                      // A statement about how Cadence is built, not a guarantee: no denial.
+                      <Info className="size-3" strokeWidth={2.5} />
                     ) : (
                       <Minus className="size-3" strokeWidth={2.5} />
                     )}
@@ -271,7 +274,7 @@ const keyIds: Record<Perspective, string> = {
 
 const abilities: Record<
   Perspective,
-  { label: string; note: string; isAllowed: boolean }[]
+  { label: string; note: string; isAllowed: boolean; isInfo?: boolean }[]
 > = {
   company: [
     {
@@ -281,7 +284,7 @@ const abilities: Record<
     },
     {
       label: "Move funds",
-      note: "Only with a signature from Solaris' own wallet.",
+      note: "Payments are signed in Solaris' own wallet.",
       isAllowed: true,
     },
     {
@@ -319,9 +322,10 @@ const abilities: Record<
       isAllowed: false,
     },
     {
-      label: "Read without a trace",
-      note: "Every decryption is logged with who and why.",
+      label: "Audit log",
+      note: "Reads are meant to be recorded in an audit log.",
       isAllowed: false,
+      isInfo: true,
     },
   ],
   cadence: [
@@ -332,13 +336,15 @@ const abilities: Record<
     },
     {
       label: "Move funds",
-      note: "Cadence holds no signing key. Only your wallet can sign.",
+      note: "Your wallet signs every transaction. Cadence is not designed to hold your funds or store your signing key.",
       isAllowed: false,
+      isInfo: true,
     },
     {
-      label: "Read without a trace",
-      note: "Every decryption is logged with who and why.",
+      label: "Audit log",
+      note: "Cadence can read amounts. Reads are meant to be recorded in an audit log.",
       isAllowed: false,
+      isInfo: true,
     },
   ],
   public: [

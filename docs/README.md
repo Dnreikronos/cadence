@@ -38,7 +38,7 @@ repo's paths instead of these.
 
 - [Confidential payment runs](plans/2026-10-03-055-runs.md) — 2026-10-03, #55. Ordered batches with independent receipts and safe retries; three live devnet payments executed from one approval through a browser-driven Turnkey test adapter. [API contract](dev/RUNS_API.md).
 
-- [Finish the frontend, against mocks](plans/2026-10-04-frontend-completion.md) — 2026-10-04, #76 and #78 to #88. Complete except task Q (end-to-end tests, accessibility pass, docs; #126, open): every other screen is merged and runs on the mock service. The task table with PR numbers, what changed from the plan, the checklist before real signing, and the known gaps.
+- [Finish the frontend, against mocks](plans/2026-10-04-frontend-completion.md) — 2026-10-04, #76 and #78 to #88. Complete (the end-to-end suite, #126, is merged): every screen runs on the mock service. The task table with PR numbers, what changed from the plan, the checklist before going live, and the known gaps.
 
 ## Contracts
 

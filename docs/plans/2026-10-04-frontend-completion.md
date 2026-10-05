@@ -3,11 +3,11 @@
 Date: 2026-10-04. Covers #76, #78 to #88 and the gaps between them. Backend and Turnkey
 integration come after this and are out of scope here.
 
-**Status (2026-10-04, synced with `main`): complete except Q.** Every task below except
-Q is merged; Q (#126) is open, and `frontend/e2e` is not on `main`. The plan itself was
-#113 and the embedded-wallet spike it leans on was #111. Sections below the task table
-record what changed from the plan, what has to happen before real signing, and what is
-known to be missing.
+**Status (2026-10-04, synced with `main`): complete.** Every task below is merged,
+Q (#126, the end-to-end suite) included. The plan itself was #113 and the embedded-wallet
+spike it leans on was #111. Sections below the task table record what changed from the
+plan, what has to happen before going live (real signing and the security review's
+findings), and what is known to be missing.
 
 ## Goal
 
@@ -86,7 +86,7 @@ PR and are recorded there, not repeated here.
 | I   | Recipient: withdraw with the reveal-risk warning                      | #87           | `/me/withdraw`                                        | F1         | #116, merged              | Withdraw with the acknowledgement step, risk levels, and held amounts after a possible send. The held amounts are in memory only.                                                                                                                           |
 | J   | Auditor panel and access log                                          | #88           | `/audit`, `/audit/access-log`                         | F1, F2     | #117, merged              | Company payments with client-side filters, receipts and CSV export; the paged access log.                                                                                                                                                                   |
 | K   | Sign-in completion: invite acceptance, sign-out, empty states         | #76           | `(auth)`, `/auth/confirm`                             | F1         | #122, merged              | Emailed link opens a confirm page that spends the token only on a POST, invite acceptance, sign-out of this device and of all devices, `frame-ancestors 'none'` and no-store headers, and the sign-in that does not reveal whether an email has an account. |
-| Q   | End-to-end tests, accessibility and design pass, docs                 | all           | none                                                  | A to K     | #126, **open**            | Not merged. `frontend/e2e` is not on `main`, so no end-to-end test exists there yet and none is documented. The docs part is this sync of the contract, this plan, `docs/README.md` and `frontend/README.md`.                                               |
+| Q   | End-to-end tests, accessibility and design pass, docs                 | all           | none                                                  | A to K     | #126, merged              | The Playwright suite in `frontend/e2e` (it runs against the production demo build) and its `e2e` CI job, with an accessibility pass. The docs part is the sync of the contract, this plan, `docs/README.md` and `frontend/README.md`.                                               |
 
 Parallelism: F1 and F2 first, in parallel. Then A to K in parallel in separate
 worktrees; merge in the order they are green, rebasing the rest. Q last.
@@ -146,35 +146,100 @@ that needs a deployed backend.
 - **A 24-hour repay guard.** The new-run screen leaves unticked anyone with a confirmed
   payment in the last 24 hours, reading the company's payments to know.
 
-## Before real signing
+## Before going live
 
-Only the first item below is done. Real signing means the Turnkey wallet signs, the app sends the
-transaction to Solana and the real service confirms it; today every screen runs on the
-mock signer and a fake submit, and in real mode `useWallet()` is unavailable.
+Real signing means the Turnkey wallet signs, the app sends the transaction to Solana and
+the real service confirms it; today every screen runs on the mock signer and a fake
+submit, and in real mode `useWallet()` is unavailable. Going live adds what the final
+security review of the whole frontend found. The checklist is one list, in the order the
+work is likely to land; the first items are done.
+
+**Done.** Persisting submissions for withdraw and payroll; and, in the security-hardening
+PR: a stage 1 CSP and the other response headers (`src/lib/security-headers.ts`), shorter
+and `Secure`-when-https session cookies from one helper, an emailed-link origin fixed by
+`NEXT_PUBLIC_SITE_URL`, `enable_confirmations = true` in the local Supabase config, a
+cluster that production builds must name, landing copy that no longer overclaims, pinned
+Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
 
 - [x] Persist submissions for withdraw and for payroll with `src/lib/submissions.ts`, and
       check them on return as deposit and apply-pending do. Done: a reload no longer
       forgets a withdrawal or a run payment that may have landed, and signing out keeps
       them per viewer.
+- [ ] **Strict CSP, stage 2, before the wallet lands (recommended).** Stage 1 allows
+      `'unsafe-inline'` scripts. Once a session key can sign silently, an XSS is a wallet
+      drain: move to a nonce with `'strict-dynamic'` and no `unsafe-inline`, plus Trusted
+      Types if the libraries allow. It costs far less than it first looked: the app routes
+      and `/` already render per request (the viewer is read from cookies and the responses
+      are no-store), so a nonce does not take static pages away; it needs a middleware that
+      mints it and a pass over the inline scripts. Not done in the security-hardening PR,
+      and the team should confirm the date.
+- [ ] **Pre-sign transaction decoder and a program/destination allowlist.** The client
+      signs whatever the service prepares: `lib/api/sign.ts` only checks `required_signers`.
+      Decode the v1 message in the browser, check its programs and destinations against an
+      allowlist (the token program, the confidential-transfer program, the company's and
+      recipient's accounts), show the destinations in the confirm dialog, and add Turnkey
+      policies that say the same. After submitting, verify that the transaction is
+      finalized through an RPC read, not on the service's word alone.
+- [ ] **A same-origin BFF with an httpOnly cookie** instead of the script-readable
+      Supabase cookie. `@supabase/ssr` writes `httpOnly: false` because the browser client
+      reads the session (`getSession()` in `lib/api/index.ts`) to send the bearer token;
+      the cookie options are now `Secure`, `SameSite=Lax` and seven days, but any script
+      on the page can still read the token. A BFF that holds the cookie and calls the proof
+      service itself removes that. A decision, with the stage 2 CSP, for the team.
+- [ ] **Close pre-registration (a migration, then the hosted settings #100).** The app
+      has no password field, but the Auth API accepts one, and with confirmations on the
+      password an attacker registered for someone's address still works after the owner
+      confirms it by code (checked on the local stack). Clear `encrypted_password` in a
+      `BEFORE UPDATE OF email_confirmed_at` trigger on `auth.users` when the column goes
+      from null to set. The function only edits `NEW`: no `SECURITY DEFINER`, schema-qualified,
+      `REVOKE ALL ... FROM PUBLIC`. Tried by hand on the local stack in that form: the
+      attacker's login then failed and the owner's code sign-in worked. Not run against a
+      hosted database, and it needs a pgTAP test. Resetting
+      `raw_user_meta_data` in the trigger does not stick (GoTrue writes its copy back after
+      confirming), so the custom-access-token hook must never read `user_metadata`
+      (`tknonce` included): use `app_metadata` or a server-side binding. Turn off password
+      sign-in on the
+      hosted project if the dashboard has the switch. Then the rest of the **hosted
+      Supabase settings:** email confirmation on, exact redirect URLs
+      (`https://<site>/auth/confirm`, no wildcards), a short JWT expiry, and an RS256
+      signing key (the spike's verdict is conditional on it and it has not been tried).
+      Nothing has been run against a hosted project.
+- [ ] **Evidence off `sessionStorage`, and idempotency on the server.** The persisted
+      submission records (signature, block height, a withdrawal's amount) live in
+      `sessionStorage`, which script and extensions can read and a closed tab loses. Keep
+      the evidence where the service can see it, and make the service refuse a second
+      send for the same intent, instead of the client remembering to check.
+- [ ] **Block-height-based expiry** for a prepared transaction, not the 90-second clock
+      the screens count down: a slow signer or a clock that is off should not decide
+      whether a transaction can still land.
 - [ ] Get the canonical key-derivation message from the SDK (and the token account it is
       for). `keyDerivationMessage` in `src/lib/activation/message.ts` is a mock
       placeholder that throws outside mock mode. Real `signMessage` must refuse any
       other bytes.
-- [ ] Decide the Turnkey questions in the embedded-wallet spike's Security review
-      (#78, #80): passkey or OAuth as the root user, step-up for new keys and large
-      transfers, session length, recovery and export, splitting the parent key from the
-      Supabase service role, email OTP as the root of trust, and how product copy states
-      custody. See
+- [ ] **Decide the Turnkey questions** in the embedded-wallet spike's Security review
+      (#78, #80): a **passkey as the root user**, with the OAuth session as a
+      policy-limited user, and **step-up (WebAuthn)** for new signing keys and large
+      transfers; session length and an absolute maximum; recovery and export; splitting
+      the parent key from the Supabase service role; email OTP as the root of trust; and
+      how product copy states custody (the landing copy now says Cadence does not
+      *store* a signing key, not that it can never move funds). See
       [the spike](../dev/spikes/2026-10-03-embedded-wallet.md#decisions-for-the-team).
 - [ ] Replace the real-mode placeholder wallet with the Turnkey signer and a `submit`
       that sends the signed bytes to Solana, and test a real v1 transaction from a user
       session on devnet (the spike did not).
 - [ ] Build the company wallet setup screen: the Deposit screen sends no `setup`, and
       `confidential_setup_required` ends with no link.
-- [ ] Put an RS256 signing key on the hosted Supabase project (#100); the spike's
-      verdict is conditional on it and it has not been tried.
-- [ ] Set `NEXT_PUBLIC_API_MODE=real` and `NEXT_PUBLIC_PROOF_API_URL` (https) on Vercel
-      Production. The build refuses to guess, and mock mode is refused on mainnet.
+- [ ] **Production environment values:** `NEXT_PUBLIC_SOLANA_CLUSTER=mainnet`,
+      `NEXT_PUBLIC_API_MODE=real` with `NEXT_PUBLIC_PROOF_API_URL` (https; the build refuses
+      to guess and mock mode is refused on mainnet), `NEXT_PUBLIC_SITE_URL` (required with
+      Supabase), and **no** `NEXT_PUBLIC_DEV_TOOLS`. The cluster and the site URL now fail
+      the build when missing; the dev-tools switch does not fail when it is wrongly set, so
+      check it.
+- [ ] **Vercel Root Directory is `frontend/`**, and nothing else is deployed from the
+      repository.
+- [ ] **Remove `spikes/embedded-wallet/web` from `main`.** It has unauthenticated routes
+      that use the Turnkey root key, and Dependabot still watches it only because it is
+      there.
 - [ ] Reconcile the payroll client and mock with the `/runs` the backend implemented
       (#107, `docs/dev/RUNS_API.md`): token-account recipients and a sender account,
       the `aes_key`, `position`-based batch confirm, retry with amounts and the
@@ -216,6 +281,5 @@ mock signer and a fake submit, and in real mode `useWallet()` is unavailable.
 - **No service-status banner.** `api.health()` exists and no screen calls it.
 - **`/transfer` has no screen.** Payroll goes through `/runs`, so the client's `/transfer`
   and the `aes_key` it needs are never used.
-- **End-to-end tests are not on `main`.** Q (#126) is open.
 - **This sync was done by reading the code on `main`**, not by running the screens in a
   browser. The tests, reviews and browser checks of each task are in that task's PR.

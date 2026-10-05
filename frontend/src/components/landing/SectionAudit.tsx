@@ -6,7 +6,7 @@ const facts = [
   { label: "Viewing keys", value: "Encrypted at rest", icon: FileKey2 },
   {
     label: "Every decryption",
-    value: "Actor and reason logged",
+    value: "Meant to be logged",
     icon: ScrollText,
   },
 ]
@@ -20,7 +20,7 @@ export function SectionAudit() {
             index="05"
             eyebrow="For your accountant"
             title="Hidden from the world."
-            muted="Never from the books. Your auditor reads every amount, and every read, ours included, is logged."
+            muted="Never from the books. Your auditor reads every amount, and every read, ours included, is meant to be logged."
           />
           <dl className="grid grid-cols-2 border-t border-line" data-reveal>
             {facts.map((fact) => (

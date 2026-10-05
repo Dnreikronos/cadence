@@ -31,28 +31,29 @@ export const perspectives: {
     label: "Recipient",
     holder: "Bruno Costa",
     initials: "BC",
-    caption: "Sees what he was paid. Nobody else's.",
+    caption: "Sees what he was paid, not his colleagues' pay.",
   },
   {
     id: "auditor",
     label: "Auditor",
     holder: "Carla Reis",
     initials: "CR",
-    caption: "Sees every amount. Every read is logged.",
+    caption: "Sees every amount. Reads are meant to be logged.",
   },
   {
     id: "cadence",
     label: "Cadence",
     holder: "The proof service",
     initials: null,
-    caption: "Reads amounts to generate proofs. Can never move funds.",
+    caption:
+      "Reads amounts to generate proofs. Payments are signed in your wallet.",
   },
   {
     id: "public",
     label: "Public",
     holder: "Anyone with an RPC",
     initials: null,
-    caption: "Sees ciphertext. Nothing else.",
+    caption: "Sees addresses and times, and ciphertext instead of amounts.",
   },
 ]
 

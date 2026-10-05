@@ -61,6 +61,14 @@ test.describe("/audit", () => {
     await expect(dialog).toContainText("Solaris")
     await expect(dialog).toContainText("Northwind Audit")
     await expect(dialog).toContainText("$9,500.00")
+    // The link comes from the shared builder (lib/receipts/receipt.ts), which only builds
+    // one from a base58 signature, on the cluster the app runs on.
+    await expect(
+      dialog.getByRole("link", { name: /View on Solana Explorer/ }),
+    ).toHaveAttribute(
+      "href",
+      /^https:\/\/explorer\.solana\.com\/tx\/[1-9A-HJ-NP-Za-km-z]{32,128}\?cluster=devnet$/,
+    )
     await dialog.getByRole("button", { name: "Close" }).first().click()
     await expect(dialog).toBeHidden()
   })
