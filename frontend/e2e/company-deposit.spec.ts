@@ -105,6 +105,16 @@ test("a payment that arrived mid-flight is a sent apply: it is checked again, ne
   watch.allowStatus(409, /\/accounts\/apply-pending\/confirm$/)
   const section = await openDeposit(page)
   await setMock(page, "instant", "credit-mismatch")
+  // Every request that prepares an apply, whatever the screen shows afterwards.
+  const prepares: string[] = []
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/accounts/apply-pending"
+    ) {
+      prepares.push(request.url())
+    }
+  })
 
   await section.getByLabel("Amount to make private (USDC)").fill("1000")
   await section.getByRole("button", { name: "Make private" }).click()
@@ -128,6 +138,8 @@ test("a payment that arrived mid-flight is a sent apply: it is checked again, ne
 
   await clearMock(page)
   await setMock(page, "instant")
+  // Nothing prepared another apply after the failure.
+  expect(prepares).toHaveLength(1)
   await alert.getByRole("button", { name: "Check again" }).click()
 
   // The same transaction is confirmed again: nothing is prepared or wrapped a second time.
@@ -136,4 +148,6 @@ test("a payment that arrived mid-flight is a sent apply: it is checked again, ne
   )
   await expect(sidebar(page)).toContainText("$85,000.00")
   await expect(section).toContainText("$11,500.00")
+  // Checking again confirmed the same transaction: still the one apply that was prepared.
+  expect(prepares).toHaveLength(1)
 })
