@@ -42,11 +42,20 @@ describe("doneMessage", () => {
 
 describe("doneToast", () => {
   it("matches the notice", () => {
-    expect(doneToast({ amount: "2500000000" })).toBe("2500 USDC is now private")
-    expect(doneToast({ amount: "1000000", earlierPending: "200000000" })).toBe(
-      "1 USDC is now private, with your earlier pending deposit (200 USDC)",
+    expect(doneToast({ amount: "2500000000" })).toBe(
+      "Your deposit is now private",
     )
     expect(doneToast({})).toBe("Your pending USDC is now available")
+  })
+
+  it("never carries an amount, whatever was pending before", () => {
+    for (const done of [
+      { amount: "2500000000" },
+      { amount: "1000000", earlierPending: "200000000" },
+      { amount: "1000000", earlierPending: null },
+    ]) {
+      expect(doneToast(done)).not.toMatch(/\d/)
+    }
   })
 })
 
@@ -56,7 +65,7 @@ describe("an earlier pending deposit that is not known", () => {
       "1 USDC is now in your private balance, and any earlier pending deposit with it. The move itself is public on-chain.",
     )
     expect(doneToast({ amount: "1000000", earlierPending: null })).toBe(
-      "1 USDC is now private, with any earlier pending deposit",
+      "Your deposit is now private",
     )
   })
 })

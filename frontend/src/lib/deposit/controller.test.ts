@@ -15,7 +15,9 @@ import {
 } from "./controller"
 import { ConfirmTimeoutError } from "@/lib/api/sign"
 import { EXPIRY_MS } from "./reconcile"
+import { browserProfile } from "@/lib/browser-profile"
 import type { Acquired } from "@/lib/flow-lock"
+import { submissionStore } from "@/lib/submissions"
 import {
   StorageUnavailableError,
   storageBlockedMessage,
@@ -61,13 +63,15 @@ function setup(
     signAndConfirm?: Deps["signAndConfirm"]
     requireStorage?: Deps["requireStorage"]
     lock?: Deps["lock"]
+    // A store shared with other screens, in place of this one's own.
+    sharedStore?: Deps["store"]
   } = {},
 ) {
   let saved = options.saved ?? null
   let clock = 1_000_000
   const records: Submission[] = []
   const unavailable = options.storage === "unavailable"
-  const store: Deps["store"] = {
+  const store: Deps["store"] = options.sharedStore ?? {
     read: () => (unavailable ? null : saved),
     record: (record) => {
       const full = { ...record, at: record.at ?? clock }
@@ -222,7 +226,7 @@ describe("MakePrivateController", () => {
       status: "done",
       amount: "2500000000",
     })
-    expect(toast).toHaveBeenCalledWith("2500 USDC is now private")
+    expect(toast).toHaveBeenCalledWith("Your deposit is now private")
     // One refresh per confirmed transaction, so the sidebar follows each.
     expect(refresh).toHaveBeenCalledTimes(2)
     expect(saved()).toBeNull()
@@ -566,13 +570,20 @@ describe("MakePrivateController", () => {
       expect(api.wrap.prepare).toHaveBeenCalledTimes(1)
 
       // Asking from here cannot confirm what has no signature: it waits out the
-      // blockhash, then says it does not know.
+      // blockhash, then says it does not know, and holds: the record stays, and no new
+      // wrap is sent until the person releases it.
       await controller.check()
-      expect(controller.getState()).toEqual({
-        status: "resolved",
-        outcome: "unknown",
-      })
+      expect(controller.getState()).toMatchObject({ status: "held" })
+      expect(saved()).toMatchObject({ signature: null })
+      await controller.deposit("1000000")
+      expect(api.wrap.prepare).toHaveBeenCalledTimes(1)
+      expect(controller.getState()).toMatchObject({ status: "held" })
+
+      controller.release()
+      expect(controller.getState()).toEqual({ status: "idle" })
       expect(saved()).toBeNull()
+      await controller.deposit("1000000")
+      expect(api.wrap.prepare).toHaveBeenCalledTimes(2)
     })
 
     it("confirming: a transaction the network dropped is retried from the wrap and the record is cleared", async () => {
@@ -713,7 +724,7 @@ describe("MakePrivateController", () => {
           status: "done",
           amount: "1000000",
         })
-        expect(toast).toHaveBeenCalledWith("1 USDC is now private")
+        expect(toast).toHaveBeenCalledWith("Your deposit is now private")
         expect(refresh).toHaveBeenCalled()
         // Asking prepared and signed nothing.
         expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
@@ -851,9 +862,8 @@ describe("MakePrivateController", () => {
       amount: "1000000",
       earlierPending: "200000000",
     })
-    expect(toast).toHaveBeenCalledWith(
-      "1 USDC is now private, with your earlier pending deposit (200 USDC)",
-    )
+    // The toast has no amount; the notice on the page says what it covers.
+    expect(toast).toHaveBeenCalledWith("Your deposit is now private")
   })
 
   it("does not claim an earlier credit when none was pending", async () => {
@@ -874,9 +884,7 @@ describe("MakePrivateController", () => {
       amount: "1000000",
       earlierPending: null,
     })
-    expect(toast).toHaveBeenCalledWith(
-      "1 USDC is now private, with any earlier pending deposit",
-    )
+    expect(toast).toHaveBeenCalledWith("Your deposit is now private")
   })
 
   it("keeps what was pending in the record, for a deposit picked up after a reload", async () => {
@@ -1209,5 +1217,155 @@ describe("MakePrivateController across tabs", () => {
 
       expect(harness.api.wrap.confirm).toHaveBeenCalledTimes(1)
     })
+  })
+})
+
+// A wrap whose outcome cannot be told is held in every tab of the browser, like a
+// withdrawal: the record stays, nothing new is sent, and a release anywhere frees them all.
+describe("MakePrivateController: an unknown outcome held across tabs", () => {
+  const viewer = { company: "Solaris", email: "ana@solaris.test" }
+  const SAVED: Submission = {
+    kind: "wrap",
+    request_id: prepared("a").request_id,
+    signature: SIG,
+    last_valid_block_height: 500,
+    wallet: COMPANY_WALLET,
+    at: 1_000_000,
+  }
+
+  // Two screens of one browser: the same store, each tab with its own view of it, told of
+  // the other's writes, and a controller wired to hear it as the screen does.
+  function twoTabs(seed: Submission | null = SAVED) {
+    const profile = browserProfile()
+    const storeA = submissionStore("wrap", viewer, profile.tab())
+    const storeB = submissionStore("wrap", viewer, profile.tab())
+    if (seed) storeA.record(seed)
+    const a = setup({ sharedStore: storeA })
+    const b = setup({ sharedStore: storeB })
+    // 404: the service has no record of it, which says nothing about whether it landed.
+    for (const tab of [a, b]) {
+      tab.api.wrap.confirm.mockRejectedValue(
+        new ApiError(404, "wrap_not_found"),
+      )
+    }
+    storeA.subscribe(() => a.controller.storeChanged())
+    storeB.subscribe(() => b.controller.storeChanged())
+    return { a, b, storeA, storeB }
+  }
+
+  const settle = (controller: MakePrivateController, status: string) =>
+    vi.waitFor(() => expect(controller.getState().status).toBe(status))
+
+  it("keeps the record, and says so, when the outcome cannot be told", async () => {
+    const { a, storeA } = twoTabs()
+
+    a.controller.start()
+    await settle(a.controller, "held")
+
+    expect(a.controller.getState()).toMatchObject({
+      status: "held",
+      at: SAVED.at,
+    })
+    expect(storeA.read()).toMatchObject({ request_id: SAVED.request_id })
+    expect(a.controller.inFlight).toBe(false)
+  })
+
+  it("holds the second tab too, which sends nothing", async () => {
+    const { a, b } = twoTabs()
+    a.controller.start()
+    await settle(a.controller, "held")
+
+    b.controller.start()
+    await settle(b.controller, "held")
+    await b.controller.deposit("1000000")
+    await b.controller.applyPending()
+
+    expect(b.api.wrap.prepare).not.toHaveBeenCalled()
+    expect(b.wallet.submit).not.toHaveBeenCalled()
+    expect(b.controller.getState()).toMatchObject({ status: "held" })
+  })
+
+  it("is released in every tab by a release in one", async () => {
+    const { a, b, storeB } = twoTabs()
+    a.controller.start()
+    b.controller.start()
+    await settle(a.controller, "held")
+    await settle(b.controller, "held")
+
+    a.controller.release()
+
+    expect(a.controller.getState()).toEqual({ status: "idle" })
+    expect(storeB.read()).toBeNull()
+    // The other tab hears the record go and lets go of its hold.
+    expect(b.controller.getState()).toEqual({ status: "idle" })
+    // And can send: nothing is held any more.
+    await b.controller.deposit("1000000")
+    expect(b.api.wrap.prepare).toHaveBeenCalledTimes(1)
+    expect(a.api.wrap.prepare).not.toHaveBeenCalled()
+  })
+
+  it("looks into a wrap another tab sends after this one opened, and holds when it cannot tell", async () => {
+    const { a, b, storeA } = twoTabs(null)
+    expect(b.controller.getState()).toEqual({ status: "idle" })
+
+    storeA.record(SAVED)
+
+    await settle(b.controller, "held")
+    expect(b.api.wrap.prepare).not.toHaveBeenCalled()
+    // The tab that wrote it is not told to look at its own record.
+    expect(a.controller.getState()).toEqual({ status: "idle" })
+  })
+
+  it("is let go in the other tab when the wrap is found confirmed there", async () => {
+    const { a, b } = twoTabs()
+    a.controller.start()
+    b.controller.start()
+    await settle(a.controller, "held")
+    await settle(b.controller, "held")
+
+    a.api.wrap.confirm.mockReset().mockResolvedValue(receipt("a"))
+    await a.controller.check()
+    await settle(a.controller, "resolved")
+
+    expect(a.controller.getState()).toMatchObject({
+      status: "resolved",
+      outcome: "confirmed",
+    })
+    expect(b.controller.getState()).toEqual({ status: "idle" })
+  })
+
+  it("can be asked about again from a held tab", async () => {
+    const { a } = twoTabs()
+    a.controller.start()
+    await settle(a.controller, "held")
+
+    a.api.wrap.confirm
+      .mockReset()
+      .mockRejectedValue(new ApiError(409, "transaction_failed"))
+    await a.controller.check()
+
+    expect(a.controller.getState()).toMatchObject({
+      status: "resolved",
+      outcome: "failed",
+    })
+  })
+
+  it("releases nothing unless it is held, and not while it is working", async () => {
+    const { a, storeA } = twoTabs()
+    a.controller.release()
+    expect(storeA.read()).not.toBeNull()
+
+    const fresh = setup()
+    fresh.controller.release()
+    expect(fresh.controller.getState()).toEqual({ status: "idle" })
+  })
+
+  it("ignores another wallet's record", async () => {
+    const { b, storeA } = twoTabs(null)
+    storeA.record({
+      ...SAVED,
+      wallet: "SomeOtherWallet1111111111111111111111111111",
+    })
+    expect(b.controller.getState()).toEqual({ status: "idle" })
   })
 })

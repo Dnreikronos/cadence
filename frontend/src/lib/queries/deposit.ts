@@ -94,8 +94,13 @@ export function useMakePrivate(wallet: string, viewer: ViewerScope) {
 
   useEffect(() => {
     controller.start()
-    return () => controller.dispose()
-  }, [controller])
+    // Another tab's change to the saved wrap: a hold released there, or a wrap sent there.
+    const stopWatching = store.subscribe(() => controller.storeChanged())
+    return () => {
+      stopWatching()
+      controller.dispose()
+    }
+  }, [controller, store])
 
   // A sent wrap is not undone by leaving: say so before the tab closes.
   const inFlight = controller.inFlight
@@ -115,5 +120,6 @@ export function useMakePrivate(wallet: string, viewer: ViewerScope) {
     check: () => controller.check(),
     checkAgain: () => controller.checkAgain(),
     dismiss: () => controller.dismiss(),
+    release: () => controller.release(),
   }
 }

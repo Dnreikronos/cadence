@@ -46,12 +46,17 @@ export type MakePrivateState =
     }
   // `amount` is absent when only a pending credit was made available.
   | { status: "done"; amount?: string; earlierPending?: EarlierPending }
-  // What the check of an earlier wrap found. Informational: the form is free.
+  // What the check of an earlier wrap found, when it could be told. Informational: the
+  // form is free.
   | {
       status: "resolved"
-      outcome: Reconciled
+      outcome: Exclude<Reconciled, "unknown">
       earlierPending?: EarlierPending
     }
+  // The earlier wrap's outcome cannot be told: its record stays, in every tab, and nothing
+  // new is sent until the person has checked and released it (`release`, offered two
+  // minutes after the send, `at`).
+  | { status: "held"; at: number; earlierPending?: EarlierPending }
 
 export type Deps = {
   wallet: string
@@ -67,6 +72,8 @@ export type Deps = {
     read: () => Submission | null
     record: (record: Omit<Submission, "at"> & { at?: number }) => Submission
     clear: () => void
+    // Told when another tab saves or clears the record (`submissionStore`).
+    subscribe?: (listener: () => void) => () => void
   }
   // Throws when a record of the send cannot be kept and the mode forbids sending without
   // one (`requireDurable`): asked before a flow starts, and again right after the record
@@ -239,6 +246,39 @@ export class MakePrivateController {
     }
   }
 
+  // The person's decision, after checking both balances and their history: the held wrap
+  // is let go, in every tab (they read the same record), and a new deposit may be sent.
+  release() {
+    if (this.running || this.state.status !== "held") return
+    const deps = this.getDeps()
+    deps.store.clear()
+    deps.refresh()
+    this.set({ status: "idle" })
+  }
+
+  // Another tab saved or cleared the wrap's record. A hold released there is released
+  // here; a wrap sent there is looked into here (and waits for that tab's lock).
+  storeChanged() {
+    if (this.running) return
+    const { store, wallet, refresh } = this.getDeps()
+    const record = store.read()
+    const mine = record !== null && record.wallet === wallet
+    const { status } = this.state
+    if (status === "held" && !mine) {
+      refresh()
+      this.set({ status: "idle" })
+    } else if (
+      mine &&
+      (status === "idle" ||
+        status === "resolved" ||
+        status === "done" ||
+        status === "other-tab")
+    ) {
+      this.set({ status: "checking" })
+      void this.reconcile()
+    }
+  }
+
   dismiss() {
     if (this.running) return
     this.sentApply = null
@@ -261,6 +301,9 @@ export class MakePrivateController {
 
   private begin(from: "wrap" | "apply") {
     if (this.running || this.state.status === "checking") return
+    // Nothing is sent while an earlier wrap is held: not another wrap, and not an apply
+    // on top of a credit nobody can account for.
+    if (this.state.status === "held") return
     // A wrap sent and not seen through blocks another, whatever the screen shows. One
     // that another tab saved since this screen opened is looked into the same way.
     if (from === "wrap") {
@@ -487,8 +530,17 @@ export class MakePrivateController {
         sleep: deps.sleep,
       })
       if (!this.live(generation)) return
-      deps.store.clear()
       deps.refresh()
+      if (outcome === "unknown") {
+        // It may have landed: the record stays, and so does the hold.
+        this.set({
+          status: "held",
+          at: current.at,
+          earlierPending: earlierFromRecord(current.earlier_pending),
+        })
+        return
+      }
+      deps.store.clear()
       this.set({
         status: "resolved",
         outcome,

@@ -33,10 +33,11 @@ export function doneMessage({ amount, earlierPending }: Done): string {
   return `${describeUsdc(amount)} is now in your private balance${also ? `, and ${also} with it` : ""}. The move itself is public on-chain.`
 }
 
-export function doneToast({ amount, earlierPending }: Done): string {
-  if (!amount) return "Your pending USDC is now available"
-  const also = alongside(earlierPending)
-  return `${describeUsdc(amount)} is now private${also ? `, with ${also}` : ""}`
+// No amount in a toast, as everywhere else: it stays in the notice on the page.
+export function doneToast({ amount }: Done): string {
+  return amount
+    ? "Your deposit is now private"
+    : "Your pending USDC is now available"
 }
 
 // A deposit found confirmed after a reload: it may still be pending, and so may what was
