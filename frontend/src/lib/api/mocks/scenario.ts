@@ -22,6 +22,8 @@ export const scenarioNames = [
   "credit-mismatch",
   // The chain read behind the public USDC balance fails (not a proof-service call).
   "rpc-down",
+  // The wallet refuses to sign, as when the person cancels the prompt: nothing is sent.
+  "sign-cancelled",
 ] as const
 export type Scenario = (typeof scenarioNames)[number]
 

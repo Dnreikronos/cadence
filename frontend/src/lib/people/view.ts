@@ -68,11 +68,19 @@ export function summarize(
 
 // Whether an auditor can read the company's amounts, for the "who can see this"
 // sentence. Unknown (still loading, failed, or a partial list with none active)
-// is undefined, which makes the sentence the longer one, never "no auditor".
+// is undefined, which makes the sentence the longer one, never "no auditor". A row
+// whose status the app does not know counts as a reader, like an active one.
 export function hasActiveAuditor(
-  list: { rows: readonly { status: string }[]; truncated: boolean } | undefined,
+  list:
+    | {
+        rows: readonly { status: string; unrecognized?: boolean }[]
+        truncated: boolean
+      }
+    | undefined,
 ): boolean | undefined {
   if (!list) return undefined
-  if (list.rows.some((row) => row.status === "active")) return true
+  if (list.rows.some((row) => row.status === "active" || row.unrecognized)) {
+    return true
+  }
   return list.truncated ? undefined : false
 }

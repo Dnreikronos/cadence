@@ -12,6 +12,7 @@ import {
   maxRunPayments,
   payLabel,
   recentWindowMs,
+  mayHaveBeenPaid,
   recentlyPaidIds,
   repaid,
   runTotal,
@@ -205,6 +206,49 @@ describe("recentlyPaidIds", () => {
       now,
     )
     expect(ids.size).toBe(0)
+  })
+
+  describe("a payment that may have paid the person", () => {
+    const ids = (status: string, signature: string | null = null) =>
+      recentlyPaidIds(
+        [{ ...payment(1, "confirmed", 1), status, signature }],
+        now,
+      )
+
+    it.each([
+      "confirmed",
+      "finalized",
+      "signed",
+      "prepared",
+      "expired",
+      "refunded",
+    ])("counts %s, so the person is not ticked again", (status) => {
+      expect([...ids(status)]).toEqual([guid(1)])
+    })
+
+    it("counts a pending payment that has a signature, since it may be on the network", () => {
+      expect(ids("pending", "5Sig").size).toBe(1)
+    })
+
+    it("leaves out only what is known not to have moved money", () => {
+      expect(ids("failed").size).toBe(0)
+      expect(ids("failed", "5Sig").size).toBe(0)
+      // Created in this session, nothing signed yet.
+      expect(ids("pending").size).toBe(0)
+    })
+
+    it("still holds an unknown status to the 24-hour window", () => {
+      const old = { ...payment(1, "confirmed", 25), status: "finalized" }
+      expect(recentlyPaidIds([old], now).size).toBe(0)
+    })
+
+    it("names the same rule on its own", () => {
+      expect(mayHaveBeenPaid({ status: "finalized" })).toBe(true)
+      expect(mayHaveBeenPaid({ status: "failed" })).toBe(false)
+      expect(mayHaveBeenPaid({ status: "pending", signature: null })).toBe(
+        false,
+      )
+    })
   })
 
   it("counts the person once however many payments they got", () => {

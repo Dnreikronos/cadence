@@ -14,7 +14,8 @@ import {
   type RunApi,
   type RunContext,
 } from "./executor"
-import { describeFailure } from "./messages"
+import { createHeldStore } from "./held"
+import { holdingRetries, runEvents, signAgain } from "./sign-again"
 import { localReducer } from "./progress"
 
 const runApi: RunApi = {
@@ -32,6 +33,9 @@ export function useRunSigner() {
   const queryClient = useQueryClient()
   const [local, dispatch] = useReducer(localReducer, {})
   const [busy, setBusy] = useState(false)
+  // Cancelled signatures: the prepared transactions, kept in memory so the same one is
+  // signed again (see `held.ts`). Not state: a change to it always comes with a dispatch.
+  const [held] = useState(createHeldStore)
   const working = useRef(false)
   const controller = useRef<AbortController | null>(null)
 
@@ -54,43 +58,45 @@ export function useRunSigner() {
         await task({
           runId,
           sign,
-          api: runApi,
+          api: holdingRetries(runApi, held),
           signal: controller.current?.signal,
-          events: {
-            signing: (id) => dispatch({ type: "signing", id }),
-            waiting: (id) => dispatch({ type: "waiting", id }),
-            submitted: (id, signature) =>
-              dispatch({ type: "submitted", id, signature }),
-            confirmed: (id) => {
-              dispatch({ type: "confirmed", id })
-              // Money moved: the sidebar balance and the payment lists are stale.
+          events: runEvents(held, dispatch, {
+            // Money moved: the sidebar balance and the payment lists are stale.
+            confirmed: () => {
               void invalidateBalances(queryClient)
               void queryClient.invalidateQueries({
                 queryKey: queryKeys.payments.all,
               })
               void refreshRun()
             },
-            failed: (id, error) => {
-              dispatch({ type: "failed", id, ...describeFailure(error) })
-              void refreshRun()
-            },
-          },
+            failed: () => void refreshRun(),
+          }),
         })
       } finally {
         working.current = false
         setBusy(false)
       }
     },
-    [sign, queryClient],
+    [sign, queryClient, held],
   )
 
   return {
     wallet,
     local,
     busy,
-    start: (created: RunCreated) =>
-      exclusive(created.run_id, (context) =>
+    start: (created: RunCreated) => {
+      held.holdAll(created.payments)
+      return exclusive(created.run_id, (context) =>
         paySequence(context, created.payments),
+      )
+    },
+    // Whether this page still holds the transaction of a cancelled signature.
+    canSignAgain: (paymentId: string) => held.has(paymentId),
+    // Signs the held transaction again, without preparing a new one. Past its blockhash
+    // it is dropped and the payment is shown as failed, so the normal retry applies.
+    signAgain: (runId: string, paymentId: string) =>
+      exclusive(runId, (context) =>
+        signAgain(context, held, dispatch, paymentId),
       ),
     retry: (runId: string, paymentId: string) =>
       exclusive(runId, (context) => retryOne(context, paymentId)),

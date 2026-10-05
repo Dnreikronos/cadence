@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest"
-import { expiredMessage } from "./messages"
+import { expiredMessage, unrecognizedMessage } from "./messages"
 import {
   canRecheck,
   canRetry,
+  canSignAgain,
   holdsUnconfirmed,
   isSettled,
   localReducer,
@@ -249,6 +250,8 @@ describe("what can be done to a row", () => {
     "signing",
     "waiting",
     "unknown",
+    "cancelled",
+    "unrecognized",
     "confirmed",
     "failed",
     "expired",
@@ -297,32 +300,169 @@ describe("what can be done to a row", () => {
       total: 8,
       confirmed: 2,
       retryable: 2,
+      cancelled: 0,
+      unrecognized: 0,
       sent: 2,
       attention: 4,
       open: 2,
     })
   })
-})
 
-describe("holdsUnconfirmed", () => {
-  it("is true while a payment is signing, waiting or of unknown outcome", () => {
-    expect(holdsUnconfirmed({ a: { status: "signing" } })).toBe(true)
-    expect(holdsUnconfirmed({ a: { status: "waiting" } })).toBe(true)
-    expect(
-      holdsUnconfirmed({
-        a: { status: "waiting", stalled: true, signature: SIGNATURE },
-      }),
-    ).toBe(true)
-    expect(holdsUnconfirmed({ a: { status: "unknown" } })).toBe(true)
+  it("counts a cancelled signature as needing attention, not as open or retryable", () => {
+    expect(tally([row("confirmed"), row("cancelled"), row("pending")])).toEqual(
+      {
+        total: 3,
+        confirmed: 1,
+        retryable: 0,
+        cancelled: 1,
+        unrecognized: 0,
+        sent: 0,
+        attention: 1,
+        open: 1,
+      },
+    )
   })
 
-  it("is false once every payment is settled one way or the other", () => {
-    expect(holdsUnconfirmed({})).toBe(false)
+  it("offers `sign again` only for a cancelled signature, and never a retry with it", () => {
+    expect(all.filter((status) => canSignAgain(row(status)))).toEqual([
+      "cancelled",
+    ])
+    expect(canRetry(row("cancelled"))).toBe(false)
+    expect(canRecheck(row("cancelled"))).toBe(false)
+    expect(isSettled("cancelled")).toBe(false)
+  })
+})
+
+describe("a cancelled signature", () => {
+  const message = "You cancelled the signature. Nothing was sent."
+  const cancelled = play(
+    { type: "signing", id: ID },
+    { type: "failed", id: ID, message, sent: false, cancelled: true },
+  )
+
+  it("is its own row, not a failure", () => {
+    expect(cancelled[ID]).toEqual({ status: "cancelled", message })
     expect(
-      holdsUnconfirmed({
-        a: { status: "confirmed" },
-        b: { status: "failed", message: "x" },
-      }),
-    ).toBe(false)
+      mergeRow(cancelled[ID], { status: "pending", failure: null }),
+    ).toEqual({ status: "cancelled", message, stalled: false, signature: null })
+  })
+
+  it("is an ordinary failure when it was not a refusal", () => {
+    const failed = play({
+      type: "failed",
+      id: ID,
+      message: "x",
+      sent: false,
+      cancelled: false,
+    })
+    expect(failed[ID].status).toBe("failed")
+  })
+
+  it("never turns a payment that may have been sent into one that can be signed again", () => {
+    const sent = play(
+      { type: "submitted", id: ID, signature: SIGNATURE },
+      { type: "failed", id: ID, message: "x", sent: true, cancelled: true },
+    )
+    expect(sent[ID].status).toBe("waiting")
+    expect(sent[ID].stalled).toBe(true)
+  })
+
+  it("gives way to the server's final answer, and to a confirmation", () => {
+    expect(
+      mergeRow(cancelled[ID], { status: "confirmed", failure: null }).status,
+    ).toBe("confirmed")
+    expect(
+      mergeRow(cancelled[ID], { status: "expired", failure: null }).status,
+    ).toBe("expired")
+    const failed = mergeRow(cancelled[ID], {
+      status: "failed",
+      failure: "transaction_failed",
+    })
+    expect(failed.status).toBe("failed")
+    // The cancelled text is not carried over to a payment that did fail.
+    expect(failed.message).not.toBe(message)
+    // Anything else the server says leaves it cancelled.
+    expect(
+      mergeRow(cancelled[ID], { status: "signed", failure: null }).status,
+    ).toBe("cancelled")
+  })
+
+  it("keeps the leave guard up, because the held transaction dies with the page", () => {
+    expect(holdsUnconfirmed(cancelled)).toBe(true)
+  })
+
+  it("is signing again from the moment it is tried, and confirmed when it lands", () => {
+    const again = localReducer(cancelled, { type: "signing", id: ID })
+    expect(again[ID]).toEqual({ status: "signing" })
+    expect(localReducer(again, { type: "confirmed", id: ID })[ID].status).toBe(
+      "confirmed",
+    )
+  })
+})
+
+describe("an unknown status from the service", () => {
+  const unknown = { status: "finalized", failure: null }
+
+  it("is its own row, not pending, and says the status is unknown", () => {
+    expect(mergeRow(undefined, unknown)).toEqual({
+      status: "unrecognized",
+      message: unrecognizedMessage,
+      stalled: false,
+      signature: null,
+    })
+    expect(
+      mergeRow(undefined, { status: "Confirmed", failure: null }).status,
+    ).toBe("unrecognized")
+    expect(unrecognizedMessage).toMatch(/Status unknown/)
+  })
+
+  it("offers nothing: no retry, no sign again, no check, and it is not pending", () => {
+    const row = mergeRow(undefined, { status: "reversed", failure: "x" })
+    expect(canRetry(row)).toBe(false)
+    expect(canSignAgain(row)).toBe(false)
+    expect(canRecheck(row)).toBe(false)
+    expect(row.status).not.toBe("confirmed")
+    expect(row.status).not.toBe("pending")
+  })
+
+  it("is not settled, and needs attention rather than counting as open", () => {
+    expect(isSettled("unrecognized")).toBe(false)
+    expect(
+      tally([
+        mergeRow(undefined, unknown),
+        mergeRow(undefined, { status: "pending", failure: null }),
+      ]),
+    ).toMatchObject({ unrecognized: 1, attention: 1, open: 1, retryable: 0 })
+  })
+
+  it("beats a cancelled signature and a failure seen here, since it may be in flight", () => {
+    const cancelled = play({
+      type: "failed",
+      id: ID,
+      message: "x",
+      sent: false,
+      cancelled: true,
+    })
+    expect(mergeRow(cancelled[ID], unknown).status).toBe("unrecognized")
+    expect(mergeRow({ status: "failed", message: "x" }, unknown).status).toBe(
+      "unrecognized",
+    )
+  })
+
+  it("does not overwrite what this browser is doing or has seen confirmed", () => {
+    expect(mergeRow({ status: "signing" }, unknown).status).toBe("signing")
+    expect(mergeRow({ status: "confirmed" }, unknown).status).toBe("confirmed")
+    expect(
+      mergeRow(
+        { status: "waiting", stalled: true, signature: SIGNATURE },
+        unknown,
+      ),
+    ).toMatchObject({ status: "waiting", stalled: true })
+  })
+
+  it("leaves `signed` as the pending it has always been", () => {
+    expect(
+      mergeRow(undefined, { status: "signed", failure: null }).status,
+    ).toBe("pending")
   })
 })

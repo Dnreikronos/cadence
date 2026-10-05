@@ -6,7 +6,9 @@ import {
   MakePrivateError,
   needsSetup,
   runMakePrivate,
+  sentApplyMessage,
   type Resume,
+  type SentApply,
 } from "./make-private"
 import {
   doneToast,
@@ -32,6 +34,9 @@ export type MakePrivateState =
       message: string
       setupRequired: boolean
       retryable: boolean
+      // An apply went out and was not seen through, and its signature is known: it
+      // can be asked about again (`checkAgain`), which prepares nothing.
+      recheck: boolean
     }
   // `amount` is absent when only a pending credit was made available.
   | { status: "done"; amount?: string; earlierPending?: EarlierPending }
@@ -75,6 +80,8 @@ export class MakePrivateController {
   // What was already pending when that deposit started.
   private earlierPending: EarlierPending = null
   private record: Submission | null = null
+  // The apply that went out and was not seen through, when there is one.
+  private sentApply: (SentApply & { at: number }) | null = null
   // Whatever is running now; a stale run never touches the state or the flag.
   private generation = 0
 
@@ -143,11 +150,87 @@ export class MakePrivateController {
       return this.reconcile()
     }
     this.getDeps().refresh()
+    this.sentApply = null
     this.set({ status: "idle" })
+  }
+
+  // After an apply that went out, when its signature is known: ask the service about
+  // that same transaction again, which prepares nothing. Only the network dropping it
+  // (or a blockhash that ran out with the service never seeing it) lets another apply
+  // be offered; anything unclear stays a check.
+  async checkAgain() {
+    const sent = this.sentApply
+    if (this.running || this.state.status !== "failed") return
+    if (!sent?.signature) return
+    const deps = this.getDeps()
+    const generation = ++this.generation
+    const abort = new AbortController()
+    this.abort = abort
+    this.running = true
+    this.set({ status: "checking" })
+    const failed = (message: string, resume: Resume, retryable: boolean) =>
+      this.set({
+        status: "failed",
+        step: "applying",
+        resume,
+        message,
+        setupRequired: false,
+        retryable,
+        recheck: resume === "check",
+      })
+    try {
+      const outcome = await reconcileWrap({
+        record: {
+          kind: "apply-pending",
+          request_id: sent.request_id,
+          signature: sent.signature,
+          last_valid_block_height: 0,
+          wallet: deps.wallet,
+          at: sent.at,
+        },
+        // Only the confirm call is read, and it is the apply's own.
+        api: { wrap: { confirm: deps.api.accounts.confirmApplyPending } },
+        signal: abort.signal,
+        now: deps.now,
+        sleep: deps.sleep,
+      })
+      if (!this.live(generation)) return
+      deps.refresh()
+      if (outcome === "unknown") {
+        failed(sentApplyMessage, "check", false)
+        return
+      }
+      this.sentApply = null
+      if (outcome === "failed") {
+        failed(
+          "Making your deposit available didn't go through. You can try again.",
+          "apply",
+          true,
+        )
+        return
+      }
+      const done = {
+        amount: this.amount || undefined,
+        earlierPending: this.amount ? this.earlierPending : undefined,
+      }
+      deps.toast(doneToast(done))
+      this.set({ status: "done", ...done })
+    } catch {
+      if (!this.live(generation) || abort.signal.aborted) return
+      // The service could not be asked: it stays a check, with the signature kept.
+      failed(
+        "We couldn't check your deposit. Try again in a moment.",
+        "check",
+        false,
+      )
+    } finally {
+      if (this.live(generation)) this.running = false
+    }
   }
 
   dismiss() {
     if (this.running) return
+    this.sentApply = null
     this.set({ status: "idle" })
   }
 
@@ -172,6 +255,9 @@ export class MakePrivateController {
       const { store, wallet } = this.getDeps()
       if (store.read()?.wallet === wallet) return
     }
+    // An apply that went out is looked into first, whatever the screen shows.
+    if (from === "apply" && this.sentApply) return
+    this.sentApply = null
     const generation = ++this.generation
     const abort = new AbortController()
     this.abort = abort
@@ -246,6 +332,11 @@ export class MakePrivateController {
       // Only an outcome that cannot be told keeps the record; otherwise nothing
       // is in flight and a stale record would block the next deposit.
       if (failure.resume !== "check") store.clear()
+      // An apply that went out is kept in memory, to ask about it again. Unlike the
+      // wrap it is not persisted: a reload forgets it, and the balances tell.
+      this.sentApply = failure.sent
+        ? { ...failure.sent, at: (deps.now ?? Date.now)() }
+        : null
       this.set({
         status: "failed",
         step: failure.step,
@@ -253,6 +344,7 @@ export class MakePrivateController {
         message: failureMessage(failure),
         setupRequired: needsSetup(failure),
         retryable: canRetry(failure),
+        recheck: !!failure.sent?.signature,
       })
     } finally {
       if (this.live(generation)) this.running = false
@@ -298,6 +390,7 @@ export class MakePrivateController {
         message: "We couldn't check your last deposit. Try again in a moment.",
         setupRequired: false,
         retryable: false,
+        recheck: false,
       })
     } finally {
       if (this.live(generation)) this.running = false

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { removalCopy } from "./copy"
+import { removalCopy, removalKind } from "./copy"
 
 // The exact words, so a change to what the admin is told is a visible change here.
 describe("removalCopy", () => {
@@ -37,5 +37,30 @@ describe("removalCopy", () => {
       done: "Expired invite removed for",
       action: "Remove expired invite for",
     })
+  })
+
+  it("does not call an unrecognized row an invite, nor promise that access ends at once", () => {
+    const copy = removalCopy("unrecognized")
+    expect(copy).toEqual({
+      description:
+        "If they have access, it ends when the service processes the removal.",
+      keep: "Keep",
+      confirm: "Remove auditor",
+      pending: "Removing…",
+      done: "Removal requested for",
+      action: "Remove auditor",
+    })
+    expect(Object.values(copy).join(" ")).not.toMatch(/invite|accepted/i)
+  })
+})
+
+describe("removalKind", () => {
+  it("is the status of a row the app knows, and its own kind for one it does not", () => {
+    expect(removalKind({ status: "active" })).toBe("active")
+    expect(removalKind({ status: "invite-expired" })).toBe("invite-expired")
+    // An unknown status is stored as "invited", but must not read as one.
+    expect(removalKind({ status: "invited", unrecognized: true })).toBe(
+      "unrecognized",
+    )
   })
 })

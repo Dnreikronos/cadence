@@ -20,6 +20,7 @@ import { ApiError } from "@/lib/api/errors"
 import { db, resetDb, type MockAuditor } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
+import { hasActiveAuditor } from "@/lib/people/view"
 import {
   MAX_PAGES,
   MUTATION_TIMEOUT_MS,
@@ -125,6 +126,22 @@ describe("listAllAuditors", () => {
     )
     const { rows } = await listAllAuditors(client)
     expect(rows[0].status).toBe("invited")
+  })
+
+  it("marks a status it does not know, so the who-can-see sentence counts a reader", async () => {
+    server.use(
+      http.get(listUrl, () =>
+        HttpResponse.json({
+          items: [item(1, "suspended"), item(2, "invited")],
+          next_cursor: null,
+        }),
+      ),
+    )
+    const list = await listAllAuditors(client)
+    expect(list.rows[0].unrecognized).toBe(true)
+    // A known status is left as it was sent.
+    expect("unrecognized" in list.rows[1]).toBe(false)
+    expect(hasActiveAuditor(list)).toBe(true)
   })
 
   it("lists an id once when pages overlap", async () => {
@@ -391,6 +408,34 @@ describe("revokeAuditorMutation", () => {
 
     expect(toast.success).toHaveBeenCalledExactlyOnceWith(
       `Invite cancelled for ${paulo.email}`,
+    )
+  })
+
+  it("words the toast for an unrecognized row as a requested removal", async () => {
+    // The list shows the row as it was read: the service sends a status the app does not know.
+    server.use(
+      http.get(listUrl, () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: paulo.id,
+              email: paulo.email,
+              status: "suspended",
+              invited_at: paulo.invitedAt,
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+    )
+
+    await observerFor(cachedList()).mutate({
+      ...row(paulo, "invited"),
+      unrecognized: true,
+    })
+
+    expect(toast.success).toHaveBeenCalledExactlyOnceWith(
+      `Removal requested for ${paulo.email}`,
     )
   })
 
