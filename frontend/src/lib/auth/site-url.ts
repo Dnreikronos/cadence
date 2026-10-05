@@ -8,7 +8,7 @@ type SiteUrlEnv = {
   nodeEnv?: string
 }
 
-// The same rule as the proof service's URL: plain http only for a local host.
+// Plain http only for a local host, and never in a production build.
 const plainHttpHosts = new Set(["localhost", "127.0.0.1", "[::1]"])
 
 // The origin the emailed sign-in link points at. It must not come from the request: the
@@ -34,10 +34,15 @@ export function readSiteUrl(env: SiteUrlEnv): string | null {
     )
   }
   const { protocol, hostname, origin } = new URL(parsed.data)
-  const local = protocol === "http:" && plainHttpHosts.has(hostname)
+  // A production build is served over https whatever it is called, so plain http is
+  // for `next dev` and tests on a local host only.
+  const local =
+    protocol === "http:" &&
+    plainHttpHosts.has(hostname) &&
+    env.nodeEnv !== "production"
   if (protocol !== "https:" && !local) {
     throw new Error(
-      "NEXT_PUBLIC_SITE_URL must use https unless it points at localhost",
+      "NEXT_PUBLIC_SITE_URL must use https (http only for localhost outside a production build)",
     )
   }
   return origin

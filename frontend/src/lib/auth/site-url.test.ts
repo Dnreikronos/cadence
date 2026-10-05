@@ -51,12 +51,19 @@ describe("readSiteUrl", () => {
     ).toThrow(/NEXT_PUBLIC_SITE_URL must be a URL/)
   })
 
-  it("requires https unless the host is local", () => {
+  it("requires https, except for a local host outside a production build", () => {
     expect(() =>
       readSiteUrl({
         siteUrl: "http://app.example.com",
         supabaseConfigured: true,
         nodeEnv: "production",
+      }),
+    ).toThrow(/must use https/)
+    expect(() =>
+      readSiteUrl({
+        siteUrl: "http://app.example.com",
+        supabaseConfigured: true,
+        nodeEnv: "development",
       }),
     ).toThrow(/must use https/)
     expect(
@@ -66,6 +73,18 @@ describe("readSiteUrl", () => {
         nodeEnv: "development",
       }),
     ).toBe("http://localhost:3000")
+  })
+
+  it("refuses http even for localhost in a production build", () => {
+    for (const siteUrl of ["http://localhost:3000", "http://127.0.0.1:3000"]) {
+      expect(() =>
+        readSiteUrl({
+          siteUrl,
+          supabaseConfigured: true,
+          nodeEnv: "production",
+        }),
+      ).toThrow(/must use https/)
+    }
   })
 })
 
