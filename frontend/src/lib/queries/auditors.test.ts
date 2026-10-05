@@ -411,6 +411,34 @@ describe("revokeAuditorMutation", () => {
     )
   })
 
+  it("words the toast for an unrecognized row as a requested removal", async () => {
+    // The list shows the row as it was read: the service sends a status the app does not know.
+    server.use(
+      http.get(listUrl, () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: paulo.id,
+              email: paulo.email,
+              status: "suspended",
+              invited_at: paulo.invitedAt,
+            },
+          ],
+          next_cursor: null,
+        }),
+      ),
+    )
+
+    await observerFor(cachedList()).mutate({
+      ...row(paulo, "invited"),
+      unrecognized: true,
+    })
+
+    expect(toast.success).toHaveBeenCalledExactlyOnceWith(
+      `Removal requested for ${paulo.email}`,
+    )
+  })
+
   it("words the toast for an expired invite as a removal", async () => {
     await observerFor(cachedList()).mutate(row(rita, "invite-expired"))
 

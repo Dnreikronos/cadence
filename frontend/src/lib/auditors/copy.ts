@@ -13,8 +13,29 @@ export type RemovalCopy = {
   action: string
 }
 
-export function removalCopy(status: AuditorStatus): RemovalCopy {
-  switch (status) {
+// A row whose status the app does not know is its own kind: it may have access, so the
+// copy neither says "invite" nor promises that access ends at once.
+export type RemovalKind = AuditorStatus | "unrecognized"
+
+export function removalKind(row: {
+  status: AuditorStatus
+  unrecognized?: boolean
+}): RemovalKind {
+  return row.unrecognized ? "unrecognized" : row.status
+}
+
+export function removalCopy(kind: RemovalKind): RemovalCopy {
+  switch (kind) {
+    case "unrecognized":
+      return {
+        description:
+          "If they have access, it ends when the service processes the removal.",
+        keep: "Keep",
+        confirm: "Remove auditor",
+        pending: "Removing…",
+        done: "Removal requested for",
+        action: "Remove auditor",
+      }
     case "active":
       return {
         description:

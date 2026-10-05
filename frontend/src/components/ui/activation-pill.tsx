@@ -2,7 +2,9 @@ import { cn } from "@/lib/utils"
 
 // Whether someone can be paid, or what is still pending: a person's activation
 // and an auditor's invite share these four states.
-type Activation = "active" | "invited" | "invite-expired" | "not-invited"
+// `unrecognized` is a status the app does not know: shown as such, never as an invite.
+type Activation =
+  "active" | "invited" | "invite-expired" | "not-invited" | "unrecognized"
 
 const pills: Record<
   Activation,
@@ -22,6 +24,11 @@ const pills: Record<
     label: "Invite expired",
     className: "border-warning-border bg-warning-bg text-warning-fg",
     dot: "bg-warning-dot",
+  },
+  unrecognized: {
+    label: "Unknown status",
+    className: "border-line text-ink-muted",
+    dot: "bg-ink-muted/50",
   },
   "not-invited": {
     label: "Not invited",

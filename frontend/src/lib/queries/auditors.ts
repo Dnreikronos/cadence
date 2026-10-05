@@ -17,7 +17,7 @@ import {
   type Auditor,
   type AuditorStatus,
 } from "@/lib/api/schemas"
-import { removalCopy } from "@/lib/auditors/copy"
+import { removalCopy, removalKind, type RemovalKind } from "@/lib/auditors/copy"
 import { queryKeys } from "./keys"
 
 // An auditor as the screen shows it: a status the screen knows how to describe.
@@ -125,18 +125,18 @@ export function revokeAuditorMutation(
   return {
     mutationFn: async (
       auditor: AuditorRow,
-    ): Promise<{ status: AuditorStatus }> => {
+    ): Promise<{ status: RemovalKind }> => {
       // What the row is now, not when it was clicked: an invite may have been
       // accepted since, and then it is access that is revoked. Best effort.
-      let status = auditor.status
+      let status = removalKind(auditor)
       try {
         const list = await listAllAuditors(
           client,
           AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
         )
         queryClient.setQueryData(queryKeys.auditors.list(), list)
-        status =
-          list.rows.find((row) => row.id === auditor.id)?.status ?? status
+        const current = list.rows.find((row) => row.id === auditor.id)
+        if (current) status = removalKind(current)
       } catch {
         // The revoke below reports whatever is really wrong.
       }
@@ -145,7 +145,7 @@ export function revokeAuditorMutation(
       })
       return { status }
     },
-    onSuccess: (result: { status: AuditorStatus }, auditor: AuditorRow) => {
+    onSuccess: (result: { status: RemovalKind }, auditor: AuditorRow) => {
       toast.success(`${removalCopy(result.status).done} ${auditor.email}`)
       refresh(queryClient)
     },
