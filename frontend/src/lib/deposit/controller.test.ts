@@ -551,7 +551,7 @@ describe("MakePrivateController", () => {
     })
 
     it("submitting: a throw after the broadcast is checked, never retried into a second wrap", async () => {
-      const { controller, api, saved } = setup({
+      const { controller, api, saved, advance } = setup({
         wallet: {
           submit: vi.fn(async () => {
             throw new Error("RPC timed out")
@@ -579,7 +579,8 @@ describe("MakePrivateController", () => {
       expect(api.wrap.prepare).toHaveBeenCalledTimes(1)
       expect(controller.getState()).toMatchObject({ status: "held" })
 
-      controller.release()
+      advance(120_000)
+      await controller.release()
       expect(controller.getState()).toEqual({ status: "idle" })
       expect(saved()).toBeNull()
       await controller.deposit("1000000")
@@ -1292,7 +1293,8 @@ describe("MakePrivateController: an unknown outcome held across tabs", () => {
     await settle(a.controller, "held")
     await settle(b.controller, "held")
 
-    a.controller.release()
+    a.advance(120_000)
+    await a.controller.release()
 
     expect(a.controller.getState()).toEqual({ status: "idle" })
     expect(storeB.read()).toBeNull()
@@ -1367,5 +1369,120 @@ describe("MakePrivateController: an unknown outcome held across tabs", () => {
       wallet: "SomeOtherWallet1111111111111111111111111111",
     })
     expect(b.controller.getState()).toEqual({ status: "idle" })
+  })
+})
+
+// The release is made on the record the person saw, under the lock, and refused otherwise.
+describe("MakePrivateController: releasing a hold on a stale view", () => {
+  const viewer = { company: "Solaris", email: "ana@solaris.test" }
+  const SAVED: Submission = {
+    kind: "wrap",
+    request_id: prepared("a").request_id,
+    signature: SIG,
+    last_valid_block_height: 500,
+    wallet: COMPANY_WALLET,
+    at: 1_000_000,
+  }
+
+  // The second tab's storage events are swallowed: it never hears of the first's changes.
+  async function frozenTab() {
+    const profile = browserProfile()
+    const storeA = submissionStore("wrap", viewer, profile.tab())
+    const storeB = submissionStore("wrap", viewer, profile.tab())
+    storeA.record(SAVED)
+    const a = setup({ sharedStore: storeA })
+    const b = setup({ sharedStore: storeB })
+    for (const tab of [a, b]) {
+      tab.api.wrap.confirm.mockRejectedValue(
+        new ApiError(404, "wrap_not_found"),
+      )
+    }
+    b.controller.start()
+    await vi.waitFor(() => expect(b.controller.getState().status).toBe("held"))
+    return { a, b, storeA, storeB }
+  }
+
+  it("does not clear the wrap another tab sent after releasing the one this tab saw", async () => {
+    const { a, b, storeA, storeB } = await frozenTab()
+    // The first tab releases, and sends a new wrap that is in flight (no signature yet).
+    storeA.clear()
+    const fresh = {
+      ...SAVED,
+      request_id: prepared("f").request_id,
+      signature: null,
+      at: 1_000_473,
+    }
+    storeA.record(fresh)
+    b.advance(1_000_000)
+
+    expect(await b.controller.release()).toBe("changed")
+
+    expect(storeB.read()).toMatchObject({ request_id: fresh.request_id })
+    expect(b.api.wrap.prepare).not.toHaveBeenCalled()
+    expect(a.api.wrap.prepare).not.toHaveBeenCalled()
+  })
+
+  it("looks again at what is saved now when its release was refused", async () => {
+    const { b, storeA } = await frozenTab()
+    storeA.clear()
+    storeA.record({
+      ...SAVED,
+      request_id: prepared("f").request_id,
+      at: 2_000_000,
+    })
+    b.advance(1_000_000)
+    b.api.wrap.confirm
+      .mockReset()
+      .mockRejectedValue(new ApiError(404, "wrap_not_found"))
+
+    await b.controller.release()
+
+    // It is looking into the other record (and will hold on that one), not the stale one.
+    await vi.waitFor(() =>
+      expect(b.controller.getState()).toMatchObject({
+        status: "held",
+        requestId: prepared("f").request_id,
+      }),
+    )
+  })
+
+  it("refuses while another tab holds the lock, and keeps the record", async () => {
+    const profile = browserProfile()
+    const store = submissionStore("wrap", viewer, profile.tab())
+    store.record(SAVED)
+    const tab = setup({
+      sharedStore: store,
+      lock: async () => ({ status: "busy" }),
+    })
+    tab.api.wrap.confirm.mockRejectedValue(new ApiError(404, "wrap_not_found"))
+    // Held on mount needs the lock to look: take it for that, then let another tab have it.
+    let busy = false
+    const open = setup({
+      sharedStore: store,
+      lock: async () =>
+        busy
+          ? { status: "busy" }
+          : { status: "held", lease: { release: () => {} } },
+    })
+    open.api.wrap.confirm.mockRejectedValue(new ApiError(404, "wrap_not_found"))
+    open.controller.start()
+    await vi.waitFor(() =>
+      expect(open.controller.getState().status).toBe("held"),
+    )
+    busy = true
+    open.advance(1_000_000)
+
+    expect(await open.controller.release()).toBe("busy")
+
+    expect(store.read()).not.toBeNull()
+    expect(open.controller.getState()).toMatchObject({ status: "held" })
+  })
+
+  it("refuses before two minutes, even on the record it saw", async () => {
+    const { b, storeB } = await frozenTab()
+
+    expect(await b.controller.release()).toBe("too-soon")
+
+    expect(storeB.read()).not.toBeNull()
   })
 })

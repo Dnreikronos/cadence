@@ -4,13 +4,12 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Dialog } from "@base-ui/react/dialog"
-import { useQueryClient } from "@tanstack/react-query"
 import { ChevronDown, Lock, LogOut, Menu, X } from "lucide-react"
 import type { Role } from "@/lib/auth/guard"
 import { cn } from "@/lib/utils"
 import { AmountDisplay, type AmountState } from "@/components/ui/amount-display"
 import { signOut, signOutEverywhere } from "@/lib/auth/actions"
-import { clearViewerEvidence } from "@/lib/submissions"
+import { markLeaving } from "@/lib/submissions"
 import { buttonVariants } from "@/components/ui/button"
 import { SkipLink, mainId } from "@/components/ui/skip-link"
 import {
@@ -157,16 +156,25 @@ function UserMenu({
   email: string
   company: ShellCompany
 }) {
-  const queryClient = useQueryClient()
-  // What the viewer left in the browser (saved sends, with a withdrawal's amount) goes
-  // with the session: a shared computer keeps none of it for the next person.
-  const forget = () => {
-    queryClient.clear()
-    clearViewerEvidence({
-      email,
-      company: company.name,
-      companyId: company.id,
-    })
+  // Signing out is a request that can fail, and the page stays signed in when it does:
+  // so the cache and what is settled in the saved records are cleared on the sign-in page
+  // it lands on (`ClearQueryCache`), not before it is sent. What may have been sent is
+  // kept: the same person signing back in must still find it held.
+  const forget = () =>
+    markLeaving({ email, company: company.name, companyId: company.id })
+  const [failed, setFailed] = useState(false)
+  // The request not reaching the server (offline) rejects with a TypeError, which would
+  // otherwise take the page down with it. A redirect, which is how a sign-out that went
+  // through ends, is not one: it is let through.
+  async function leave(signOutAction: () => Promise<void>) {
+    setFailed(false)
+    forget()
+    try {
+      await signOutAction()
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error
+      setFailed(true)
+    }
   }
   return (
     <Popover>
@@ -185,14 +193,9 @@ function UserMenu({
         <p className="truncate text-label text-ink-muted">Signed in as</p>
         <p className="-mt-1.5 truncate font-medium text-ink">{email}</p>
         {/* Clears the Supabase session; the Turnkey session joins it with the wallet (#77). */}
-        {/* The cache and the saved records are the viewer's data: the next sign-in must not see them. */}
+        {/* The cache is the viewer's data: the sign-in page it lands on clears it. */}
         <div className="border-t border-line pt-2">
-          <form
-            action={() => {
-              forget()
-              return signOut()
-            }}
-          >
+          <form action={() => leave(() => signOut())}>
             <button
               type="submit"
               className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-ink-muted hover:bg-canvas hover:text-ink"
@@ -201,12 +204,7 @@ function UserMenu({
             </button>
           </form>
           {/* Ends this account's sessions on every device, for a lost laptop or a shared computer. */}
-          <form
-            action={() => {
-              forget()
-              return signOutEverywhere()
-            }}
-          >
+          <form action={() => leave(() => signOutEverywhere())}>
             <button
               type="submit"
               className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-ink-muted hover:bg-canvas hover:text-ink"
@@ -215,6 +213,12 @@ function UserMenu({
               devices
             </button>
           </form>
+          {failed && (
+            <p role="alert" className="px-2 pt-1 text-caption text-danger-fg">
+              Couldn&apos;t sign out. You are still signed in: check your
+              connection and try again.
+            </p>
+          )}
         </div>
       </PopoverContent>
     </Popover>

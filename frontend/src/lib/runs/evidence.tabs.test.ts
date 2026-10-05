@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
 import type { RunPaymentPrepared } from "@/lib/api/schemas"
 import { browserProfile } from "@/lib/browser-profile"
-import { clearViewerEvidence, viewerScopeId } from "@/lib/submissions"
+import { clearSettledEvidence, viewerScopeId } from "@/lib/submissions"
 import {
+  attemptCreated,
   beginAttempt,
   paymentResolved,
   paymentSending,
@@ -128,17 +129,22 @@ describe("a payment sent in one tab, seen from another", () => {
     expect(runBlocker(brunos, [{ id: guid(101) }])).toBeNull()
   })
 
-  it("is gone from every tab when the viewer signs out", () => {
+  it("stays held in every tab when the viewer signs out, and a settled attempt goes", () => {
     const shared = browserProfile()
     const a = runEvidence(ana, shared.tab())
     const b = runEvidence(ana, shared.tab())
     beginAttempt(a, { idempotency_key: "k1", fingerprint: "f1" }, 1_000)
+    attemptCreated(a, "f1", RUN)
     paymentSending(a, RUN, prepared(1), 1_000)
+    beginAttempt(a, { idempotency_key: "k2", fingerprint: "f2" }, 1_000)
+    attemptCreated(a, "f2", "settled-run")
 
-    clearViewerEvidence(ana, shared.tab())
+    clearSettledEvidence(ana, shared.tab())
 
-    expect(b.payments.read()).toEqual([])
-    expect(b.attempts.read()).toEqual([])
-    expect(shared.items.size).toBe(0)
+    expect(b.payments.read()).toHaveLength(1)
+    expect(runBlocker(b, [{ id: guid(101) }])).toBe(unsettledMessage)
+    expect(b.attempts.read().map((attempt) => attempt.fingerprint)).toEqual([
+      "f1",
+    ])
   })
 })

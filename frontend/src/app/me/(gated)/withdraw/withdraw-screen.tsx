@@ -43,6 +43,7 @@ import {
   type WithdrawState,
 } from "@/lib/withdraw/flow"
 import { acquireFlowLock, otherTabMessage } from "@/lib/flow-lock"
+import { releaseMessage } from "@/lib/release"
 import { storageBlockedMessage } from "@/lib/storage-guard"
 import {
   heldCheckMessage,
@@ -366,7 +367,9 @@ function WithdrawCard({
       <StorageNotice className="mt-4" />
       {release.unreadable && (
         <UnreadableNotice
-          onRelease={release.releaseUnreadable}
+          onRelease={async () =>
+            releaseMessage(await release.releaseUnreadable(), "withdrawal")
+          }
           afterRelease={afterRelease}
         />
       )}
@@ -526,7 +529,9 @@ function WithdrawCard({
               onCheckAgain={check.checkAgain}
               checking={checking}
               canRelease={release.canRelease(held.amount)}
-              onRelease={() => release.release(held.amount)}
+              onRelease={async () =>
+                releaseMessage(await release.release(held.amount), "withdrawal")
+              }
               afterRelease={afterRelease}
               isAlert={
                 state.stage === "failed" &&
@@ -668,7 +673,7 @@ function HeldNotice({
   checking?: boolean
   // Offered once it has been unresolved for two minutes: lets the amount go on purpose.
   canRelease?: boolean
-  onRelease?: () => void
+  onRelease?: () => void | Promise<string | null>
   // Where focus goes once the release has removed this notice.
   afterRelease?: () => HTMLElement | null | undefined
 }) {
@@ -751,7 +756,7 @@ function UnreadableNotice({
   onRelease,
   afterRelease,
 }: {
-  onRelease: () => void
+  onRelease: () => void | Promise<string | null>
   afterRelease: () => HTMLElement | null | undefined
 }) {
   return (

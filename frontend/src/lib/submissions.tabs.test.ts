@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { z } from "zod"
 import { browserProfile } from "./browser-profile"
 import {
-  clearViewerEvidence,
+  clearSettledEvidence,
+  finishLeaving,
+  markLeaving,
   createRecordList,
   evidenceMaxAgeMs,
   legacyViewerScopeIds,
@@ -266,79 +268,308 @@ describe("a single record kept per viewer", () => {
   })
 })
 
-describe("clearViewerEvidence", () => {
+describe("clearSettledEvidence", () => {
+  const scope = (viewer: typeof bruno) => viewerScopeId(viewer)
   const seed = (shared: ReturnType<typeof browserProfile>) => {
     const tab = shared.tab()
     for (const viewer of [bruno, ana]) {
-      const scope = viewerScopeId(viewer)
-      tab.setItem(`cadence:submission:wrap:${scope}`, "{}")
-      tab.setItem(`cadence:submission:apply-pending:${scope}`, "{}")
-      tab.setItem(`cadence:submissions:withdraw:${scope}`, "[]")
-      tab.setItem(`cadence:submissions:withdraw:${scope}:unreadable`, "[]")
-      tab.setItem(`cadence:submissions:payroll-payment:${scope}`, "[]")
+      const id = scope(viewer)
+      tab.setItem(
+        `cadence:submission:wrap:${id}`,
+        JSON.stringify({ ...submission, at: 5 }),
+      )
+      tab.setItem(
+        `cadence:submission:apply-pending:${id}`,
+        JSON.stringify({ ...submission, kind: "apply-pending", at: 5 }),
+      )
+      tab.setItem(
+        `cadence:submissions:withdraw:${id}`,
+        JSON.stringify([{ amount_units: "5", at: 5 }]),
+      )
+      tab.setItem(`cadence:submissions:withdraw:${id}:unreadable`, "[1]")
+      tab.setItem(
+        `cadence:submissions:payroll-payment:${id}`,
+        JSON.stringify([{ payment_id: "p1", run_id: "open", at: 5 }]),
+      )
+      tab.setItem(
+        `cadence:submissions:payroll-attempt:${id}`,
+        JSON.stringify([
+          // Its run has a payment in doubt, one has no run yet (the answer may be lost),
+          // and one is settled.
+          { fingerprint: "a", run_id: "open", created_at: 5 },
+          { fingerprint: "b", created_at: 5 },
+          { fingerprint: "c", run_id: "done", created_at: 5 },
+        ]),
+      )
     }
     tab.setItem("cadence:probe", "x")
     tab.setItem("other:key", "x")
     return tab
   }
 
-  it("removes everything the viewer left, set-aside state included, and nothing else", () => {
+  it("keeps what may have been sent: the same person signing back in finds it held", () => {
     const shared = browserProfile()
     const tab = seed(shared)
 
-    clearViewerEvidence(bruno, tab)
+    clearSettledEvidence(bruno, tab)
 
-    const left = [...shared.items.keys()]
-    expect(left.filter((key) => key.includes(viewerScopeId(bruno)))).toEqual([])
-    // Everyone else's records, and unrelated keys, are untouched.
-    expect(left.filter((key) => key.includes(viewerScopeId(ana)))).toHaveLength(
-      5,
-    )
-    expect(left).toContain("cadence:probe")
-    expect(left).toContain("other:key")
+    const id = scope(bruno)
+    for (const key of [
+      `cadence:submission:wrap:${id}`,
+      `cadence:submission:apply-pending:${id}`,
+      `cadence:submissions:withdraw:${id}`,
+      `cadence:submissions:payroll-payment:${id}`,
+    ]) {
+      expect(shared.items.has(key), key).toBe(true)
+    }
+    // The withdrawal is still held, in the list a tab reads.
+    expect(heldList(shared.tab()).read()).toEqual([
+      { amount_units: "5", at: 5 },
+    ])
   })
 
-  it("is the same for every tab: the others find nothing", () => {
+  it("removes only what is settled: unreadable leftovers and attempts with nothing in doubt", () => {
     const shared = browserProfile()
-    const a = seed(shared)
-    const b = heldList(shared.tab())
-    b.upsert({ amount_units: "1", at: 1 })
-    expect(b.read()).toHaveLength(1)
+    const tab = seed(shared)
 
-    clearViewerEvidence(bruno, a)
+    clearSettledEvidence(bruno, tab)
 
-    expect(b.read()).toEqual([])
-    expect(submissionStore("wrap", bruno, shared.tab()).read()).toBeNull()
+    const id = scope(bruno)
+    expect(
+      shared.items.has(`cadence:submissions:withdraw:${id}:unreadable`),
+    ).toBe(false)
+    expect(
+      JSON.parse(
+        shared.items.get(`cadence:submissions:payroll-attempt:${id}`)!,
+      ),
+    ).toEqual([
+      { fingerprint: "a", run_id: "open", created_at: 5 },
+      { fingerprint: "b", created_at: 5 },
+    ])
   })
 
-  it("also removes records an earlier version saved under the company name", () => {
+  it("removes an attempt list that is left empty, and touches nobody else's", () => {
+    const shared = browserProfile()
+    const tab = shared.tab()
+    const id = scope(bruno)
+    tab.setItem(
+      `cadence:submissions:payroll-attempt:${id}`,
+      JSON.stringify([{ fingerprint: "c", run_id: "done", created_at: 5 }]),
+    )
+    const full = seed(browserProfile())
+    clearSettledEvidence(bruno, tab)
+    expect(shared.items.size).toBe(0)
+
+    // Another viewer's records, settled or not, are left as they are.
+    const other = browserProfile()
+    const otherTab = seed(other)
+    const before = new Map(other.items)
+    clearSettledEvidence(bruno, otherTab)
+    for (const [key, value] of before) {
+      if (key.includes(scope(ana)) || !key.includes(scope(bruno))) {
+        expect(other.items.get(key), key).toBe(value)
+      }
+    }
+    expect(full).toBeDefined()
+  })
+
+  it("never lets one viewer's records block or show to another", () => {
+    const shared = browserProfile()
+    seed(shared)
+    clearSettledEvidence(ana, shared.tab())
+    expect(heldList(shared.tab(), bruno).read()).toHaveLength(1)
+    expect(submissionStore("wrap", ana, shared.tab()).read()).not.toBeNull()
+    // A viewer with nothing saved finds nothing, whoever else has.
+    const carla = { company: "Acme", email: "carla@acme.test" }
+    expect(heldList(shared.tab(), carla).read()).toEqual([])
+    expect(submissionStore("wrap", carla, shared.tab()).read()).toBeNull()
+  })
+
+  it("also reads records an earlier version saved under the company name", () => {
     const shared = browserProfile()
     const tab = shared.tab()
     const withId = { ...bruno, companyId: "c-1" }
     const legacy = legacyViewerScopeIds(withId)[0]!
-    tab.setItem(`cadence:submissions:withdraw:${legacy}`, "[]")
-    tab.setItem(`cadence:submissions:withdraw:${viewerScopeId(withId)}`, "[]")
-
-    clearViewerEvidence(withId, tab)
-
+    tab.setItem(`cadence:submissions:withdraw:${legacy}:unreadable`, "[1]")
+    clearSettledEvidence(withId, tab)
     expect(shared.items.size).toBe(0)
   })
 
-  it("does nothing, and does not throw, without storage or with storage that cannot list or remove", () => {
-    expect(() => clearViewerEvidence(bruno, null)).not.toThrow()
+  it("does nothing, and does not throw, without storage or with storage that cannot list", () => {
+    expect(() => clearSettledEvidence(bruno, null)).not.toThrow()
     const blind: SubmissionStorage = {
       getItem: () => null,
       setItem: () => {},
       removeItem: () => {},
     }
-    expect(() => clearViewerEvidence(bruno, blind)).not.toThrow()
-    const broken: SubmissionStorage = {
-      ...blind,
-      keys: () => {
-        throw new Error("blocked")
+    expect(() => clearSettledEvidence(bruno, blind)).not.toThrow()
+    expect(() =>
+      clearSettledEvidence(bruno, {
+        ...blind,
+        keys: () => {
+          throw new Error("blocked")
+        },
+      }),
+    ).not.toThrow()
+  })
+})
+
+describe("leaving", () => {
+  const marker = () => {
+    const items = new Map<string, string>()
+    return {
+      items,
+      getItem: (key: string) => items.get(key) ?? null,
+      setItem: (key: string, value: string) => void items.set(key, value),
+      removeItem: (key: string) => void items.delete(key),
+    }
+  }
+
+  it("clears what is settled only once the sign-in page is reached, not when sign-out is pressed", () => {
+    const shared = browserProfile()
+    const tab = shared.tab()
+    tab.setItem(
+      `cadence:submissions:withdraw:${viewerScopeId(bruno)}:unreadable`,
+      "[1]",
+    )
+    const note = marker()
+
+    markLeaving(bruno, note)
+    // The sign-out request failed: the page is still signed in, and nothing was removed.
+    expect(shared.items.size).toBe(1)
+
+    finishLeaving(tab, note)
+    expect(shared.items.size).toBe(0)
+    expect(note.items.size).toBe(0)
+  })
+
+  it("keeps what is held, and does nothing when nobody was noted", () => {
+    const shared = browserProfile()
+    const tab = shared.tab()
+    heldList(tab).upsert({ amount_units: "5", at: 1 })
+    const note = marker()
+
+    finishLeaving(tab, note)
+    markLeaving(bruno, note)
+    finishLeaving(tab, note)
+
+    expect(heldList(shared.tab()).read()).toHaveLength(1)
+  })
+
+  it("ignores a note it cannot read, and a missing or refusing marker", () => {
+    const shared = browserProfile()
+    const note = marker()
+    note.items.set("cadence:leaving", "not json")
+    expect(() => finishLeaving(shared.tab(), note)).not.toThrow()
+    expect(() => finishLeaving(shared.tab(), null)).not.toThrow()
+    expect(() => markLeaving(bruno, null)).not.toThrow()
+    expect(() =>
+      markLeaving(bruno, {
+        setItem: () => {
+          throw new Error("blocked")
+        },
+      }),
+    ).not.toThrow()
+  })
+})
+
+describe("a write that races another tab's", () => {
+  // A tab whose storage lets another tab write right after it reads the key once: the
+  // moment between this tab reading and writing, which only a lock could close.
+  function racing() {
+    const shared = browserProfile()
+    const other = heldList(shared.tab())
+    const tab = shared.tab()
+    let fire: (() => void) | null = null
+    const key = `cadence:submissions:withdraw:${viewerScopeId(bruno)}`
+    const ours = {
+      ...tab,
+      getItem: (name: string) => {
+        const value = tab.getItem(name)
+        if (name === key && fire) {
+          const run = fire
+          fire = null
+          run()
+        }
+        return value
       },
     }
-    expect(() => clearViewerEvidence(bruno, broken)).not.toThrow()
+    return {
+      shared,
+      other,
+      ours: heldList(ours),
+      race: (run: () => void) => {
+        fire = run
+      },
+    }
+  }
+
+  it("does not lose the other tab's record when it adds its own", () => {
+    const { ours, other, race } = racing()
+    expect(ours.read()).toEqual([])
+    race(() => other.upsert({ amount_units: "2", at: 2 }))
+
+    ours.upsert({ amount_units: "1", at: 1 })
+
+    expect(
+      ours
+        .read()
+        .map((r) => r.amount_units)
+        .sort(),
+    ).toEqual(["1", "2"])
+    expect(
+      other
+        .read()
+        .map((r) => r.amount_units)
+        .sort(),
+    ).toEqual(["1", "2"])
+  })
+
+  it("does not bring back what the other tab removed, nor lose what it added, when it removes", () => {
+    const { ours, other, race } = racing()
+    ours.upsert({ amount_units: "1", at: 1 })
+    expect(other.read()).toHaveLength(1)
+    race(() => {
+      other.remove((r) => r.amount_units === "1")
+      other.upsert({ amount_units: "3", at: 3 })
+    })
+
+    ours.remove((r) => r.amount_units === "1")
+
+    expect(ours.read().map((r) => r.amount_units)).toEqual(["3"])
+    expect(other.read().map((r) => r.amount_units)).toEqual(["3"])
+  })
+
+  it("prunes on what is stored now, not on what it read", () => {
+    const shared = browserProfile()
+    const tab = shared.tab()
+    const key = `cadence:submissions:withdraw:${viewerScopeId(bruno)}`
+    tab.setItem(key, JSON.stringify([{ amount_units: "1", at: 0 }]))
+    let fired = false
+    const racing: SubmissionStorage = {
+      ...tab,
+      getItem: (name) => {
+        const value = tab.getItem(name)
+        if (name === key && !fired) {
+          fired = true
+          // Another tab adds a fresh record after this read.
+          shared.tab().setItem(
+            key,
+            JSON.stringify([
+              { amount_units: "1", at: 0 },
+              { amount_units: "2", at: 10_000_000_000 },
+            ]),
+          )
+        }
+        return value
+      },
+    }
+
+    expect(pruneEvidence(10_000_000_000, racing)).toBe(1)
+
+    expect(JSON.parse(tab.getItem(key)!)).toEqual([
+      { amount_units: "2", at: 10_000_000_000 },
+    ])
   })
 })
 
@@ -524,8 +755,15 @@ describe("the browser's localStorage", () => {
     fire(null)
     expect(heard).toHaveBeenCalledTimes(2)
 
-    clearViewerEvidence(bruno)
-    expect(items.size).toBe(0)
+    // It lists the browser's keys: a settled leftover goes, a record held stays.
+    items.set(
+      `cadence:submissions:withdraw:${viewerScopeId(bruno)}:unreadable`,
+      "[1]",
+    )
+    clearSettledEvidence(bruno)
+    expect([...items.keys()]).toEqual([
+      `cadence:submission:wrap:${viewerScopeId(bruno)}`,
+    ])
 
     stop()
     expect(listeners.size).toBe(0)

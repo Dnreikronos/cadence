@@ -51,6 +51,7 @@ import {
 import { createLatch } from "@/lib/runs/latch"
 import { holdsUnconfirmed } from "@/lib/runs/progress"
 import { acquireFlowLock, otherTabMessage } from "@/lib/flow-lock"
+import { releaseMessage, releaseUnreadableUnderLock } from "@/lib/release"
 import { storageBlockedMessage } from "@/lib/storage-guard"
 import { useStorageGate } from "@/lib/use-storage-gate"
 import {
@@ -59,7 +60,7 @@ import {
   beginAttempt,
   canReleasePayment,
   dropAttempt,
-  releasePerson,
+  releasePersonChecked,
   releaseWarning,
   runEvidenceFor,
   runSeenBefore,
@@ -428,7 +429,15 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
             label="Release unreadable state"
             warning={releaseWarning}
             prompt="I checked the payments, release this saved state"
-            onRelease={() => evidence.payments.clearUnreadable()}
+            onRelease={async () =>
+              releaseMessage(
+                await releaseUnreadableUnderLock(
+                  () => acquireFlowLock(runLockName(viewer)),
+                  () => evidence.payments.clearUnreadable(),
+                ),
+                "run",
+              )
+            }
           />
         </div>
       )}
@@ -443,7 +452,19 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
               lookedUp: !signer.checking.has(payment.payment_id),
             })
           }
-          onRelease={(personId) => releasePerson(evidence, personId)}
+          onRelease={async (personId) =>
+            releaseMessage(
+              await releasePersonChecked({
+                evidence,
+                personId,
+                seen: sentPayments.filter(
+                  (payment) => payment.person_id === personId,
+                ),
+                lock: () => acquireFlowLock(runLockName(viewer)),
+              }),
+              "run",
+            )
+          }
         />
       )}
 

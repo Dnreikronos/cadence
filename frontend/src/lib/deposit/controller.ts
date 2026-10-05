@@ -1,5 +1,6 @@
 import type { ApiClient } from "@/lib/api/client"
 import type { Acquired, Lease } from "@/lib/flow-lock"
+import { releaseUnderLock, type ReleaseOutcome } from "@/lib/release"
 import type { Submission } from "@/lib/submissions"
 import {
   canRetry,
@@ -22,6 +23,8 @@ import { reconcileWrap, wait, type Reconciled } from "./reconcile"
 import type { MakePrivateStep } from "./types"
 
 export const SUBMISSION_KIND = "wrap"
+
+const noLease: Lease = { release: () => {} }
 
 export type MakePrivateState =
   | { status: "idle" }
@@ -56,7 +59,14 @@ export type MakePrivateState =
   // The earlier wrap's outcome cannot be told: its record stays, in every tab, and nothing
   // new is sent until the person has checked and released it (`release`, offered two
   // minutes after the send, `at`).
-  | { status: "held"; at: number; earlierPending?: EarlierPending }
+  | {
+      status: "held"
+      // The record this was held on: a release is made on exactly this one.
+      at: number
+      requestId: string
+      signature: string | null
+      earlierPending?: EarlierPending
+    }
 
 export type Deps = {
   wallet: string
@@ -248,12 +258,42 @@ export class MakePrivateController {
 
   // The person's decision, after checking both balances and their history: the held wrap
   // is let go, in every tab (they read the same record), and a new deposit may be sent.
-  release() {
-    if (this.running || this.state.status !== "held") return
+  // Made under the deposit lock and on the record the person saw: if another tab released
+  // it and sent again, or settled it, the saved record is not the one they decided about,
+  // so nothing is cleared and the screen looks again.
+  async release(): Promise<ReleaseOutcome> {
+    const held = this.state
+    if (this.running || held.status !== "held") return "changed"
     const deps = this.getDeps()
-    deps.store.clear()
-    deps.refresh()
-    this.set({ status: "idle" })
+    const outcome = await releaseUnderLock<
+      Pick<Submission, "at" | "request_id" | "signature">
+    >({
+      lock: deps.lock ?? (async () => ({ status: "held", lease: noLease })),
+      read: () => {
+        const record = deps.store.read()
+        return record && record.wallet === deps.wallet ? [record] : []
+      },
+      seen: [
+        {
+          at: held.at,
+          request_id: held.requestId,
+          signature: held.signature,
+        },
+      ],
+      same: (a, b) =>
+        a.request_id === b.request_id &&
+        a.signature === b.signature &&
+        a.at === b.at,
+      remove: () => deps.store.clear(),
+      now: (deps.now ?? Date.now)(),
+    })
+    if (outcome === "released") {
+      deps.refresh()
+      if (this.state.status === "held") this.set({ status: "idle" })
+    } else if (outcome === "changed") {
+      this.storeChanged()
+    }
+    return outcome
   }
 
   // Another tab saved or cleared the wrap's record. A hold released there is released
@@ -267,6 +307,17 @@ export class MakePrivateController {
     if (status === "held" && !mine) {
       refresh()
       this.set({ status: "idle" })
+    } else if (
+      status === "held" &&
+      record &&
+      (record.at !== this.state.at ||
+        record.request_id !== this.state.requestId ||
+        record.signature !== this.state.signature)
+    ) {
+      // Another record is saved now (the wrap was released there and a new one sent, or
+      // it gained a signature): what this screen holds is stale, so look again.
+      this.set({ status: "checking" })
+      void this.reconcile()
     } else if (
       mine &&
       (status === "idle" ||
@@ -536,6 +587,8 @@ export class MakePrivateController {
         this.set({
           status: "held",
           at: current.at,
+          requestId: current.request_id,
+          signature: current.signature,
           earlierPending: earlierFromRecord(current.earlier_pending),
         })
         return

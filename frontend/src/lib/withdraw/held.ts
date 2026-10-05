@@ -10,6 +10,8 @@ import {
   type SubmissionStorage,
   type Viewer,
 } from "@/lib/submissions"
+import { releaseUnderLock, releaseUnreadableUnderLock } from "@/lib/release"
+import type { Acquired } from "@/lib/flow-lock"
 import { requireDurable, type ApiMode } from "@/lib/storage-guard"
 import type { Held } from "./flow"
 
@@ -21,7 +23,9 @@ import type { Held } from "./flow"
 // the signature once the network returned one. A record without a signature
 // cannot be asked about: it stays until it is released (or signed out, or pruned).
 export const heldRecordSchema = z.object({
-  amount_units: z.string().regex(/^\d{1,20}$/),
+  // Canonical base units: no leading zero. Anything else is not something this app
+  // wrote, and is set aside as unreadable (the whole list is then held).
+  amount_units: z.string().regex(/^(0|[1-9]\d{0,19})$/),
   request_id: z.string().min(1).optional(),
   signature: z.string().min(1).optional(),
   last_valid_block_height: z.number().int().nonnegative().optional(),
@@ -266,9 +270,47 @@ export const canRelease = (
   { now, lookedUp }: { now: number; lookedUp: boolean },
 ) => now - record.at >= releaseAfterMs && (!record.signature || lookedUp)
 
-// The person's decision: the amount is free again. Nothing about it is written anywhere.
+// Removes the held amount. Only for what has been checked: see `releaseHeldChecked`.
 export const releaseHeld = (records: HeldRecords, amount: string) =>
   records.remove((record) => record.amount_units === amount)
+
+const sameHeld = (a: HeldRecord, b: HeldRecord) =>
+  a.amount_units === b.amount_units &&
+  a.request_id === b.request_id &&
+  a.signature === b.signature &&
+  a.at === b.at
+
+// The person's decision, on the record they saw: made under the withdraw lock, only if
+// that very record is still what is saved and is two minutes old, and clearing only it.
+// Nothing about it is written anywhere.
+export const releaseHeldChecked = ({
+  records,
+  seen,
+  lock,
+  now,
+}: {
+  records: HeldRecords
+  seen: HeldRecord
+  lock: () => Promise<Acquired>
+  now?: number
+}) =>
+  releaseUnderLock<HeldRecord>({
+    lock,
+    now,
+    read: () =>
+      records
+        .read()
+        .filter((record) => record.amount_units === seen.amount_units),
+    seen: [seen],
+    same: sameHeld,
+    remove: (found) =>
+      records.remove((record) => found.some((one) => sameHeld(one, record))),
+  })
+
+export const releaseUnreadableChecked = (
+  records: HeldRecords,
+  lock: () => Promise<Acquired>,
+) => releaseUnreadableUnderLock(lock, () => records.clearUnreadable())
 
 export const unreadableMessage =
   "Unreadable saved state: some saved withdrawals could not be read, so nothing can be withdrawn until you have checked your history and released them."

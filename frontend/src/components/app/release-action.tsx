@@ -24,12 +24,16 @@ export function ReleaseAction({
   prompt: string
   // What the release risks, in plain words.
   warning: string
-  onRelease: () => void
+  // Does the release. It may be refused (the hold changed since the person looked, or
+  // another tab is busy with it): it then returns what to tell them, and nothing moves.
+  onRelease: () => void | Promise<string | null>
   // Where focus goes once the release has removed the notice: the screen's first action
   // for what is left. Defaults to the main area.
   afterRelease?: () => HTMLElement | null | undefined
 }) {
   const [asking, setAsking] = useState(false)
+  const [refused, setRefused] = useState<string | null>(null)
+  const [working, setWorking] = useState(false)
   const warningId = useId()
   const opener = useRef<HTMLButtonElement>(null)
   const confirmation = useRef<HTMLDivElement>(null)
@@ -71,19 +75,39 @@ export function ReleaseAction({
       <p id={warningId} className="text-ui/normal font-medium">
         {warning}
       </p>
+      {refused && (
+        <p role="alert" className="text-ui/normal font-medium text-danger-fg">
+          {refused}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
+          aria-disabled={working || undefined}
           onClick={(event) => {
+            if (working) return
             const button = event.currentTarget
-            onRelease()
-            // The notice (and this button) are gone once the screen has updated.
-            setTimeout(() => {
-              focusIfLost(
-                afterRelease?.() ?? document.getElementById(mainId),
-                button,
-              )
-            }, 0)
+            setWorking(true)
+            void Promise.resolve(onRelease()).then(
+              (message) => {
+                setWorking(false)
+                if (message) {
+                  setRefused(message)
+                  return
+                }
+                // The notice (and this button) are gone once the screen has updated.
+                setTimeout(() => {
+                  focusIfLost(
+                    afterRelease?.() ?? document.getElementById(mainId),
+                    button,
+                  )
+                }, 0)
+              },
+              () => {
+                setWorking(false)
+                setRefused("Nothing was released. Try again.")
+              },
+            )
           }}
           className={buttonVariants({ size: "sm" })}
         >

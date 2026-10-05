@@ -7,8 +7,9 @@ import { z } from "zod"
 // The records live in `localStorage`, which every tab of the browser profile shares: a
 // second tab must see what the first one holds as "may have gone through", or it could
 // send it again. Keys carry the viewer (a hash of company id and email), so one person's
-// records are never read as another's, and signing out removes them
-// (`clearViewerEvidence`). `pruneEvidence` drops what is old enough to be of no use.
+// records are never read as another's. Signing out keeps what may have been sent (the
+// next sign-in of the same person must still find it held) and removes only what is
+// settled (`clearSettledEvidence`); `pruneEvidence` drops what is old enough to be of no use.
 export const submissionSchema = z.object({
   kind: z.string().min(1),
   request_id: z.string().min(1),
@@ -364,6 +365,22 @@ export function createRecordList<T>({
     return stored
   }
 
+  // Read, change, write. A synchronous API cannot hold a Web Lock, so the stored value
+  // is looked at again right before the write: if another tab wrote since this one read,
+  // the change is made again on what that tab left, so its write is not lost. What is left
+  // is the gap between two synchronous storage calls.
+  function change(mutate: (current: readonly T[]) => readonly T[]): boolean {
+    for (let attempt = 0; ; attempt++) {
+      const current = read()
+      const based = seen
+      const next = mutate(current)
+      if (next === current) return storage != null
+      const now = peek()
+      if (attempt < 3 && now !== undefined && now !== based) continue
+      return commit(next)
+    }
+  }
+
   function read(): readonly T[] {
     if (records === null) {
       records = load()
@@ -389,18 +406,18 @@ export function createRecordList<T>({
   return {
     read,
     upsert(record) {
-      const current = read()
-      const at = current.findIndex((existing) => same(existing, record))
-      return commit(
-        at === -1
+      return change((current) => {
+        const at = current.findIndex((existing) => same(existing, record))
+        return at === -1
           ? [...current, record]
-          : current.map((existing, i) => (i === at ? record : existing)),
-      )
+          : current.map((existing, i) => (i === at ? record : existing))
+      })
     },
     remove(match) {
-      const current = read()
-      const kept = current.filter((record) => !match(record))
-      if (kept.length !== current.length) commit(kept)
+      change((current) => {
+        const kept = current.filter((record) => !match(record))
+        return kept.length === current.length ? current : kept
+      })
     },
     unreadable() {
       read()
@@ -473,24 +490,142 @@ export function submissionStore(
 
 const evidenceKey = /^cadence:submissions?:[^:]+:([0-9a-f]{16})(:unreadable)?$/
 
-// Removes every record of one viewer from the browser, set-aside unreadable ones and
-// records saved under the company name by an earlier version included: signing out is
-// the end of what a shared computer may keep of them. Nobody else's are touched.
-export function clearViewerEvidence(
+// Rewrites one stored value: `change` gets the text and returns the new text, null to
+// remove the key, or undefined to leave it. The value is looked at again right before the
+// write, and the change made again if another tab wrote meanwhile (see `change` in the
+// record list). Returns whether it wrote.
+function rewrite(
+  storage: SubmissionStorage,
+  key: string,
+  change: (raw: string) => string | null | undefined,
+): boolean {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const raw = storage.getItem(key)
+    if (!raw) return false
+    const next = change(raw)
+    if (next === undefined) return false
+    if (storage.getItem(key) !== raw) continue
+    if (next === null) storage.removeItem(key)
+    else storage.setItem(key, next)
+    return true
+  }
+  return false
+}
+
+const asList = (raw: string): unknown[] | null => {
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+// What signing out may remove of one viewer's records: only what is settled. A record of
+// something that may have been sent stays, so the same person signing back in still finds
+// it held (the keys carry the viewer, so no one else reads it). Settled is the set-aside
+// unreadable entries, and a payroll attempt whose run has no payment left in doubt. Nobody
+// else's are touched.
+export function clearSettledEvidence(
   viewer: Viewer,
   storage: SubmissionStorage | null = defaultStorage(),
 ) {
+  if (!storage?.keys) return
   const scopes = new Set([
     viewerScopeId(viewer),
     ...legacyViewerScopeIds(viewer),
   ])
   try {
-    for (const key of storage?.keys?.() ?? []) {
+    const mine = storage.keys().filter((key) => {
       const scope = evidenceKey.exec(key)?.[1]
-      if (scope && scopes.has(scope)) storage?.removeItem(key)
+      return scope !== undefined && scopes.has(scope)
+    })
+    // The runs that still have a payment in doubt.
+    const open = new Set<unknown>()
+    for (const key of mine) {
+      if (!key.includes(":payroll-payment:") || key.endsWith(":unreadable")) {
+        continue
+      }
+      const list = asList(storage.getItem(key) ?? "")
+      for (const entry of list ?? []) {
+        if (typeof entry === "object" && entry !== null) {
+          open.add((entry as Record<string, unknown>).run_id)
+        }
+      }
+    }
+    for (const key of mine) {
+      if (key.endsWith(":unreadable")) {
+        storage.removeItem(key)
+      } else if (key.includes(":payroll-attempt:")) {
+        rewrite(storage, key, (raw) => {
+          const list = asList(raw)
+          if (!list) return undefined
+          const kept = list.filter((entry) => {
+            const run = (entry as Record<string, unknown> | null)?.run_id
+            return run === undefined || open.has(run)
+          })
+          if (kept.length === list.length) return undefined
+          return kept.length === 0 ? null : JSON.stringify(kept)
+        })
+      }
     }
   } catch {
     // Nothing more can be removed.
+  }
+}
+
+// Signing out is a request that can fail, and the page stays signed in when it does: so
+// what it clears is cleared on the sign-in page it lands on, not before it is sent. The
+// person leaving is noted here (this tab's `sessionStorage`) until then.
+const leavingKey = "cadence:leaving"
+const viewerSchema = z.object({
+  email: z.string(),
+  company: z.string(),
+  companyId: z.string().optional(),
+})
+
+function leavingMarker(): Pick<
+  Storage,
+  "getItem" | "setItem" | "removeItem"
+> | null {
+  try {
+    return typeof window === "undefined" ? null : window.sessionStorage
+  } catch {
+    return null
+  }
+}
+
+export function markLeaving(
+  viewer: Viewer,
+  marker: Pick<Storage, "setItem"> | null = leavingMarker(),
+) {
+  try {
+    marker?.setItem(
+      leavingKey,
+      JSON.stringify({
+        email: viewer.email,
+        company: viewer.company,
+        ...(viewer.companyId ? { companyId: viewer.companyId } : {}),
+      }),
+    )
+  } catch {
+    // Nothing is noted: what was settled is removed by the next prune instead.
+  }
+}
+
+// On reaching a sign-in page: clears what is settled for whoever was noted as leaving.
+export function finishLeaving(
+  storage: SubmissionStorage | null = defaultStorage(),
+  marker: Pick<Storage, "getItem" | "removeItem"> | null = leavingMarker(),
+) {
+  try {
+    const raw = marker?.getItem(leavingKey)
+    if (!raw) return
+    marker?.removeItem(leavingKey)
+    const viewer = viewerSchema.safeParse(JSON.parse(raw))
+    if (viewer.success) clearSettledEvidence(viewer.data, storage)
+  } catch {
+    // Nothing noted, or nothing to clear.
   }
 }
 
@@ -519,28 +654,30 @@ export function pruneEvidence(
   try {
     for (const key of storage?.keys?.() ?? []) {
       if (!evidenceKey.test(key) || key.endsWith(":unreadable")) continue
-      const raw = storage?.getItem(key)
-      if (!raw) continue
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(raw)
-      } catch {
-        continue
-      }
       const old = (entry: unknown) => {
         const time = stamp(entry)
         return time !== null && now - time > maxAgeMs
       }
-      if (Array.isArray(parsed)) {
-        const kept = parsed.filter((entry) => !old(entry))
-        if (kept.length === parsed.length) continue
-        removed += parsed.length - kept.length
-        if (kept.length === 0) storage?.removeItem(key)
-        else storage?.setItem(key, JSON.stringify(kept))
-      } else if (old(parsed)) {
-        removed += 1
-        storage?.removeItem(key)
-      }
+      if (!storage) continue
+      let count = 0
+      rewrite(storage, key, (raw) => {
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(raw)
+        } catch {
+          return undefined
+        }
+        if (Array.isArray(parsed)) {
+          const kept = parsed.filter((entry) => !old(entry))
+          if (kept.length === parsed.length) return undefined
+          count = parsed.length - kept.length
+          return kept.length === 0 ? null : JSON.stringify(kept)
+        }
+        if (!old(parsed)) return undefined
+        count = 1
+        return null
+      })
+      removed += count
     }
   } catch {
     // Pruning is housekeeping: whatever it could not reach stays.

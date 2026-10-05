@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { Check, CircleAlert, Eye, Loader2, RotateCw } from "lucide-react"
 import { ReleaseAction } from "@/components/app/release-action"
+import { releaseMessage, type ReleaseOutcome } from "@/lib/release"
 import { useViewerScope } from "@/components/app/viewer-scope"
 import { AmountDisplay } from "@/components/ui/amount-display"
 import { buttonVariants } from "@/components/ui/button"
@@ -501,7 +502,7 @@ function Held({
 }: {
   at: number
   onCheck: () => void
-  onRelease: () => void
+  onRelease: () => Promise<ReleaseOutcome>
   afterRelease: () => HTMLElement | null
 }) {
   const [now, setNow] = useState(() => Date.now())
@@ -524,7 +525,7 @@ function Held({
           label="Release this amount"
           prompt="I checked my history, release this amount"
           warning={releaseWarning}
-          onRelease={onRelease}
+          onRelease={async () => releaseMessage(await onRelease(), "deposit")}
           afterRelease={afterRelease}
         />
       )}

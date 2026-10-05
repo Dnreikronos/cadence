@@ -467,6 +467,143 @@ test.describe("deposit", () => {
     ).toBeVisible()
     expect(wraps).toHaveLength(1)
   })
+
+  test("signing out keeps a held deposit: the same person signing back in finds it held, and nothing is sent", async ({
+    page,
+    watch,
+  }) => {
+    test.setTimeout(120_000)
+    watch.allowStatus(404, /\/wrap\/confirm$/)
+    watch.allowStatus(409, /\/wrap\/confirm$/)
+    page.on("dialog", (dialog) => void dialog.accept())
+    const wraps = posts(page, /\/wrap$/)
+
+    await signInAs(page, "admin")
+    await page.goto("/company/deposit?mock=slow")
+    await expect(page.getByText("$12,500.00").first()).toBeVisible()
+    await depositField(page).fill("1000")
+    await makePrivate(page).click()
+    await expect
+      .poll(async () =>
+        (await saved(page, "cadence:submission:wrap:")).some(
+          (r) => r.signature,
+        ),
+      )
+      .toBe(true)
+    await page.reload()
+    const held = page.getByText(
+      "We couldn't tell whether your last deposit went through",
+    )
+    await expect(held).toBeVisible({ timeout: 30_000 })
+    expect(wraps).toHaveLength(1)
+
+    await page.getByRole("button", { name: /ana@solaris\.test/ }).click()
+    await page.getByRole("button", { name: "Sign out", exact: true }).click()
+    await page.waitForURL("**/sign-in")
+    expect(await saved(page, "cadence:submission:wrap:")).toHaveLength(1)
+
+    await signInAs(page, "admin")
+    await page.waitForLoadState("networkidle")
+    await page.goto("/company/deposit")
+    await expect(held).toBeVisible({ timeout: 30_000 })
+    await expect(depositField(page)).toHaveAttribute("readonly", "")
+    await expect(makePrivate(page)).toHaveAttribute("aria-disabled", "true")
+    expect(wraps).toHaveLength(1)
+  })
+
+  test("a release made on a stale view cannot clear a deposit another tab sent since", async ({
+    page,
+    context,
+    watch,
+  }) => {
+    test.setTimeout(150_000)
+    watch.allowStatus(404, /\/wrap\/confirm$/)
+    watch.allowStatus(409, /\/(wrap|accounts\/apply-pending)\/confirm$/)
+    page.on("dialog", (dialog) => void dialog.accept())
+
+    await signInAs(page, "admin")
+    await page.goto("/company/deposit?mock=slow")
+    await expect(page.getByText("$12,500.00").first()).toBeVisible()
+    await depositField(page).fill("1000")
+    await makePrivate(page).click()
+    await expect
+      .poll(async () =>
+        (await saved(page, "cadence:submission:wrap:")).some(
+          (r) => r.signature,
+        ),
+      )
+      .toBe(true)
+    // Two minutes on, so the release is offered.
+    await page.evaluate(() => {
+      for (const key of Object.keys(window.localStorage)) {
+        if (!key.startsWith("cadence:submission:wrap:")) continue
+        const record = JSON.parse(window.localStorage.getItem(key) ?? "{}")
+        record.at -= 3 * 60_000
+        window.localStorage.setItem(key, JSON.stringify(record))
+      }
+    })
+    await page.reload()
+    const held = page.getByText(
+      "We couldn't tell whether your last deposit went through",
+    )
+    await expect(held).toBeVisible({ timeout: 30_000 })
+
+    // The second tab sees the same hold, and never hears of what the first does next: its
+    // `storage` events are swallowed.
+    const other = await context.newPage()
+    other.on("dialog", (dialog) => void dialog.accept())
+    await other.addInitScript(() => {
+      const original = window.addEventListener.bind(window)
+      window.addEventListener = ((type: string, ...rest: unknown[]) => {
+        if (type === "storage") return
+        return (original as (...a: unknown[]) => void)(type, ...rest)
+      }) as typeof window.addEventListener
+    })
+    const wraps = posts(other, /\/wrap$/)
+    await other.goto("/company/deposit?mock=instant")
+    await expect(
+      other.getByText(
+        "We couldn't tell whether your last deposit went through",
+      ),
+    ).toBeVisible({ timeout: 30_000 })
+    const otherRelease = other.getByRole("button", {
+      name: "I checked my history, release this amount",
+    })
+    await expect(otherRelease).toBeVisible()
+
+    // The first tab releases, and sends again: a new wrap, in flight.
+    await page
+      .getByRole("button", {
+        name: "I checked my history, release this amount",
+      })
+      .click()
+    await page.getByRole("button", { name: "Release this amount" }).click()
+    await expect(held).toHaveCount(0)
+    await depositField(page).fill("1000")
+    await makePrivate(page).click()
+    await expect
+      .poll(async () => {
+        const [record] = await saved(page, "cadence:submission:wrap:")
+        return Boolean(record && Date.now() - Number(record.at) < 60_000)
+      })
+      .toBe(true)
+    const [inFlight] = await saved(page, "cadence:submission:wrap:")
+
+    // The second tab, still showing the old hold, decides to release it.
+    await otherRelease.click()
+    await other.getByRole("button", { name: "Release this amount" }).click()
+    await expect(other.getByRole("main").getByRole("alert")).toContainText(
+      /Another tab is sending or checking a deposit|changed in another tab/,
+    )
+
+    // The first tab's wrap is untouched, and nothing was sent from the second.
+    expect(await saved(page, "cadence:submission:wrap:")).toEqual([inFlight])
+    expect(wraps).toEqual([])
+    await expect(
+      page.getByText(/1000 USDC is now in your private balance/),
+    ).toBeVisible({ timeout: 60_000 })
+    expect(await saved(page, "cadence:submission:wrap:")).toEqual([])
+  })
 })
 
 // ---- Apply pending ------------------------------------------------------------

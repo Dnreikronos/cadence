@@ -8,6 +8,9 @@ type Watch = {
   // status and the URL it is expected for; any other console error, the same status on
   // another URL, and any uncaught page error fail the test.
   allowStatus: (status: number, url: RegExp) => void
+  // A request the browser could not make at all (a test takes the network away on purpose)
+  // is logged as "net::ERR_...", with no status.
+  allowNetworkFailure: (url: RegExp) => void
   // Every `securitypolicyviolation` the pages of the test raised so far, one line each (see
   // csp.ts). The test fails on any at its end.
   cspViolations: string[]
@@ -21,6 +24,7 @@ export const test = base.extend<{ watch: Watch }>({
   watch: [
     async ({ context }, use) => {
       const allowed: { status: number; url: RegExp }[] = []
+      const failed: RegExp[] = []
       const problems: string[] = []
 
       const cspViolations = await collectCspViolations(context)
@@ -33,6 +37,7 @@ export const test = base.extend<{ watch: Watch }>({
         const text = message.text()
         const status = Number(resourceError.exec(text)?.[1])
         const { url } = message.location()
+        if (/net::ERR_/.test(text) && failed.some((re) => re.test(url))) return
         const matches = (n: { status: number; url: RegExp }) =>
           n.status === status && n.url.test(url)
         if (allowed.some(matches) || knownNoise.some(matches)) return
@@ -41,6 +46,7 @@ export const test = base.extend<{ watch: Watch }>({
 
       await use({
         allowStatus: (status, url) => allowed.push({ status, url }),
+        allowNetworkFailure: (url) => failed.push(url),
         cspViolations,
       })
 

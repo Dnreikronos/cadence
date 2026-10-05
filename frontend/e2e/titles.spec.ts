@@ -75,9 +75,35 @@ for (const { role, path } of unknown) {
     await expect(
       page.getByRole("heading", { name: "Page not found" }),
     ).toBeVisible()
+    await expect(page).toHaveTitle("Page not found · Cadence")
     // Inside the shell, so the way back is the navigation that is already there.
     if (role) {
       await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible()
     }
   })
 }
+
+test("a page that is not found on the client does not keep the title of the page before", async ({
+  page,
+  watch,
+}) => {
+  watch.allowStatus(404, /\/company\/runs\/abc/)
+  await signInAs(page, "admin")
+  await page.goto("/company/people")
+  await expect(page).toHaveTitle("People · Cadence")
+
+  await page.evaluate(() => {
+    ;(
+      window as unknown as { next: { router: { push: (to: string) => void } } }
+    ).next.router.push("/company/runs/abc")
+  })
+
+  await expect(page.getByText("Run not found")).toBeVisible()
+  await expect(page).toHaveTitle("Page not found · Cadence")
+  // And the next page names itself again.
+  await page
+    .getByRole("navigation", { name: "Main" })
+    .getByRole("link", { name: "Deposit", exact: true })
+    .click()
+  await expect(page).toHaveTitle("Deposit · Cadence")
+})

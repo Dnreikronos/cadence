@@ -166,7 +166,7 @@ export function CheckingList({
   // Offered after two minutes unsettled, once a lookup (if one can be made) came back
   // unknown: lets the person be paid again, on purpose.
   canRelease: (payment: SentPayment) => boolean
-  onRelease: (personId: string) => void
+  onRelease: (personId: string) => void | Promise<string | null>
 }) {
   return (
     <section

@@ -9,6 +9,8 @@ import {
   type Viewer,
 } from "@/lib/submissions"
 import type { RunEvents } from "./executor"
+import type { Acquired } from "@/lib/flow-lock"
+import { releaseUnderLock } from "@/lib/release"
 import { requireDurable, type ApiMode } from "@/lib/storage-guard"
 import { describeFailure } from "./messages"
 import { attemptKey, type AttemptKey } from "./plan"
@@ -299,6 +301,46 @@ export const canReleasePayment = (
 export function releasePerson(evidence: RunEvidence, personId: string) {
   evidence.payments.remove((payment) => payment.person_id === personId)
   settleAttempts(evidence)
+}
+
+const samePayment = (a: SentPayment, b: SentPayment) =>
+  a.payment_id === b.payment_id &&
+  a.request_id === b.request_id &&
+  a.signature === b.signature &&
+  a.at === b.at
+
+// The person's decision, on the payments they saw for that person: made under the run
+// lock, only if exactly those are still what is saved and each is two minutes old, and
+// clearing only them (an attempt left with nothing open goes with them).
+export async function releasePersonChecked({
+  evidence,
+  personId,
+  seen,
+  lock,
+  now,
+}: {
+  evidence: RunEvidence
+  personId: string
+  seen: readonly SentPayment[]
+  lock: () => Promise<Acquired>
+  now?: number
+}) {
+  const outcome = await releaseUnderLock<SentPayment>({
+    lock,
+    now,
+    read: () =>
+      evidence.payments
+        .read()
+        .filter((payment) => payment.person_id === personId),
+    seen,
+    same: samePayment,
+    remove: (found) =>
+      evidence.payments.remove((payment) =>
+        found.some((one) => samePayment(one, payment)),
+      ),
+  })
+  if (outcome === "released") settleAttempts(evidence)
+  return outcome
 }
 
 export const unreadableMessage =

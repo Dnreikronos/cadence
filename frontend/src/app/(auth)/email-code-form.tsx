@@ -109,11 +109,13 @@ function Card({
               : "We will email you a 6-digit code. No password needed."}
           </p>
           <IntentFields intent={intent} />
-          {notConfigured && (
-            <p role="status" className="text-ui/normal text-warning-fg">
-              {signInErrorMessage("not_configured")}
-            </p>
-          )}
+          {/* Said once: the redirect from the verify route carries the same words as an error. */}
+          {notConfigured &&
+            state.error !== signInErrorMessage("not_configured") && (
+              <p role="status" className="text-ui/normal text-warning-fg">
+                {signInErrorMessage("not_configured")}
+              </p>
+            )}
           {mode === "sign-up" && (
             <label className="block space-y-1.5">
               <span className="text-label text-ink-muted">Company name</span>

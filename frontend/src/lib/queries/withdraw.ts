@@ -28,7 +28,8 @@ import {
   checkHeldWithdrawals,
   heldOf,
   heldRecordsFor,
-  releaseHeld,
+  releaseHeldChecked,
+  releaseUnreadableChecked,
   withdrawEvidence,
   type HeldCheck,
   type HeldRecord,
@@ -242,9 +243,22 @@ export function useWithdrawRelease(viewer: ViewerScope, check: WithdrawCheck) {
         canRelease(record, { now, lookedUp: check.unknownAmounts.has(amount) })
       )
     },
-    release: (amount: string) => releaseHeld(list, amount),
+    // On the record this screen showed: refused if it has changed since.
+    release: (amount: string) => {
+      const seen = records.find((record) => record.amount_units === amount)
+      return seen
+        ? releaseHeldChecked({
+            records: list,
+            seen,
+            lock: () => acquireFlowLock(withdrawLockName(viewer)),
+          })
+        : Promise.resolve("changed" as const)
+    },
     unreadable,
-    releaseUnreadable: () => list.clearUnreadable(),
+    releaseUnreadable: () =>
+      releaseUnreadableChecked(list, () =>
+        acquireFlowLock(withdrawLockName(viewer)),
+      ),
   }
 }
 

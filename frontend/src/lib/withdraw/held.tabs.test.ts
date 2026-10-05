@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/errors"
 import { browserProfile } from "@/lib/browser-profile"
-import { clearViewerEvidence } from "@/lib/submissions"
+import { clearSettledEvidence } from "@/lib/submissions"
 import { initialWithdraw, withdrawReducer } from "./flow"
 import {
   checkHeldWithdrawals,
@@ -170,7 +170,7 @@ describe("a withdrawal sent in one tab, seen from another", () => {
     expect(submitFrom(heldOf(ana1.read()), AMOUNT)).toBe("working")
   })
 
-  it("is gone from every tab when the viewer signs out, and the others' stay", () => {
+  it("stays held in every tab when the viewer signs out, for them and for no one else", () => {
     const shared = browserProfile()
     const a = heldRecords(bruno, shared.tab())
     const b = heldRecords(bruno, shared.tab())
@@ -178,10 +178,18 @@ describe("a withdrawal sent in one tab, seen from another", () => {
     withdrawEvidence(a, AMOUNT, () => 1_000).onSent(sentUnsigned)
     withdrawEvidence(anas, "7", () => 1_000).onSent(sentUnsigned)
 
-    clearViewerEvidence(bruno, shared.tab())
+    clearSettledEvidence(bruno, shared.tab())
 
-    expect(a.read()).toEqual([])
-    expect(b.read()).toEqual([])
+    expect(a.read()).toHaveLength(1)
+    expect(b.read()).toHaveLength(1)
     expect(anas.read()).toHaveLength(1)
+    // Held means held: signing back in does not offer the amount again.
+    expect(submitFrom(heldOf(b.read()), AMOUNT)).toBe("form")
+    // And it is not another person's to read or to be stopped by.
+    expect(
+      heldRecords(ana, shared.tab())
+        .read()
+        .map((r) => r.amount_units),
+    ).toEqual(["7"])
   })
 })

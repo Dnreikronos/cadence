@@ -336,9 +336,8 @@ test("a reload while the network is confirming keeps the amount held, and anothe
   await expect(sidebar(page)).toContainText("$7,499.75")
 })
 
-test("signing out removes what a person left held from the browser, and no one else's is ever shown", async ({
+test("signing out keeps what a person left held, for them and for no one else", async ({
   page,
-  context,
   watch,
 }) => {
   test.setTimeout(60_000)
@@ -346,6 +345,7 @@ test("signing out removes what a person left held from the browser, and no one e
   watch.allowStatus(409, /\/unwrap\/confirm$/)
   page.on("dialog", (dialog) => void dialog.accept())
   const stored = () => savedKeys(page)
+  const sent = withdrawalsSent(page)
 
   await signInAs(page, "recipient")
   await page.goto("/me/withdraw?mock=slow")
@@ -362,11 +362,20 @@ test("signing out removes what a person left held from the browser, and no one e
   expect(key).toBeDefined()
   // The key names a viewer by a hash, not by an email.
   expect(key).toMatch(/^cadence:submissions:withdraw:[0-9a-f]{16}$/)
+  expect(sent).toEqual(["1234560000"])
 
-  // A session that ends without signing out (it expired, or the cookie was cleared)
-  // leaves the record behind: another person who signs in on this browser never sees it,
-  // and does not remove it either.
-  await context.clearCookies()
+  // What is settled goes with the sign-out: a leftover the app could not read is removed,
+  // what may have been sent is not.
+  await page.evaluate(
+    (name) => window.localStorage.setItem(`${name}:unreadable`, "[1]"),
+    key,
+  )
+
+  // Another person signs in on the same tab: nothing of the first one's is shown, or removed.
+  await signOut(page, "bruno@solaris.test")
+  await expect
+    .poll(() => page.evaluate(() => Object.keys(window.localStorage).sort()))
+    .toEqual([key])
   await signInAs(page, "admin")
   // Let the home page finish asking before it is left: a request cut off by the navigation
   // is logged by the browser as a failure.
@@ -378,7 +387,8 @@ test("signing out removes what a person left held from the browser, and no one e
   await expect(page.getByText("may have gone through")).toHaveCount(0)
   expect(await stored()).toEqual([key])
 
-  // The first one signs back in and finds it where it was.
+  // The first one signs back in and still finds the amount held: the same amount is not
+  // offered again, and nothing is prepared for it.
   await page.waitForLoadState("networkidle")
   await signOut(page, "ana@solaris.test")
   await signInAs(page, "recipient")
@@ -388,30 +398,24 @@ test("signing out removes what a person left held from the browser, and no one e
   await expect(
     card.getByText("The withdrawal may have gone through"),
   ).toBeVisible()
-  expect(await stored()).toEqual([key])
-
-  // Signing out is the end of it: a shared computer keeps nothing of the amount.
-  await signOut(page, "bruno@solaris.test")
-  expect(await stored()).toEqual([])
-  expect(
-    await page.evaluate(() =>
-      Object.keys(window.localStorage).filter((name) =>
-        name.startsWith("cadence:submission"),
-      ),
+  await amountField(card).fill("1234.56")
+  const withdraw = card.getByRole("button", { name: "Withdraw", exact: true })
+  await expect(withdraw).toHaveAttribute("aria-disabled", "true")
+  await withdraw.click({ force: true })
+  await expect(
+    card.getByText(
+      "A withdrawal for this amount may already have gone through. Check your balance and history, or change the amount.",
     ),
-  ).toEqual([])
-  await signInAs(page, "recipient")
-  await page.waitForLoadState("networkidle")
-  await page.goto("/me/withdraw")
-  await expect(card).toContainText("$8,000.00")
-  await expect(card.getByText("may have gone through")).toHaveCount(0)
+  ).toBeVisible()
+  expect(sent).toEqual(["1234560000"])
 })
 
-test("signing out of every device removes it too", async ({ page, watch }) => {
+test("signing out of every device keeps it too", async ({ page, watch }) => {
   test.setTimeout(60_000)
   watch.allowStatus(404, /\/unwrap\/confirm$/)
   watch.allowStatus(409, /\/unwrap\/confirm$/)
   page.on("dialog", (dialog) => void dialog.accept())
+  const sent = withdrawalsSent(page)
 
   await signInAs(page, "recipient")
   await page.goto("/me/withdraw?mock=slow")
@@ -428,8 +432,63 @@ test("signing out of every device removes it too", async ({ page, watch }) => {
   await page.getByRole("button", { name: /bruno@solaris\.test/ }).click()
   await page.getByRole("button", { name: "Sign out of all devices" }).click()
   await page.waitForURL("**/sign-in")
+  expect(await savedKeys(page)).toHaveLength(1)
 
-  expect(await savedKeys(page)).toEqual([])
+  await signInAs(page, "recipient")
+  await page.waitForLoadState("networkidle")
+  await page.goto("/me/withdraw")
+  await expect(
+    card.getByText("The withdrawal may have gone through"),
+  ).toBeVisible()
+  expect(sent).toEqual(["1234560000"])
+})
+
+test("a sign-out that fails leaves the page signed in, with nothing cleared", async ({
+  page,
+  context,
+  watch,
+}) => {
+  test.setTimeout(60_000)
+  watch.allowStatus(404, /\/unwrap\/confirm$/)
+  watch.allowStatus(409, /\/unwrap\/confirm$/)
+  page.on("dialog", (dialog) => void dialog.accept())
+  // The browser reports the sign-out request failing; that is the point of the test.
+  watch.allowNetworkFailure(/\/me\/withdraw/)
+
+  await signInAs(page, "recipient")
+  await page.goto("/me/withdraw?mock=slow")
+  const card = page.getByRole("region", { name: "Withdraw to your wallet" })
+  await expect(card).toContainText("$8,000.00")
+  await amountField(card).fill("1234.56")
+  await card.getByRole("button", { name: "Withdraw", exact: true }).click()
+  await expect.poll(() => savedKeys(page)).toHaveLength(1)
+  await page.reload()
+  await expect(
+    card.getByText("The withdrawal may have gone through"),
+  ).toBeVisible()
+  const [key] = await savedKeys(page)
+  // A settled leftover, which a sign-out that went through would remove.
+  await page.evaluate(
+    (name) => window.localStorage.setItem(`${name}:unreadable`, "[1]"),
+    key,
+  )
+
+  await context.setOffline(true)
+  await page.getByRole("button", { name: /bruno@solaris\.test/ }).click()
+  await page.getByRole("button", { name: "Sign out", exact: true }).click()
+  // Give the request time to fail: the page is still the withdraw screen, still signed in.
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Couldn't sign out" }),
+  ).toBeVisible()
+  await expect(page).toHaveURL(/\/me\/withdraw/)
+  await expect(
+    card.getByText("The withdrawal may have gone through"),
+  ).toBeVisible()
+  expect(
+    await page.evaluate(() => Object.keys(window.localStorage).sort()),
+  ).toEqual([key, `${key}:unreadable`])
+
+  await context.setOffline(false)
 })
 
 test("a second tab that was open before the first started cannot send while it is in flight", async ({

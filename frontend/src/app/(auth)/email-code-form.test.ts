@@ -10,13 +10,17 @@ import { EmailCodeForm } from "./email-code-form"
 const intent = { invite: null, company: null, next: null }
 
 function render(
-  options: { mode?: "sign-in" | "sign-up"; notConfigured?: boolean } = {},
+  options: {
+    mode?: "sign-in" | "sign-up"
+    notConfigured?: boolean
+    error?: string | null
+  } = {},
 ) {
   return renderToStaticMarkup(
     createElement(EmailCodeForm, {
       mode: options.mode ?? "sign-in",
       intent,
-      error: null,
+      error: options.error ?? null,
       noCompany: false,
       retryHref: null,
       notConfigured: options.notConfigured,
@@ -65,5 +69,20 @@ describe("the sign-in form where Supabase is configured", () => {
     expect(html).not.toContain("not configured")
     expect(disabled(html, 'name="email"')).toBe(false)
     expect(disabled(html, 'type="submit"')).toBe(false)
+  })
+})
+
+describe("the notice when the redirect already carries it", () => {
+  it("says it once: the redirect from the verify route puts the same words in the error", () => {
+    const words =
+      "Sign-in is not configured on this deployment, so no code can be sent."
+    const html = render({ notConfigured: true, error: words })
+    expect(html.split("Sign-in is not configured").length - 1).toBe(1)
+  })
+
+  it("still says it when there is no error, or another one", () => {
+    const html = render({ notConfigured: true, error: "Enter a valid email." })
+    expect(html).toContain("Sign-in is not configured")
+    expect(html).toContain("Enter a valid email.")
   })
 })
