@@ -143,8 +143,15 @@ export const paymentStatuses = [
 ] as const
 export type PaymentStatus = (typeof paymentStatuses)[number]
 
+export function isKnownRunPaymentStatus(
+  status: string,
+): status is PaymentStatus {
+  return (paymentStatuses as readonly string[]).includes(status)
+}
+
 // An unknown status of a payment in a run is read as pending: it never claims a
-// payment is confirmed, and no retry is offered for it.
+// payment is confirmed, and no retry is offered for it. A run screen goes further and
+// shows it as unrecognized (`mergeRow`), since it may mean the payment is in flight.
 export function knownRunPaymentStatus(status: string): PaymentStatus {
   return (paymentStatuses as readonly string[]).includes(status)
     ? (status as PaymentStatus)

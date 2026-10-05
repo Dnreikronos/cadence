@@ -276,6 +276,16 @@ function Done({
       </p>
     )
   }
+  if (counts.unrecognized > 0) {
+    return (
+      <p className="text-ui/normal text-ink-muted">
+        {counts.unrecognized === 1
+          ? "One payment has a status this app doesn't know."
+          : `${counts.unrecognized} payments have a status this app doesn't know.`}{" "}
+        Check the company payments before paying those people another way.
+      </p>
+    )
+  }
   if (counts.cancelled > 0) {
     return (
       <p className="text-ui/normal text-ink-muted">

@@ -27,6 +27,11 @@ const pills: Record<
     className: "border-warning-border bg-warning-bg text-warning-fg",
     dot: "bg-warning-dot",
   },
+  unrecognized: {
+    label: "Unknown",
+    className: "border-line text-ink-muted",
+    dot: "bg-ink-muted/50",
+  },
   cancelled: {
     label: "Not signed",
     className: "border-warning-border bg-warning-bg text-warning-fg",

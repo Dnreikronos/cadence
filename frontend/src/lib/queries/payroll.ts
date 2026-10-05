@@ -3,8 +3,9 @@
 import { useMemo } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
-import { knownRunPaymentStatus, type RunRequest } from "@/lib/api/schemas"
+import type { RunRequest } from "@/lib/api/schemas"
 import { collectPages } from "@/lib/runs/pages"
+import { runPollInterval } from "@/lib/runs/poll"
 import {
   recentWindowMs,
   recentlyPaidIds,
@@ -97,8 +98,6 @@ export function useRecentlyPaid() {
   })
 }
 
-const runPollMs = 5_000
-
 // The run's payments, without amounts. Asks again while any payment is still open, so
 // a run started elsewhere (or confirmed by the network later) catches up.
 export function useRun(runId: string) {
@@ -108,12 +107,11 @@ export function useRun(runId: string) {
     refetchInterval: (query) => {
       const run = query.state.data
       if (!run || query.state.status === "error") return false
-      const open = run.payments.some((payment) => {
-        // An unknown status is read as pending: keep asking.
-        const status = knownRunPaymentStatus(payment.status)
-        return status === "pending" || status === "signed"
-      })
-      return open ? runPollMs : false
+      // A status the app does not know is polled a bounded number of times.
+      return runPollInterval(
+        run.payments.map((payment) => payment.status),
+        query.state.dataUpdateCount,
+      )
     },
   })
 }

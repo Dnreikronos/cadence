@@ -49,6 +49,11 @@ export const sentWithSignatureMessage =
 export const sentWithoutSignatureMessage =
   "This payment may have been sent. Check the company payments and balance before doing anything."
 
+// A status the service sent and this app does not know: the payment may be in flight or
+// paid, so nothing is offered for it.
+export const unrecognizedMessage =
+  "Status unknown: check the company payments before doing anything."
+
 // A cancelled signature sent nothing. These say what to do next without ever suggesting
 // the person was paid.
 export const cancelledGoneMessage =

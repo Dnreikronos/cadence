@@ -1,5 +1,13 @@
-import { knownRunPaymentStatus } from "@/lib/api/schemas"
-import { expiredMessage, failureCodeMessage, type Failure } from "./messages"
+import {
+  isKnownRunPaymentStatus,
+  knownRunPaymentStatus,
+} from "@/lib/api/schemas"
+import {
+  expiredMessage,
+  failureCodeMessage,
+  unrecognizedMessage,
+  type Failure,
+} from "./messages"
 
 // What a payment in a run looks like on screen: the server's status, with what this
 // browser is doing to it laid over the top. `signing`, `waiting` and `unknown` exist
@@ -13,6 +21,9 @@ export type RowStatus =
   | "waiting"
   | "unknown"
   | "cancelled"
+  // The service sent a status this app does not know: the payment may be in flight or
+  // paid, so no action is offered for it.
+  | "unrecognized"
   | "confirmed"
   | "failed"
   | "expired"
@@ -121,6 +132,7 @@ export function mergeRow(local?: LocalRow, serverRow?: ServerRow): Row {
     ...serverRow,
     status: knownRunPaymentStatus(serverRow.status),
   }
+  const unrecognized = !!serverRow && !isKnownRunPaymentStatus(serverRow.status)
   const signature = local?.signature ?? null
   const done: Row = {
     status: "confirmed",
@@ -138,12 +150,21 @@ export function mergeRow(local?: LocalRow, serverRow?: ServerRow): Row {
   if (
     local &&
     local.status !== "failed" &&
-    !(local.status === "cancelled" && settledByServer)
+    // An unrecognized status may mean it is in flight: it beats a cancelled signature.
+    !(local.status === "cancelled" && (settledByServer || unrecognized))
   ) {
     return {
       status: local.status,
       message: local.message ?? null,
       stalled: local.stalled ?? false,
+      signature,
+    }
+  }
+  if (unrecognized) {
+    return {
+      status: "unrecognized",
+      message: unrecognizedMessage,
+      stalled: false,
       signature,
     }
   }
@@ -186,6 +207,8 @@ export function tally(rows: readonly Row[]) {
   const retryable = count(canRetry)
   // Signature cancelled: not sent, waiting for the person to sign again.
   const cancelled = count(canSignAgain)
+  // A status this app does not know: it may be in flight, so nothing is offered.
+  const unrecognized = count((row) => row.status === "unrecognized")
   // Sent and not confirmed, with or without a signature to ask about.
   const sent = count((row) => row.stalled || row.status === "unknown")
   return {
@@ -193,9 +216,10 @@ export function tally(rows: readonly Row[]) {
     confirmed,
     retryable,
     cancelled,
+    unrecognized,
     sent,
-    attention: retryable + cancelled + sent,
-    open: rows.length - confirmed - retryable - cancelled - sent,
+    attention: retryable + cancelled + unrecognized + sent,
+    open: rows.length - confirmed - retryable - cancelled - unrecognized - sent,
   }
 }
 
