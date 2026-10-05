@@ -367,7 +367,10 @@ test.describe("deposit", () => {
       timeout: 60_000,
     })
     await expect(depositField(other)).not.toHaveAttribute("readonly", "")
-    await other.getByRole("button", { name: "Dismiss" }).click()
+    // Refused at the click, it says so and offers to dismiss that; if the first tab's saved
+    // wrap reached it first, it was already waiting on that tab and has nothing to dismiss.
+    const dismiss = other.getByRole("button", { name: "Dismiss" })
+    if (await dismiss.isVisible()) await dismiss.click()
     await depositField(other).fill("1000")
     await makePrivate(other).click()
     await expect(
