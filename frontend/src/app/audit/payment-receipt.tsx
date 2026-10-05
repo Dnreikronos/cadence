@@ -84,7 +84,7 @@ export function PaymentReceipt({
                 rel="noopener noreferrer"
                 className={buttonVariants({ variant: "secondary" })}
               >
-                View on explorer
+                View on Solana Explorer
                 <ExternalLink className="size-3.5" />
                 <span className="sr-only">(opens in a new tab)</span>
               </a>
