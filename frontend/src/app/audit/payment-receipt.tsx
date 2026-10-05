@@ -10,7 +10,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { TransparentBadge } from "@/components/ui/transparent-badge"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import type { AuditRow } from "@/lib/audit/payments"
-import { explorerTxUrl } from "@/lib/audit/receipt"
+import { explorerTxUrl } from "@/lib/receipts/receipt"
 import { cluster } from "@/lib/solana/cluster"
 import { Time, timeFormat } from "./list-parts"
 
@@ -29,6 +29,8 @@ export function PaymentReceipt({
   const [last, setLast] = useState(row)
   if (row && row !== last) setLast(row)
   const shown = row ?? last
+  // Null for a signature that is not base58: no link is built from it.
+  const explorer = shown && explorerTxUrl(shown.signature, cluster.name)
 
   return (
     <Modal
@@ -75,9 +77,9 @@ export function PaymentReceipt({
             </Detail>
           </dl>
           <div className="flex justify-end gap-2">
-            {shown.signature && (
+            {explorer && (
               <a
-                href={explorerTxUrl(shown.signature, cluster.name)}
+                href={explorer}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={buttonVariants({ variant: "secondary" })}
