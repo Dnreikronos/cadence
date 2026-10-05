@@ -56,7 +56,7 @@ const faqs: { question: string; answer: string; icon: LucideIcon }[] = [
     question: "Can Cadence see my amounts?",
     icon: EyeOff,
     answer:
-      "Yes. Cadence generates the proofs, so it holds viewing keys and can read amounts. Payments are signed in your wallet, and Cadence does not custody your funds or store your signing key. Viewing keys are encrypted at rest, and reads are meant to be recorded in an audit log with who and why.",
+      "Yes. Cadence generates the proofs, so it holds viewing keys and can read amounts. Payments are signed in your wallet, and Cadence is not designed to hold your funds or store your signing key. Viewing keys are encrypted at rest, and reads are meant to be recorded in an audit log with who and why.",
   },
   {
     question: "Is this anonymous?",
