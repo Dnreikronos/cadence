@@ -127,7 +127,7 @@ that needs a deployed backend.
   written for the deposit's wrap and reused by apply-pending. Withdraw and payroll use it
   too, through a list of records per viewer. It started in `sessionStorage`; the
   second-tab QA pass (below) moved it, and added a Web Lock to the deposit and to apply
-  pending, as withdraw and payroll already had. Signing out removes the viewer's records.
+  pending, as withdraw and payroll already had. Signing out keeps what may have been sent.
 - **A 100-recipient cap on a run.** A run request takes 1 to 100 payments: each entry
   is about 80 bytes, sized for the 8 KiB body of the wrap and transfer routes. The
   client schema enforces it and the new-run screen blocks above it. The plan had no
@@ -167,7 +167,7 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
 - [x] Persist submissions for withdraw and for payroll with `src/lib/submissions.ts`, and
       check them on return as deposit and apply-pending do. Done: a reload no longer
       forgets a withdrawal or a run payment that may have landed, and a second tab of the
-      same browser sees it too. They are kept per viewer, and signing out removes them.
+      same browser sees it too. They are kept per viewer, and a sign-out keeps what is unresolved.
 - [ ] **Strict CSP, stage 2, before the wallet lands (recommended).** Stage 1 allows
       `'unsafe-inline'` scripts. Once a session key can sign silently, an XSS is a wallet
       drain: move to a nonce with `'strict-dynamic'` and no `unsafe-inline`, plus Trusted
@@ -282,11 +282,16 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
   signed after a reload, and a new run is for it.
 - **The evidence is per browser profile.** Another browser, a private window, another
   device and cleared site data do not see it, so a transaction sent from one is not held in
-  another; signing out removes it, so a person who signs out with a withdrawal in doubt finds
-  nothing held and has to check their history; and records older than 30 days are pruned.
+  another; signing out keeps what is unresolved (so the amount of a withdrawal in doubt
+  stays on that computer's disk, in `localStorage`, readable only through developer tools,
+  until it is released or pruned at 30 days; no other viewer reads it) and removes only what
+  is settled; and records older than 30 days are pruned. A release is checked under the
+  flow's lock against the record the person saw.
   A deposit whose wrap cannot be accounted for stays held in every tab until the person
   releases it (as a withdrawal does). The deposit's apply step and the activation account
-  step still keep no record, only the Web Lock while they are in flight. Server-side idempotency (a key that makes a repeated
+  step still keep no record, only the Web Lock while they are in flight; **the service
+  must refuse an apply it has already done** (the credit counter comparison), because the
+  screen cannot. Server-side idempotency (a key that makes a repeated
   prepare or send answer with what it already did) is the real fix, and belongs to the
   integration. The contract's [The sent-failure rule](../dev/API_CONTRACT.md#the-sent-failure-rule)
   has the detail.

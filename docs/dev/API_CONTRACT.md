@@ -61,7 +61,7 @@ details are easy to over-read, so they are stated exactly:
 | Cluster          | Devnet only today. On another cluster `/wrap` and `/wrap/confirm` fail with `wrap_requires_devnet`. Only `/transfer` and `/transfer/confirm` remap it to `transfer_requires_devnet` (`client.rs:68`, `transfer.rs:335-340`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Rate limits      | Fixed 60 s windows, held in memory per service instance and reset on restart. The wrap routes and the transfer routes each have their own limiter, so a wrap call does not spend transfer quota. Per window and limiter: 120 requests in total, 30 per direct socket peer, and (prepare only) 10 per `company_wallet`. Forwarded IP headers are ignored, so behind a proxy all users share the proxy's peer quota. These are **not** windows: at most 8 requests in flight per limiter, and on `/transfer` at most 4 proof workers. Every limit returns `429` with `Retry-After: 60` and the route's `wrap_rate_limited` or `transfer_rate_limited` code, concurrency caps included. A confirm call spends the same peer and global quota as a prepare call, so polling uses budget. The runs routes use the transfer codes, have their own 120 and 30 per window and share the four proof workers with `/transfer` (see [`RUNS_API.md`](RUNS_API.md)). `/transfer` and `/transfer/confirm` also give up after 30 s with `503 transfer_timeout` (`wrap_limits.rs:41-115`, `transfer.rs:89`). `/health` is not limited. |
 | `Retry-After`    | CORS sets no `expose_headers`, and `Retry-After` is not a CORS-safelisted response header, so cross-origin browser code reads `null` for it. Until the backend exposes it, the web app waits a fixed 60 s on any `429` whose `Retry-After` it cannot read (60 is the only value the service sends) and does not auto-retry in a loop: `ApiError.retryAfter` is 60 then, or the header's value when it is readable (the mock sends it from the same origin, so it is readable there only). **Backend request:** add `Access-Control-Expose-Headers: Retry-After`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Caching          | `Cache-Control: no-store` on every response that carries an amount. The web app fetches every request, downloads included, with `cache: "no-store"` and keeps amounts in memory only (React Query's cache; the only thing written to `localStorage` is the saved submission records, which hold no amount except a withdrawal's, kept until its outcome is final and removed when the person signs out). The service sets no `Cache-Control` on any route today (the only response header it sets itself is `Retry-After`), so this is a backend request.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Caching          | `Cache-Control: no-store` on every response that carries an amount. The web app fetches every request, downloads included, with `cache: "no-store"` and keeps amounts in memory only (React Query's cache; the only thing written to `localStorage` is the saved submission records, which hold no amount except a withdrawal's, kept until its outcome is final or it is pruned, and kept across a sign-out while it is unresolved). The service sets no `Cache-Control` on any route today (the only response header it sets itself is `Retry-After`), so this is a backend request.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Request checks   | The client parses every request body with a strict schema before it leaves the browser, so an unknown field or a malformed value throws in the browser and nothing is sent. Amounts: `1` to `2^48 - 1`, digits only, no leading zero (a read may be `"0"`). Wallets, accounts and `company_wallet`: base58, 32 to 44 characters; the curve is not checked. Request signatures (`signature`, `wallet_signature`): base58, 43 to 88 characters. `request_id`: 64 lowercase hex. `aes_key`: base64 of exactly 16 bytes (22 characters, a last one of `A`, `Q`, `g` or `w`, then `==`). `setup` artifacts: base64. A path segment that is not a GUID is refused before the call, so `..` or `/` never reaches a path. Responses are checked too: one that does not match its schema is a `ContractError`, not an `ApiError`.                                                                                                                                                                                                                                                                                               |
 | Retryable errors | `ApiError.isRetryable` is true for `transaction_not_finalized`, any `429`, `502` to `504` (so `503` too) and `network_error` (the browser could not reach the server). It is false for `500`, every other `4xx` and a `ContractError`. Confirm polling and the screens' "Try again" use that one flag. React Query retries a failed read once, and never a `4xx`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Compatibility    | Additive only. See [Evolving the contract](#evolving-the-contract).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -457,13 +457,17 @@ buttons follow the first's. Where the records live, and when they go:
   no longer matters, because every tab reads the same store.
 - **Removed when settled.** A record goes as soon as its outcome is final (it landed, or
   the network refused it); an unresolved one is kept until the person releases it.
-- **Removed on sign-out.** Signing out of this device or of every device removes the
-  viewer's records from the browser, including the set-aside unreadable ones, so a shared
-  computer keeps no amount for the next person. This is a deliberate trade: a person who
-  signs out with a withdrawal that may have gone through finds nothing held when they
-  sign back in, and has to check their history. A session that ends without a sign-out
-  (it expired, the cookie was cleared) removes nothing, and the next person to sign in
-  never reads it: the keys carry the viewer.
+- **Kept across a sign-out while unresolved.** Signing out of this device or of every
+  device removes only what is settled: the set-aside unreadable leftovers and a payroll
+  attempt whose run has no payment in doubt. A record of something that may have been
+  sent stays, so the same person signing back in still finds it held (removing it would
+  let the same money go out again, which is what the sent-failure rule exists to stop).
+  **The trade-off:** a withdrawal's amount stays in `localStorage` on that computer for as
+  long as it is unresolved (up to the 30 days below), readable only through the browser's
+  developer tools. The keys carry the viewer, so no other person who signs in on that
+  browser reads, is shown or is blocked by it. The cleanup runs on the sign-in page the
+  sign-out lands on, not before the request is sent: a sign-out that fails leaves the page
+  signed in and clears nothing.
 - **Pruned.** Once per page load, records older than 30 days are dropped, whatever
   their outcome: by then a transaction can no longer be in doubt (a blockhash lives
   about 90 seconds) and the person has long had the chance to check. Entries that cannot
@@ -520,18 +524,22 @@ sent from one of them is not held in another: the real fix is idempotency in the
 service (a key that makes a repeated prepare or send answer with what it already did),
 noted for the backend integration. The deposit's apply step and the activation account
 step keep no record, so another tab does not learn of an apply that was sent and not
-seen through there (the lock covers the time it is in flight). A transaction still in
-flight when the person signs out writes its record after the sign-out removed theirs.
+seen through there (the lock covers the time it is in flight).
 The deposit's apply step, past "signing", is held in memory by the tab that sent it
 (the table says so): if that tab is left, or another one opens, nothing says an apply was
 sent and not seen through. Only the lock covers it while it is in flight. The wrap before it has its record.
+**The service must enforce what the screen cannot here:** an apply the browser has no record of must not apply twice. The comparison of the expected and the actual credit counter (`credit_counter_mismatch`, above) is that guard, and it is a requirement of the service, not a courtesy: the web app relies on it for the apply step.
 
 **Deliberate release.** A hold that does not resolve (no signature to ask with, or a
 lookup that stays unknown) is offered for release after two minutes: "I checked my
 history, release this amount" for a withdrawal or a deposit's wrap, "Release this person"
 for a payroll payment, each behind a confirmation that says the earlier attempt may still have been
 sent and that releasing it lets the same money go out again. Nothing about a release is
-logged.
+logged. A release is made on what the person saw: it takes the flow's lock, reads the
+saved record again, and clears it only if it is the very record they saw (same request
+id, signature and time) and is at least two minutes old; otherwise it clears nothing and
+says so (another tab released it and sent again, or settled it, or is working on it). The
+screen then looks at what is saved now.
 
 A deposit's wrap is held the same way. When it is looked up (after a reload, or when
 another tab saved it) and the outcome cannot be told (the service has no record of it, or
@@ -917,6 +925,11 @@ For recipient activation (#67, #68, #80).
   That answer can come for an apply that **did land**: the mock applies the credit,
   stores the receipt and still answers `409`, and confirming the same signature
   again returns the receipt.
+- **Requirement for the backend:** this comparison is what stops an apply from being
+  applied twice. The web app keeps no record of the deposit screen's apply step (only the
+  wrap before it has one), so another tab, or a reload, can send a second apply with
+  nothing on the browser's side to refuse it. The service must refuse an apply it has
+  already done, for every caller, and not leave it to the client.
 
 Both take `{ "wallet": "<public key>" }` and no amount. Neither route exists today.
 Their `confirm` takes `{ request_id, signature }` and returns the receipt.
@@ -1024,8 +1037,8 @@ Amounts are strings of base units in these success responses, because the caller
 is authorized to read them. They stay out of errors, logs, analytics and any
 cache the browser persists. The web app keeps them in memory only, with one exception:
 a withdrawal that may have been sent keeps its amount in `localStorage` (per viewer,
-shared by the tabs of the browser) until its outcome is final or the person signs out,
-so the same amount cannot be sent twice.
+shared by the tabs of the browser) until its outcome is final or it is released or pruned
+(it stays across a sign-out), so the same amount cannot be sent twice.
 
 An auditor with a grant on company A who asks for company B gets `404`.
 
@@ -1242,8 +1255,8 @@ other role gets `403 forbidden_role`. It returns four booleans and nothing else:
 - It never prepares a replacement for a transaction that may have been broadcast
   (see [The sent-failure rule](#the-sent-failure-rule)); where it keeps evidence of a
   send it keeps only ids, a signature, a block height and a wallet address, and for a
-  withdrawal the amount, in `localStorage` until the outcome is final or the person
-  signs out.
+  withdrawal the amount, in `localStorage` until the outcome is final, it is
+  released or it is pruned.
 - It ignores unknown response fields and maps unknown enum values to their safest
   class, with the one known gap in
   [Evolving the contract](#evolving-the-contract).
