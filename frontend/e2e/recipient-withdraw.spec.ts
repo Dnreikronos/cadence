@@ -25,6 +25,21 @@ async function openWithdraw(page: Page, ...scenarios: Scenario[]) {
   return card
 }
 
+// The real sign-out, from the account menu: it clears the query cache and the session.
+async function signOut(page: Page, email: string) {
+  await page.getByRole("button", { name: new RegExp(email) }).click()
+  await page.getByRole("button", { name: "Sign out", exact: true }).click()
+  await page.waitForURL("**/sign-in")
+}
+
+// The keys of the withdrawals this tab has saved, one list per person.
+const savedKeys = (page: Page) =>
+  page.evaluate(() =>
+    Object.keys(window.sessionStorage).filter((key) =>
+      key.startsWith("cadence:submissions:withdraw:"),
+    ),
+  )
+
 const amountField = (card: ReturnType<Page["locator"]>) =>
   card.getByLabel("Amount to withdraw (USDC)")
 
@@ -215,4 +230,131 @@ test("after the network does not confirm in time, the same amount is refused", a
   const done = page.getByRole("region", { name: "Withdrawal complete" })
   await expect(done).toContainText("$500.25")
   await expect(sidebar(page)).toContainText("$7,499.75")
+})
+
+test("a reload while the network is confirming keeps the amount held, and another amount still goes out", async ({
+  page,
+  watch,
+}) => {
+  // Slow answers, a reload and a lookup held on purpose: well past the default 30 s on a slow runner.
+  test.setTimeout(60_000)
+  // After the reload the mock is empty again, so asking about the saved withdrawal gets a
+  // 404: that says nothing about whether it landed, so the amount stays held.
+  watch.allowStatus(404, /\/unwrap\/confirm$/)
+  watch.allowStatus(409, /\/unwrap\/confirm$/)
+  // The reload happens with the withdrawal in flight, so the browser asks first.
+  const prompts: string[] = []
+  page.on("dialog", (dialog) => {
+    prompts.push(dialog.type())
+    void dialog.accept()
+  })
+
+  // The lookup after the reload is held for 3 s, longer than the balance behind the form
+  // takes (`slow` below), so the form is seen while it is still waiting for the answer.
+  await page.addInitScript(() => {
+    const original = window.fetch
+    window.fetch = async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (url.endsWith("/unwrap/confirm")) {
+        await new Promise((resolve) => setTimeout(resolve, 3_000))
+      }
+      return original(input, init)
+    }
+  })
+
+  await signInAs(page, "recipient")
+  // `slow` makes every answer take 1.5 s, so there is a window to reload in. It is read
+  // from the URL on every load.
+  await page.goto("/me/withdraw?mock=slow")
+  const card = page.getByRole("region", { name: "Withdraw to your wallet" })
+  await expect(card).toContainText("$8,000.00")
+
+  await amountField(card).fill("1234.56")
+  await card.getByRole("button", { name: "Withdraw", exact: true }).click()
+  // It is saved as it is handed to the network (the steps are all listed from the start, so
+  // their text does not say where it is).
+  await expect.poll(() => savedKeys(page)).toHaveLength(1)
+  await page.reload()
+  expect(prompts).toContain("beforeunload")
+
+  // The saved withdrawal is looked up before anything new can be sent.
+  await expect(page.getByText("Checking your last withdrawal.")).toBeVisible()
+  await expect(card).toContainText("$8,000.00")
+  await expect(amountField(card)).toBeDisabled()
+  await expect(page.getByText("Checking your last withdrawal.")).toBeHidden()
+
+  // It could not be settled, so the same amount is refused, with the field still holding it.
+  await expect(
+    card.getByText("The withdrawal may have gone through"),
+  ).toBeVisible()
+  await setMock(page, "instant")
+  await amountField(card).fill("1234.56")
+  const withdraw = card.getByRole("button", { name: "Withdraw", exact: true })
+  await expect(withdraw).toHaveAttribute("aria-disabled", "true")
+  await withdraw.click({ force: true })
+  await expect(
+    card.getByText(
+      "A withdrawal for this amount may already have gone through. Check your balance and history, or change the amount.",
+    ),
+  ).toBeVisible()
+  await expect(sidebar(page)).toContainText("$8,000.00")
+
+  // Another amount is its own withdrawal.
+  await amountField(card).fill("500.25")
+  await card.getByRole("button", { name: "Withdraw", exact: true }).click()
+  await expect(
+    page.getByRole("region", { name: "Withdrawal complete" }),
+  ).toContainText("$500.25")
+  await expect(sidebar(page)).toContainText("$7,499.75")
+})
+
+test("signing out keeps what a person left held, for them and for no one else", async ({
+  page,
+  watch,
+}) => {
+  test.setTimeout(60_000)
+  watch.allowStatus(404, /\/unwrap\/confirm$/)
+  watch.allowStatus(409, /\/unwrap\/confirm$/)
+  page.on("dialog", (dialog) => void dialog.accept())
+  const stored = () => savedKeys(page)
+
+  await signInAs(page, "recipient")
+  await page.goto("/me/withdraw?mock=slow")
+  const card = page.getByRole("region", { name: "Withdraw to your wallet" })
+  await expect(card).toContainText("$8,000.00")
+  await amountField(card).fill("1234.56")
+  await card.getByRole("button", { name: "Withdraw", exact: true }).click()
+  await expect.poll(stored).toHaveLength(1)
+  await page.reload()
+  await expect(
+    card.getByText("The withdrawal may have gone through"),
+  ).toBeVisible()
+  const [key] = await stored()
+  expect(key).toBeDefined()
+  // The key names a viewer by a hash, not by an email.
+  expect(key).toMatch(/^cadence:submissions:withdraw:[0-9a-f]{16}$/)
+
+  // Another person signs in on the same tab: nothing of the first one's is shown, or removed.
+  await signOut(page, "bruno@solaris.test")
+  await signInAs(page, "admin")
+  // Let the home page finish asking before it is left: a request cut off by the navigation
+  // is logged by the browser as a failure.
+  await page.waitForLoadState("networkidle")
+  await page.goto("/company/runs/new")
+  await expect(
+    page.getByRole("checkbox", { name: /Bruno Costa/ }),
+  ).toBeVisible()
+  await expect(page.getByText("may have gone through")).toHaveCount(0)
+  expect(await stored()).toEqual([key])
+
+  // The first one signs back in and still finds the amount held.
+  await page.waitForLoadState("networkidle")
+  await signOut(page, "ana@solaris.test")
+  await signInAs(page, "recipient")
+  await page.waitForLoadState("networkidle")
+  await page.goto("/me/withdraw")
+  await expect(card).toContainText("$8,000.00")
+  await expect(
+    card.getByText("The withdrawal may have gone through"),
+  ).toBeVisible()
 })

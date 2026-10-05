@@ -6,7 +6,13 @@ import {
   useMutationState,
   useQueryClient,
 } from "@tanstack/react-query"
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { formatUnits } from "@/lib/money"
@@ -17,10 +23,12 @@ import {
   type WithdrawInput,
 } from "@/lib/withdraw/flow"
 import {
+  checkable,
   checkableKey,
   checkHeldWithdrawals,
   heldOf,
   heldRecordsFor,
+  recordKey,
   withdrawEvidence,
   type HeldCheck,
   type HeldRecord,
@@ -77,27 +85,41 @@ export type WithdrawCheck = {
 }
 
 // Finds out what became of withdrawals sent and not seen through, by confirming their
-// saved signatures again, which prepares nothing. It runs on mount (after a reload, or
-// signing back in) and again after a withdrawal here ends in a sent failure.
+// saved signatures again, which prepares nothing. It looks at the ones found when the
+// screen opens (after a reload, or signing back in), and at all of them when the person
+// asks again. A withdrawal that ends in a sent failure on this very screen is not looked
+// up by itself: the screen says to check, and "Check again" does.
 export function useWithdrawCheck(viewer: ViewerScope): WithdrawCheck {
   const queryClient = useQueryClient()
   const list = heldRecordsFor(viewer)
   const records = useHeldRecords(viewer)
   const running = useWithdrawInFlight()
-  const key = checkableKey(records)
+  // What was held on arrival.
+  const [arrival] = useState(
+    () => new Set(list.read().filter(checkable).map(recordKey)),
+  )
   // Bumped to look again.
   const [tick, setTick] = useState(0)
+  const include = useCallback(
+    (record: HeldRecord) => tick > 0 || arrival.has(recordKey(record)),
+    [tick, arrival],
+  )
+  const key = checkableKey(records, include)
   // The lookup that last ended: for which saved signatures, and which `checkAgain`.
   const [checked, setChecked] = useState<{ key: string; tick: number }>()
   const [settled, setSettled] = useState<readonly HeldCheck[]>([])
+  // Read each render, so the form is disabled before the effect has run.
+  const checking =
+    !running && key !== "" && !(checked?.key === key && checked.tick === tick)
 
   useEffect(() => {
-    if (running || key === "") return
+    if (!checking) return
     const controller = new AbortController()
     checkHeldWithdrawals({
       records: list,
       api,
       refresh: () => void invalidateBalances(queryClient),
+      include,
       signal: controller.signal,
     }).then(
       (checks) => {
@@ -107,18 +129,14 @@ export function useWithdrawCheck(viewer: ViewerScope): WithdrawCheck {
           ...checks.filter((check) => check.outcome !== "unknown"),
         ])
         // Keyed by what is left, so the records it settled do not start another lookup.
-        setChecked({ key: checkableKey(list.read()), tick })
+        setChecked({ key: checkableKey(list.read(), include), tick })
       },
       () => {
         // Aborted by leaving. Anything else was already turned into "unknown".
       },
     )
     return () => controller.abort()
-  }, [list, key, running, tick, queryClient])
-
-  // Read each render, so the form is disabled before the effect has run.
-  const checking =
-    !running && key !== "" && !(checked?.key === key && checked.tick === tick)
+  }, [list, checking, include, tick, queryClient])
 
   return {
     checking,

@@ -59,6 +59,7 @@ export function WithdrawScreen({ viewer }: { viewer: ViewerScope }) {
     return (
       <div aria-busy className="max-w-3xl space-y-4">
         <span className="sr-only">Loading your balance</span>
+        {check.checking && <CheckingNotice />}
         <Skeleton className="h-64 rounded-xl" />
         <Skeleton className="h-48 rounded-xl" />
       </div>

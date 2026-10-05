@@ -129,6 +129,8 @@ type CheckInput = {
   api: { unwrap: Pick<ApiClient["unwrap"], "confirm"> }
   // Balances may have changed: a withdrawal was found confirmed or not to have landed.
   refresh: () => void
+  // Only these are looked up (default: every record). The others are left as they are.
+  include?: (record: HeldRecord) => boolean
   signal?: AbortSignal
   now?: () => number
   sleep?: Parameters<typeof reconcileWrap>[0]["sleep"]
@@ -143,39 +145,43 @@ export async function checkHeldWithdrawals({
   records,
   api,
   refresh,
+  include = () => true,
   signal,
   now,
   sleep,
   pollMs,
 }: CheckInput): Promise<HeldCheck[]> {
   const checks = await Promise.all(
-    records.read().map(async (record): Promise<HeldCheck> => {
-      const amount = record.amount_units
-      if (!record.request_id || !record.signature) {
-        return { amount, outcome: "unknown" }
-      }
-      let outcome: Reconciled
-      try {
-        outcome = await reconcileWrap({
-          record: {
-            request_id: record.request_id,
-            signature: record.signature,
-            at: record.at,
-          },
-          api: { wrap: { confirm: api.unwrap.confirm } },
-          signal,
-          now,
-          sleep,
-          pollMs,
-        })
-      } catch {
-        // Leaving the screen is not an answer; not being able to ask says nothing
-        // about the transaction.
-        signal?.throwIfAborted()
-        outcome = "unknown"
-      }
-      return { amount, outcome }
-    }),
+    records
+      .read()
+      .filter(include)
+      .map(async (record): Promise<HeldCheck> => {
+        const amount = record.amount_units
+        if (!record.request_id || !record.signature) {
+          return { amount, outcome: "unknown" }
+        }
+        let outcome: Reconciled
+        try {
+          outcome = await reconcileWrap({
+            record: {
+              request_id: record.request_id,
+              signature: record.signature,
+              at: record.at,
+            },
+            api: { wrap: { confirm: api.unwrap.confirm } },
+            signal,
+            now,
+            sleep,
+            pollMs,
+          })
+        } catch {
+          // Leaving the screen is not an answer; not being able to ask says nothing
+          // about the transaction.
+          signal?.throwIfAborted()
+          outcome = "unknown"
+        }
+        return { amount, outcome }
+      }),
   )
   const settled = new Set(
     checks.filter((c) => c.outcome !== "unknown").map((c) => c.amount),
@@ -187,11 +193,21 @@ export async function checkHeldWithdrawals({
   return checks
 }
 
-// The records a check can ask about: the screen re-checks when this changes.
-export const checkableKey = (records: readonly HeldRecord[]) =>
+// A record a check can ask about, and what tells one apart from another sent later for
+// the same amount.
+export const checkable = (record: HeldRecord) =>
+  Boolean(record.request_id && record.signature)
+export const recordKey = (record: HeldRecord) =>
+  `${record.amount_units}:${record.signature}`
+
+// The records a check will ask about, as one value: the screen looks again when it changes.
+export const checkableKey = (
+  records: readonly HeldRecord[],
+  include: (record: HeldRecord) => boolean = () => true,
+) =>
   records
-    .filter((record) => record.request_id && record.signature)
-    .map((record) => `${record.amount_units}:${record.signature}`)
+    .filter((record) => checkable(record) && include(record))
+    .map(recordKey)
     .join("|")
 
 // What the person reads once a check has settled a withdrawal. One that stays unknown

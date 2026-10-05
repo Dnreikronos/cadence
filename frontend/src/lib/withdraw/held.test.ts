@@ -180,7 +180,13 @@ describe("held records", () => {
     expect(heldRecords(ana, blocked).read()).toEqual([])
   })
 
-  it("lists the signatures a check can ask about", () => {
+  it("lists the signatures a check can ask about, and only the ones it will look at", () => {
+    expect(
+      checkableKey(
+        [record(), record({ amount_units: "7", signature: "B" })],
+        (r) => r.amount_units === "7",
+      ),
+    ).toBe("7:B")
     expect(checkableKey([])).toBe("")
     expect(checkableKey([record({ signature: undefined })])).toBe("")
     expect(checkableKey([record({ request_id: undefined })])).toBe("")
@@ -466,6 +472,19 @@ describe("checking what became of a held withdrawal", () => {
     ])
     expect(records.read().map((r) => r.amount_units)).toEqual(["3"])
     expect(refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("looks only at the records it is told to, and leaves the others untouched", async () => {
+    const records = heldRecords(ana, fakeStorage())
+    records.upsert(record({ amount_units: "1", signature: "A" }))
+    records.upsert(record({ amount_units: "2", signature: "B" }))
+    const confirm = confirmer(receipt)
+    const { done } = check(records, confirm, {
+      include: (r) => r.amount_units === "2",
+    })
+    expect(await done).toEqual([{ amount: "2", outcome: "confirmed" }])
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(records.read().map((r) => r.amount_units)).toEqual(["1"])
   })
 
   it("stops when the screen is left, leaving every record as it was", async () => {
