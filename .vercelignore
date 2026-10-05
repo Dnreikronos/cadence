@@ -1,3 +1,5 @@
+# This only affects uploads from the Vercel CLI; for repository-connected deploys the
+# project's Root Directory setting is the real control.
 # Only frontend/ is ever built and deployed from a Vercel project (Root Directory:
 # frontend). Everything else here is never part of a deployment, and spikes/ holds
 # unauthenticated routes that use the Turnkey root key.

@@ -165,12 +165,14 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
       check them on return as deposit and apply-pending do. Done: a reload no longer
       forgets a withdrawal or a run payment that may have landed, and signing out keeps
       them per viewer.
-- [ ] **Strict CSP, stage 2, before the wallet lands.** Stage 1 allows
-      `'unsafe-inline'` scripts so every page can stay static. Once a session key can sign
-      silently, an XSS is a wallet drain: move to a nonce with `'strict-dynamic'` and no
-      `unsafe-inline`, plus Trusted Types if the libraries allow. A nonce needs a request
-      per page, so it makes every route dynamic. That is a decision for the team (cost and
-      caching against the protection), not a refactor to slip in.
+- [ ] **Strict CSP, stage 2, before the wallet lands (recommended).** Stage 1 allows
+      `'unsafe-inline'` scripts. Once a session key can sign silently, an XSS is a wallet
+      drain: move to a nonce with `'strict-dynamic'` and no `unsafe-inline`, plus Trusted
+      Types if the libraries allow. It costs far less than it first looked: the app routes
+      and `/` already render per request (the viewer is read from cookies and the responses
+      are no-store), so a nonce does not take static pages away; it needs a middleware that
+      mints it and a pass over the inline scripts. Not done in the security-hardening PR,
+      and the team should confirm the date.
 - [ ] **Pre-sign transaction decoder and a program/destination allowlist.** The client
       signs whatever the service prepares: `lib/api/sign.ts` only checks `required_signers`.
       Decode the v1 message in the browser, check its programs and destinations against an
@@ -189,8 +191,14 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
       password an attacker registered for someone's address still works after the owner
       confirms it by code (checked on the local stack). Clear `encrypted_password` in a
       `BEFORE UPDATE OF email_confirmed_at` trigger on `auth.users` when the column goes
-      from null to set (tried by hand locally: the attacker's login then failed and the
-      owner's code sign-in worked), with a pgTAP test, and turn off password sign-in on the
+      from null to set. The function only edits `NEW`: no `SECURITY DEFINER`, schema-qualified,
+      `REVOKE ALL ... FROM PUBLIC`. Tried by hand on the local stack in that form: the
+      attacker's login then failed and the owner's code sign-in worked. Not run against a
+      hosted database, and it needs a pgTAP test. Resetting
+      `raw_user_meta_data` in the trigger does not stick (GoTrue writes its copy back after
+      confirming), so the custom-access-token hook must never read `user_metadata`
+      (`tknonce` included): use `app_metadata` or a server-side binding. Turn off password
+      sign-in on the
       hosted project if the dashboard has the switch. Then the rest of the **hosted
       Supabase settings:** email confirmation on, exact redirect URLs
       (`https://<site>/auth/confirm`, no wildcards), a short JWT expiry, and an RS256

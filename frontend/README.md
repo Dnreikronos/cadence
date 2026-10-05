@@ -312,9 +312,17 @@ because anyone can register a password for an address that is not theirs (**pre-
   first (the CLI's `config.toml` has no such key) and whether the hosted dashboard has
   one was not checked, so the working fix is the second: a `BEFORE UPDATE OF
 email_confirmed_at` trigger on `auth.users`, firing when it goes from null to set, that
-  sets `encrypted_password := ''`. Tried by hand on the local stack, it made the
-  attacker's login fail with `invalid_credentials` and left the owner's code sign-in
-  working. It is a migration, so it is the backend's to add and test; it is not in this PR.
+  sets `encrypted_password := ''`. Tried by hand on the local stack, without `SECURITY DEFINER` (the function only
+  edits `NEW`) and with `REVOKE ALL ... FROM PUBLIC`, it made the attacker's login fail
+  with `invalid_credentials` and left the owner's code sign-in working. Not run against a
+  hosted database. It is a migration, so it is the backend's to add and test; it is not in this PR.
+- **Attacker-supplied `user_metadata` survives too.** `signUp` accepts a `data` object,
+  and it is still on the user after the owner confirms. A trigger cannot clear it
+  reliably: tried on the local stack, resetting `raw_user_meta_data` in the same trigger
+  did not stick, because GoTrue writes its in-memory copy of the metadata back after the
+  confirmation. So nothing that matters may read `user_metadata` (for example the
+  custom-access-token hook's `tknonce`, when it lands): use `app_metadata` or a
+  server-side binding, as the embedded-wallet spike suggests.
 
 The code is entered on the form. The link
 lands on `/auth/confirm`, which only shows a "Continue" button: the token is
@@ -369,10 +377,15 @@ inside the emailed link, so they survive opening the email on another device.
 The link is built from `{{ .RedirectTo }}`, whose origin is `NEXT_PUBLIC_SITE_URL`
 (`src/lib/auth/site-url.ts`), never the request's `Origin` or forwarded host: Next's
 server-action origin check trusts `X-Forwarded-Host`, so a forged host could otherwise put
-an attacker's origin in a link that Supabase sends to the victim. It is required in a
-production build with Supabase configured (the build fails without it), must be https
-(plain http only for localhost), and may be unset under `next dev` and in tests, where
-the request's `Origin` is the fallback.
+an attacker's origin in a link that Supabase sends to the victim. It is required in **any**
+production build with Supabase configured, a Vercel Preview included (the build fails
+without it), must be https (plain http only for localhost under `next dev` and in tests,
+never in a production build), and may be unset under `next dev` and in tests, where the
+request's `Origin` is the fallback. A Preview that uses Supabase therefore needs a fixed
+https origin it will be served from (a branch alias or a domain assigned to the
+environment, set as `NEXT_PUBLIC_SITE_URL` for Preview, and listed in the Supabase
+redirect URLs); Vercel's per-deployment URL is not known at build time. A Preview with
+the Supabase variables unset (the demo) needs none.
 
 On the hosted project, list the redirect URLs **exactly**: `https://<site>/auth/confirm`
 for each deployed origin, no `*` or `/**` on the host or the path. The local config keeps
@@ -397,30 +410,35 @@ the [completion plan](../docs/plans/2026-10-04-frontend-completion.md#before-goi
 `next.config.ts` sets these on every response, built from the `NEXT_PUBLIC_*` values the
 build inlines (`src/lib/security-headers.ts`):
 
-- `Content-Security-Policy` (stage 1, header-only so no route is forced dynamic):
-  `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
-img-src 'self' data: blob:; font-src 'self'; connect-src 'self' <proof service, or the
-mock origin in mock mode> <Supabase> https://api.turnkey.com <Solana RPC>;
-worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self';
-frame-ancestors 'none'`. The `/dev/*` pages say `frame-ancestors 'self'` (they frame each
-  other) and `X-Frame-Options: SAMEORIGIN`. The mock origin has to be listed in mock mode:
-  MSW answers it inside the page, but the browser checks `connect-src` before the worker
-  sees the request. `next dev` gets only `frame-ancestors`, because its refresh runtime
-  needs `eval`. There is no `unsafe-eval`: zod is set `jitless` (`src/lib/zod-config.ts`,
-  loaded first by `src/instrumentation-client.ts`) so it never probes for `new Function`,
-  which a strict CSP reports as a violation.
+- `Content-Security-Policy` (stage 1): `default-src 'self'; script-src 'self'
+'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src
+'self'; connect-src 'self' <proof service, or the mock origin in mock mode> <Supabase>
+https://api.turnkey.com <Solana RPC>; worker-src 'self' blob:; object-src 'none';
+base-uri 'self'; form-action 'self'; frame-ancestors 'none'`. The `/dev/*` pages say
+  `frame-ancestors 'self'` (they frame each other) and `X-Frame-Options: SAMEORIGIN`. The
+  mock origin has to be listed in mock mode: MSW answers it inside the page, but the
+  browser checks `connect-src` before the worker sees the request. `next dev` gets only
+  `frame-ancestors`, because its refresh runtime needs `eval`. There is no `unsafe-eval`:
+  zod is set `jitless` (`src/lib/zod-config.ts`, loaded first by
+  `src/instrumentation-client.ts`) so it never probes for `new Function`, which a strict
+  CSP reports as a violation.
 - `X-Frame-Options: DENY`, `Referrer-Policy: same-origin` (not `no-referrer`: Chrome then
   sends `Origin: null` with the confirm form's POST, which the verify route refuses),
   `X-Content-Type-Options: nosniff`,
   `Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()`, and
-  `Strict-Transport-Security: max-age=63072000; includeSubDomains` in production builds
-  only. `poweredByHeader` is off.
+  `Strict-Transport-Security: max-age=31536000` in production builds only. HSTS is a year
+  and has no `includeSubDomains` for the first deploy, so a mistake costs one host for a
+  year rather than every subdomain of the domain; raise it once the deploy has run clean.
+  `poweredByHeader` is off.
 
-The inline allowances are the cost of keeping every page static-capable: a nonce-based
-policy with `strict-dynamic` makes every route dynamic, and is the team's decision before
-the wallet lands. A new third-party origin (analytics, fonts, an image host) needs adding
-to `connectSources` or the policy, and the e2e suite fails on any violation
-(`e2e/csp.spec.ts` and the console watch in `e2e/support/test.ts`).
+The inline allowances are what stage 1 costs. A nonce-based stage 2 (`nonce` plus
+`strict-dynamic`, no `unsafe-inline`) would remove them, and it is cheaper than it
+sounds: the app routes and `/` already render per request (the viewer is read from
+cookies and the responses are no-store), so a nonce does not take static pages away. It
+is recommended before the wallet lands and is not done here. A new third-party origin
+(analytics, fonts, an image host) needs adding to `connectSources` or the policy, and the
+e2e suite fails on any violation (`e2e/csp.spec.ts` and the console watch in
+`e2e/support/test.ts`).
 
 ## End-to-end tests
 
@@ -509,13 +527,15 @@ debits) with `src/lib/solana/balances.ts`; mock mode answers that read from the 
 
 Vercel builds this directory, with a preview for every pull request. The project's
 **Root Directory must be `frontend/`**: the frontend is the only thing a Vercel project
-may build, and `.vercelignore` at the repository root keeps `spikes/`, `services/`,
-`supabase/`, `ops/` and `docs/` out of an upload. In particular
+may build. `.vercelignore` at the repository root keeps `spikes/`, `services/`,
+`supabase/`, `ops/` and `docs/` out of an upload, but it only affects uploads from the
+Vercel CLI: for Git-connected deploys the Root Directory setting is the real control. In particular
 **`spikes/embedded-wallet/web` must never be deployed**: it has unauthenticated routes that
 use the Turnkey root key (it is to be removed from `main`). Set the variables from
 `.env.example` per environment: Production gets `mainnet`, Preview and Development get
-`devnet`. Production also sets `NEXT_PUBLIC_SITE_URL` (the https origin of the deploy)
-when Supabase is configured, and no `NEXT_PUBLIC_DEV_TOOLS`.
+`devnet`. Every environment that configures Supabase also sets `NEXT_PUBLIC_SITE_URL` (the https
+origin it is served from), Production and Preview alike, and Production sets no
+`NEXT_PUBLIC_DEV_TOOLS`.
 
 `NEXT_PUBLIC_API_MODE` must be set outside `next dev`, or the build fails. A Preview
 can run `mock` (with the Supabase variables unset, the demo viewer is on). Production must

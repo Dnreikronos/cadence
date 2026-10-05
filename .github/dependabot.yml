@@ -33,3 +33,13 @@ updates:
     groups:
       actions:
         patterns: ['*']
+
+  # The proof service's crates.
+  - package-ecosystem: cargo
+    directory: /services/proof
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      proof-service:
+        patterns: ['*']
