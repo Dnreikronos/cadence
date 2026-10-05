@@ -1,6 +1,7 @@
 import type { ApiClient } from "@/lib/api/client"
 import { ApiError, messageFor } from "@/lib/api/errors"
 import type { Receipt } from "@/lib/api/schemas"
+import { otherTabMessage } from "@/lib/flow-lock"
 import {
   ConfirmTimeoutError,
   UnexpectedSignerError,
@@ -57,6 +58,15 @@ export class ApplyInProgressError extends Error {
   constructor() {
     super("An apply is already in progress")
     this.name = "ApplyInProgressError"
+  }
+}
+
+// Another tab holds the apply lock (it is applying, or looking up an apply it sent): this
+// one prepared and sent nothing.
+export class ApplyOtherTabError extends Error {
+  constructor() {
+    super(otherTabMessage("update"))
+    this.name = "ApplyOtherTabError"
   }
 }
 
@@ -147,6 +157,7 @@ export const sentMessage =
 export function applyPendingMessage(error: unknown): string {
   if (error instanceof SentApplyError) return sentMessage
   if (error instanceof StorageUnavailableError) return storageBlockedMessage
+  if (error instanceof ApplyOtherTabError) return otherTabMessage("update")
   if (error instanceof ApplyInProgressError) {
     return "An update is already in progress. Wait for it to finish."
   }

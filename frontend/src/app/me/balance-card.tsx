@@ -8,6 +8,7 @@ import { buttonVariants } from "@/components/ui/button"
 import { ApiErrorState } from "@/components/ui/api-error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
+import { otherTabMessage } from "@/lib/flow-lock"
 import { balanceReaders } from "@/lib/me/copy"
 import { applyPendingMessage } from "@/lib/me/apply-pending"
 import { lastApplyMessage } from "@/lib/me/last-apply"
@@ -17,8 +18,9 @@ import { useApplyPending } from "@/lib/queries/me"
 import { Units } from "./units"
 
 export function BalanceCard() {
-  const balance = useMyBalance(useViewerScope())
-  const apply = useApplyPending(balance.data)
+  const viewer = useViewerScope()
+  const balance = useMyBalance(viewer)
+  const apply = useApplyPending(balance.data, viewer)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const alertRef = useRef<HTMLDivElement>(null)
 
@@ -55,6 +57,7 @@ export function BalanceCard() {
   const hasPending = BigInt(pending) > 0n
   const { ui } = apply
   const note =
+    (apply.otherTab === "busy" ? otherTabMessage("update") : null) ??
     ui.status ??
     lastApplyMessage(apply.last) ??
     (apply.settle === "timed-out"

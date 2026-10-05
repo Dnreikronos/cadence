@@ -1,4 +1,5 @@
 import type { ApiClient } from "@/lib/api/client"
+import type { Acquired, Lease } from "@/lib/flow-lock"
 import type { Submission } from "@/lib/submissions"
 import {
   canRetry,
@@ -17,7 +18,7 @@ import {
   earlierToRecord,
   type EarlierPending,
 } from "./message"
-import { reconcileWrap, type Reconciled } from "./reconcile"
+import { reconcileWrap, wait, type Reconciled } from "./reconcile"
 import type { MakePrivateStep } from "./types"
 
 export const SUBMISSION_KIND = "wrap"
@@ -26,7 +27,12 @@ export type MakePrivateState =
   | { status: "idle" }
   | { status: "running"; step: MakePrivateStep }
   // Finding out what became of a wrap sent earlier, before anything new is sent.
-  | { status: "checking" }
+  // `otherTab`: the lock is another tab's, which is sending or checking a deposit, so
+  // this one waits for it.
+  | { status: "checking"; otherTab?: boolean }
+  // Another tab is working on a deposit and holds the lock: nothing was sent from here.
+  // Informational, like `resolved`: the form is free.
+  | { status: "other-tab" }
   | {
       status: "failed"
       step: MakePrivateStep
@@ -66,6 +72,10 @@ export type Deps = {
   // one (`requireDurable`): asked before a flow starts, and again right after the record
   // of the wrap is written, before the send.
   requireStorage?: () => void
+  // One tab at a time (`flow-lock.ts`): asks for the lock without waiting. It is held for
+  // the whole run of a deposit or an apply, and while a saved wrap is looked up; a tab
+  // that cannot get it sends nothing.
+  lock?: () => Promise<Acquired>
   now?: () => number
   sleep?: Parameters<typeof reconcileWrap>[0]["sleep"]
 }
@@ -251,10 +261,16 @@ export class MakePrivateController {
 
   private begin(from: "wrap" | "apply") {
     if (this.running || this.state.status === "checking") return
-    // A wrap sent and not seen through blocks another, whatever the screen shows.
+    // A wrap sent and not seen through blocks another, whatever the screen shows. One
+    // that another tab saved since this screen opened is looked into the same way.
     if (from === "wrap") {
       const { store, wallet } = this.getDeps()
-      if (store.read()?.wallet === wallet) return
+      if (store.read()?.wallet === wallet) {
+        // After a failure of this screen's own, the person ends it first.
+        if (this.state.status === "failed") return
+        this.set({ status: "checking" })
+        return this.reconcile()
+      }
     }
     // An apply that went out is looked into first, whatever the screen shows.
     if (from === "apply" && this.sentApply) return
@@ -277,7 +293,78 @@ export class MakePrivateController {
     const abort = new AbortController()
     this.abort = abort
     this.running = true
-    return this.run(from, generation, abort)
+    const { lock } = this.getDeps()
+    return lock
+      ? this.runLocked(from, generation, abort, lock)
+      : this.run(from, generation, abort)
+  }
+
+  // One tab at a time: the lock is asked for first and held until the run has ended.
+  // A tab that cannot get it sends nothing and says so. Another tab may have sent a wrap
+  // while this one asked, so the record is read again once the lock is held.
+  private async runLocked(
+    from: "wrap" | "apply",
+    generation: number,
+    abort: AbortController,
+    lock: () => Promise<Acquired>,
+  ) {
+    const got = await lock()
+    if (!this.live(generation)) {
+      if (got.status !== "busy") got.lease.release()
+      return
+    }
+    if (got.status === "busy") {
+      this.running = false
+      this.set({ status: "other-tab" })
+      return
+    }
+    let held = true
+    const letGo = () => {
+      if (held) got.lease.release()
+      held = false
+    }
+    try {
+      const { store, wallet } = this.getDeps()
+      if (from === "wrap" && store.read()?.wallet === wallet) {
+        // Looking asks for the lock itself: this one is let go first.
+        letGo()
+        this.running = false
+        this.set({ status: "checking" })
+        return this.reconcile()
+      }
+      return await this.run(from, generation, abort)
+    } finally {
+      letGo()
+    }
+  }
+
+  // Waits for the lock while another tab has it, showing that it does. Null when the
+  // screen was left meanwhile.
+  private async waitForLock(
+    generation: number,
+    signal: AbortSignal,
+  ): Promise<Lease | null> {
+    const { lock, sleep = wait } = this.getDeps()
+    if (!lock) return { release: () => {} }
+    for (let tries = 0; ; tries++) {
+      const got = await lock()
+      if (!this.live(generation) || signal.aborted) {
+        if (got.status !== "busy") got.lease.release()
+        return null
+      }
+      if (got.status !== "busy") {
+        if (this.state.status === "checking" && this.state.otherTab) {
+          this.set({ status: "checking" })
+        }
+        return got.lease
+      }
+      this.set({ status: "checking", otherTab: true })
+      try {
+        await sleep(tries < 3 ? 500 : 3_000, signal)
+      } catch {
+        return null
+      }
+    }
   }
 
   private live(generation: number) {
@@ -380,9 +467,20 @@ export class MakePrivateController {
     const abort = new AbortController()
     this.abort = abort
     this.running = true
+    let lease: Lease | null = null
     try {
+      // Another tab may be sending or checking it: wait for its turn.
+      lease = await this.waitForLock(generation, abort.signal)
+      if (!lease) return
+      // That tab may have seen it through while this one waited.
+      const current = deps.store.read()
+      if (!current || current.wallet !== deps.wallet) {
+        deps.refresh()
+        this.set({ status: "idle" })
+        return
+      }
       const outcome = await reconcileWrap({
-        record,
+        record: current,
         api: deps.api,
         signal: abort.signal,
         now: deps.now,
@@ -394,7 +492,7 @@ export class MakePrivateController {
       this.set({
         status: "resolved",
         outcome,
-        earlierPending: earlierFromRecord(record.earlier_pending),
+        earlierPending: earlierFromRecord(current.earlier_pending),
       })
     } catch {
       if (!this.live(generation) || abort.signal.aborted) return
@@ -410,6 +508,7 @@ export class MakePrivateController {
         recheck: false,
       })
     } finally {
+      lease?.release()
       if (this.live(generation)) this.running = false
     }
   }

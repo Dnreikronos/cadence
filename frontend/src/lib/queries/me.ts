@@ -7,10 +7,22 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
-import { useEffect, useRef, useState } from "react"
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { apiConfig } from "@/lib/api/mode"
+import {
+  acquireFlowLock,
+  flowLockName,
+  waitForFlowLock,
+  type OtherTab,
+} from "@/lib/flow-lock"
 import { requireDurable } from "@/lib/storage-guard"
 import { saveBlob } from "@/lib/download"
 import { applyUi, type Lock } from "@/lib/me/apply-ui"
@@ -18,14 +30,8 @@ import {
   APPLY_KIND,
   sentMessage,
   type ApplyPhase,
-  type ApplyStore,
 } from "@/lib/me/apply-pending"
-import {
-  checkLastApply,
-  sentApply,
-  type LastApply,
-  type LastApplyStore,
-} from "@/lib/me/last-apply"
+import { checkLastApply, sentApply, type LastApply } from "@/lib/me/last-apply"
 import {
   SETTLE_TIMEOUT_MS,
   settleState,
@@ -33,14 +39,10 @@ import {
   type BalanceRead,
   type Confirmed,
 } from "@/lib/me/settle"
-import {
-  clearSubmission,
-  readSubmission,
-  recordSubmission,
-} from "@/lib/submissions"
+import { submissionStore } from "@/lib/submissions"
 import { useSignAndConfirm, useWallet } from "@/lib/wallet/context"
 import { invalidateBalances } from "./invalidate"
-import { queryKeys } from "./keys"
+import { queryKeys, type ViewerScope } from "./keys"
 import {
   applyKey,
   applyPendingMutation,
@@ -54,12 +56,8 @@ export const useRecentPayments = () => useQuery(queries.recent())
 
 export const usePaymentHistory = () => useInfiniteQuery(queries.history())
 
-// Where the apply in flight is kept, so a reload can find out what became of it.
-const applyStore: ApplyStore & LastApplyStore = {
-  read: () => readSubmission(APPLY_KIND),
-  record: (record) => recordSubmission(record),
-  clear: () => clearSubmission(APPLY_KIND),
-}
+export const applyLockName = (viewer: ViewerScope) =>
+  flowLockName("apply-pending", viewer)
 
 // Balances and the setup state, after something that may have changed them.
 function refreshAccount(queryClient: ReturnType<typeof useQueryClient>) {
@@ -70,15 +68,33 @@ function refreshAccount(queryClient: ReturnType<typeof useQueryClient>) {
 }
 
 // Applying pending credits, with everything around it that keeps it from being sent
-// twice: one at a time, a lock while an apply sent earlier is looked up (also after a
-// reload), no retry after a failure that may have gone through, and no second apply
-// while the balance catches up with a confirmed one.
-export function useApplyPending(balance: BalanceRead | undefined) {
+// twice: one at a time (also across tabs: a Web Lock for the whole apply, and the saved
+// record that every tab of the browser sees), a lock while an apply sent earlier is looked
+// up (also after a reload), no retry after a failure that may have gone through, and no
+// second apply while the balance catches up with a confirmed one.
+export function useApplyPending(
+  balance: BalanceRead | undefined,
+  viewer: ViewerScope,
+) {
   const queryClient = useQueryClient()
+  // Where the apply in flight is kept for this viewer, so a reload or another tab can
+  // find out what became of it.
+  const { email, company, companyId } = viewer
+  const applyStore = useMemo(
+    () => submissionStore(APPLY_KIND, { email, company, companyId }),
+    [email, company, companyId],
+  )
+  const savedVersion = useSyncExternalStore(
+    applyStore.subscribe,
+    applyStore.version,
+    () => null,
+  )
   const wallet = useWallet()
   const run = useSignAndConfirm()
   const [phase, setPhase] = useState<ApplyPhase | null>(null)
   const [lock, setLock] = useState<Lock>("none")
+  // Another tab is applying, or looking up an apply it sent.
+  const [otherTab, setOtherTab] = useState<OtherTab>(null)
   const [last, setLast] = useState<LastApply>("none")
   // Bumped to look up the last apply again.
   const [tick, setTick] = useState(0)
@@ -98,6 +114,7 @@ export function useApplyPending(balance: BalanceRead | undefined) {
       wallet,
       run,
       store: applyStore,
+      lock: () => acquireFlowLock(applyLockName(viewer)),
       requireStorage: () => requireDurable(apiConfig.mode),
       onPhase: setPhase,
       onApplied: () => toast.success("Pending balance is now available"),
@@ -108,23 +125,38 @@ export function useApplyPending(balance: BalanceRead | undefined) {
   const { reset, variables } = mutation
 
   // An apply sent and not seen through is looked up by confirming it again, which
-  // prepares nothing. It runs on mount (after a reload) and after a sent failure.
+  // prepares nothing. It runs on mount (after a reload), after a sent failure, and when
+  // another tab saves one. The apply lock is held while it looks, and waited for while
+  // another tab has it: that tab may be sending the very apply this one would look up.
   useEffect(() => {
     if (wallet.status !== "ready" || running) return
-    if (!sentApply(applyStore, wallet.address)) return
+    if (!sentApply(applyStore, wallet.address)) {
+      // Nothing saved (another tab settled it): nothing is being looked up.
+      setLock((current) => (current === "checking" ? "none" : current))
+      setOtherTab(null)
+      return
+    }
     const controller = new AbortController()
+    const { signal } = controller
     // What was pending when Apply was pressed, if this screen pressed it.
     const pressed = variables?.pendingBefore
     setLock("checking")
-    checkLastApply({
-      store: applyStore,
-      wallet: wallet.address,
-      accounts: api.accounts,
-      refresh: () => void refreshAccount(queryClient),
-      signal: controller.signal,
-    }).then(
-      (outcome) => {
-        if (controller.signal.aborted) return
+    void (async () => {
+      const taken = await waitForFlowLock(applyLockName(viewer), {
+        signal,
+        onBusy: () => setOtherTab("busy"),
+      })
+      if (!taken) return
+      setOtherTab(taken.status === "maybe-busy" ? "maybe" : null)
+      try {
+        const outcome = await checkLastApply({
+          store: applyStore,
+          wallet: wallet.address,
+          accounts: api.accounts,
+          refresh: () => void refreshAccount(queryClient),
+          signal,
+        })
+        if (signal.aborted) return
         setLock("none")
         setLast(outcome)
         // The read can lag behind it, as after an apply confirmed here.
@@ -138,13 +170,15 @@ export function useApplyPending(balance: BalanceRead | undefined) {
         }
         // The failure it explained is settled: no stale "check" prompt.
         reset()
-      },
-      () => {
+      } catch {
         // The service could not be asked: the lock stays until it can be.
-        if (!controller.signal.aborted) setLock("check-failed")
-      },
-    )
+        if (!signal.aborted) setLock("check-failed")
+      } finally {
+        taken.lease.release()
+      }
+    })()
     return () => controller.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     wallet.status,
     wallet.address,
@@ -153,6 +187,8 @@ export function useApplyPending(balance: BalanceRead | undefined) {
     queryClient,
     reset,
     variables,
+    applyStore,
+    savedVersion,
   ])
 
   const confirmed = mutation.data?.confirmed ?? recovered
@@ -216,6 +252,7 @@ export function useApplyPending(balance: BalanceRead | undefined) {
 
   return {
     ui,
+    otherTab,
     lock: effectiveLock,
     settle,
     last,

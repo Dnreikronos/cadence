@@ -64,6 +64,7 @@ import {
   runEvidenceFor,
   runSeenBefore,
   settleAttempts,
+  runBlocker,
   unreadableMessage,
 } from "@/lib/runs/evidence"
 import { useLeaveGuard } from "@/lib/runs/use-leave-guard"
@@ -99,7 +100,7 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
   const auditors = useAuditors()
   const signer = useRunSigner(viewer)
   // What an earlier page left behind: the key of a run attempt, and the payments that may
-  // have been sent. Kept per viewer in this tab's storage.
+  // have been sent. Kept per viewer in the browser's storage, shared by its tabs.
   const evidence = runEvidenceFor(viewer)
   const sentPayments = useSentPayments(viewer)
   const unsettled = useUnsettledPeople(viewer)
@@ -298,6 +299,16 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
         return
       }
       const lease = got.lease
+      // Another tab may have sent a payment to someone in this list, or left saved state
+      // this tab cannot read, while the lock was being asked for: look at what is saved
+      // now, with the lock held.
+      const blocker = runBlocker(evidence, review.recipients)
+      if (blocker) {
+        lease.release()
+        setCreateError(blocker)
+        done()
+        return
+      }
       // Written before the request goes out, so a reload during it still knows the key.
       beginAttempt(
         evidence,
