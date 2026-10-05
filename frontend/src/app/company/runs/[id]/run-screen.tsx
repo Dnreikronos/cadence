@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { ApiErrorState } from "@/components/ui/api-error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { isApiError } from "@/lib/api/errors"
+import type { ViewerScope } from "@/lib/queries/keys"
 import { usePeople } from "@/lib/queries/people"
 import { useRun } from "@/lib/queries/payroll"
 import { runMessage } from "@/lib/runs/messages"
@@ -32,10 +33,16 @@ export function RunNotFound() {
   )
 }
 
-export function RunScreen({ runId }: { runId: string }) {
+export function RunScreen({
+  runId,
+  viewer,
+}: {
+  runId: string
+  viewer: ViewerScope
+}) {
   const run = useRun(runId)
   const people = usePeople()
-  const signer = useRunSigner()
+  const signer = useRunSigner(viewer)
   useLeaveGuard(signer.busy || holdsUnconfirmed(signer.local))
 
   const data = run.data

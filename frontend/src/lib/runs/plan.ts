@@ -5,6 +5,7 @@ import {
   type RunRequest,
 } from "@/lib/api/schemas"
 import { formatBaseUnits, formatUnits, sumUnits } from "@/lib/money"
+import { stableHash } from "@/lib/submissions"
 
 // Who a payroll run can pay, and what it would cost. All amounts are base-unit strings.
 
@@ -199,14 +200,30 @@ export function createdMatches(request: RunRequest, created: RunCreated) {
 // one; a changed list is a different attempt and gets its own.
 export type AttemptKey = { fingerprint: string; key: string }
 
+// A stable hash of the wallet and the sorted person ids with their amounts: the same
+// people and amounts give the same value in any order and after a reload, and any other
+// list gives another. It is what a saved attempt is matched on (see `evidence.ts`).
 export function fingerprintOf(
   companyWallet: string,
   recipients: readonly PayrollPerson[],
 ) {
-  return JSON.stringify([
-    companyWallet,
-    recipients.map((person) => [person.id, person.amount]),
-  ])
+  const entries = recipients
+    .map((person) => `${person.id}:${person.amount ?? ""}`)
+    .sort()
+  return stableHash(companyWallet, ...entries)
+}
+
+// People who would be paid but have a payment of an earlier run that may have been sent
+// and is not settled yet: they leave the roster until it is, since paying them again
+// could pay them twice.
+export function holdChecking(
+  payable: readonly PayrollPerson[],
+  checking: ReadonlySet<string>,
+) {
+  return {
+    payable: payable.filter((person) => !checking.has(person.id)),
+    checking: payable.filter((person) => checking.has(person.id)),
+  }
 }
 
 export function attemptKey(

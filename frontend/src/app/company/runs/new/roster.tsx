@@ -7,6 +7,7 @@ import { AmountDisplay } from "@/components/ui/amount-display"
 import { AvatarPerson } from "@/components/ui/avatar-person"
 import { buttonVariants } from "@/components/ui/button"
 import { unitsToUsd } from "@/lib/money"
+import type { SentPayment } from "@/lib/runs/evidence"
 import { initialsOf } from "@/lib/runs/people"
 import {
   excludedNote,
@@ -143,6 +144,81 @@ function PayableRow({
         </p>
       )}
     </li>
+  )
+}
+
+// People whose last payment may already have gone out and is not settled. They cannot be
+// ticked until it is, so a second run cannot pay them twice; the page asks the service
+// about each one that has a signature, and this list empties as the answers come in.
+// One it could not settle stays here, with a way to ask again.
+export function CheckingList({
+  checking,
+  payments,
+  lookingUp,
+}: {
+  checking: readonly PayrollPerson[]
+  payments: readonly SentPayment[]
+  // Ids of the payments being asked about right now.
+  lookingUp: ReadonlySet<string>
+}) {
+  return (
+    <section
+      aria-labelledby="checking-heading"
+      className="rounded-xl border border-warning-border bg-warning-bg p-4"
+    >
+      <h2
+        id="checking-heading"
+        className="flex items-center gap-2 text-ui font-medium text-warning-fg"
+      >
+        <TriangleAlert aria-hidden className="size-4 shrink-0" />
+        Last payment not settled ({checking.length})
+      </h2>
+      <p className="mt-1 text-ui/normal text-warning-fg">
+        A payment to these people may already have gone out, so they can&apos;t
+        be in a new run until it is confirmed or refused. Paying them again
+        could pay them twice.
+      </p>
+      <ul className="mt-3 divide-y divide-warning-border rounded-lg border border-warning-border bg-surface">
+        {checking.map((person) => {
+          const sent = payments.find(
+            (payment) => payment.person_id === person.id,
+          )
+          return (
+            <li
+              key={person.id}
+              className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3"
+            >
+              <span className="min-w-0 flex-1 basis-48">
+                <span className="block text-ui font-medium wrap-break-word text-ink">
+                  {person.name}
+                </span>
+                <span className="block text-caption break-all text-ink-muted">
+                  {person.email}
+                </span>
+                <span className="mt-0.5 block text-caption text-ink-muted">
+                  {!sent?.signature
+                    ? "May have been sent and can't be looked up: check the company's payments and balance"
+                    : lookingUp.has(sent.payment_id)
+                      ? "Checking whether it went through"
+                      : "Couldn't tell whether it went through: open the run to check again"}
+                </span>
+              </span>
+              {sent && (
+                <Link
+                  href={`/company/runs/${sent.run_id}`}
+                  className={buttonVariants({
+                    variant: "secondary",
+                    size: "sm",
+                  })}
+                >
+                  Open the run
+                </Link>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
 

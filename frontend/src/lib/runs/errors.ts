@@ -15,6 +15,15 @@ export class SentPaymentError extends Error {
   }
 }
 
+// A payment sent earlier was looked up again and is not on the network: it was refused,
+// or it was seen missing until its blockhash ran out, so it can no longer land.
+export class PaymentNotOnChainError extends Error {
+  constructor() {
+    super("The payment did not land")
+    this.name = "PaymentNotOnChainError"
+  }
+}
+
 // The service answered for a different payment or person than the one asked about.
 export class ResponseMismatchError extends Error {
   constructor() {

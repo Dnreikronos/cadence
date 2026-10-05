@@ -2,6 +2,7 @@ import { ApiError, isApiError, messageFor } from "@/lib/api/errors"
 import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
+  PaymentNotOnChainError,
   ResponseMismatchError,
   SentPaymentError,
   isSignatureRejection,
@@ -85,6 +86,9 @@ export function describeFailure(error: unknown): Failure {
         "This payment needs a different wallet than the one you're signed in with.",
       sent: false,
     }
+  }
+  if (error instanceof PaymentNotOnChainError) {
+    return { message: failureCodeMessage(null), sent: false }
   }
   if (error instanceof ResponseMismatchError) {
     return {

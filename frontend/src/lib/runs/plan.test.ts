@@ -8,6 +8,7 @@ import {
   excludedNote,
   fingerprintOf,
   formatExact,
+  holdChecking,
   isTicked,
   maxRunPayments,
   payLabel,
@@ -346,6 +347,103 @@ describe("buildRunRequest", () => {
         "d0000000-0000-4000-8000-000000000009",
       ),
     ).toThrow()
+  })
+})
+
+describe("fingerprintOf", () => {
+  const list = [
+    person(1, { amount: "1000000" }),
+    person(2, { amount: "2000000" }),
+    person(3, { amount: "3000000" }),
+  ]
+
+  it("is a short hex hash that holds no id or amount", () => {
+    const fingerprint = fingerprintOf(WALLET, list)
+    expect(fingerprint).toMatch(/^[0-9a-f]{16}$/)
+    expect(fingerprint).not.toContain("a0000000")
+    expect(fingerprint).not.toContain("1000000")
+  })
+
+  it("is stable: the same people and amounts give the same value, in any order", () => {
+    const first = fingerprintOf(WALLET, list)
+    expect(fingerprintOf(WALLET, [...list])).toBe(first)
+    expect(fingerprintOf(WALLET, [list[2], list[0], list[1]])).toBe(first)
+    // Only ids and amounts count.
+    expect(fingerprintOf(WALLET, [person(1)])).toBe(
+      fingerprintOf(WALLET, [person(1, { name: "Renamed" })]),
+    )
+  })
+
+  it("never changes for a given list: a value saved before a reload is the one computed after", () => {
+    expect(fingerprintOf(WALLET, [person(1)])).toBe("0c94734bb2090732")
+  })
+
+  it("changes when someone is added or removed, or an id or an amount changes", () => {
+    const first = fingerprintOf(WALLET, list)
+    expect(fingerprintOf(WALLET, list.slice(1))).not.toBe(first)
+    expect(fingerprintOf(WALLET, [...list, person(4)])).not.toBe(first)
+    expect(
+      fingerprintOf(WALLET, [
+        list[0],
+        list[1],
+        person(9, { amount: "3000000" }),
+      ]),
+    ).not.toBe(first)
+    expect(
+      fingerprintOf(WALLET, [
+        list[0],
+        list[1],
+        { ...list[2], amount: "3000001" },
+      ]),
+    ).not.toBe(first)
+  })
+
+  it("does not confuse an id and an amount that run together", () => {
+    expect(
+      fingerprintOf(WALLET, [
+        person(1, { amount: "12" }),
+        person(2, { amount: "3" }),
+      ]),
+    ).not.toBe(
+      fingerprintOf(WALLET, [
+        person(1, { amount: "1" }),
+        person(2, { amount: "23" }),
+      ]),
+    )
+  })
+
+  it("changes with the wallet the run is paid from", () => {
+    expect(fingerprintOf(WALLET, list)).not.toBe(
+      fingerprintOf("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin", list),
+    )
+  })
+})
+
+describe("holdChecking", () => {
+  const people = [person(1), person(2), person(3)]
+
+  it("takes the people whose last payment is not settled out of the payable ones", () => {
+    const { payable, checking } = holdChecking(people, new Set([guid(2)]))
+    expect(payable.map((p) => p.id)).toEqual([guid(1), guid(3)])
+    expect(checking.map((p) => p.id)).toEqual([guid(2)])
+  })
+
+  it("leaves the roster whole when nobody is being checked", () => {
+    const { payable, checking } = holdChecking(people, new Set())
+    expect(payable).toEqual(people)
+    expect(checking).toEqual([])
+  })
+
+  it("keeps a checking person out of a run even when they were ticked by hand", () => {
+    const { payable } = holdChecking(people, new Set([guid(1)]))
+    const ticked = selectRecipients(payable, new Set(), { [guid(1)]: true })
+    expect(ticked.map((p) => p.id)).not.toContain(guid(1))
+  })
+
+  it("ignores someone who is not in the roster at all", () => {
+    const { payable, checking } = holdChecking(people, new Set([guid(99)]))
+    expect(payable).toHaveLength(3)
+    expect(checking).toEqual([])
   })
 })
 

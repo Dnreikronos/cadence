@@ -46,9 +46,12 @@ const pills: Record<
 
 export function RunStatusPill({
   status,
+  label,
   className,
 }: {
   status: RowStatus
+  // Says what this browser is doing when the status alone does not ("Checking").
+  label?: string
   className?: string
 }) {
   const pill = pills[status]
@@ -61,7 +64,7 @@ export function RunStatusPill({
       )}
     >
       <span aria-hidden className={cn("size-1.5 rounded-full", pill.dot)} />
-      {pill.label}
+      {label ?? pill.label}
     </span>
   )
 }
