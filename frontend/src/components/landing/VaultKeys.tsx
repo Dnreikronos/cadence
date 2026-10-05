@@ -319,8 +319,8 @@ const abilities: Record<
       isAllowed: false,
     },
     {
-      label: "Read without a trace",
-      note: "Every decryption is logged with who and why.",
+      label: "Read without a record",
+      note: "Reads are meant to be recorded in an audit log.",
       isAllowed: false,
     },
   ],
@@ -332,12 +332,12 @@ const abilities: Record<
     },
     {
       label: "Move funds",
-      note: "Cadence holds no signing key. Only your wallet can sign.",
+      note: "Your wallet signs every transaction. Cadence does not store your signing key.",
       isAllowed: false,
     },
     {
-      label: "Read without a trace",
-      note: "Every decryption is logged with who and why.",
+      label: "Read without a record",
+      note: "Reads are meant to be recorded in an audit log.",
       isAllowed: false,
     },
   ],

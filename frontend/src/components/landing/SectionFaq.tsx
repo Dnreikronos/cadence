@@ -56,7 +56,7 @@ const faqs: { question: string; answer: string; icon: LucideIcon }[] = [
     question: "Can Cadence see my amounts?",
     icon: EyeOff,
     answer:
-      "Yes. Cadence generates the proofs, so it holds viewing keys and can read amounts. It never holds your funds or a signing key, so it can never move money. Viewing keys are encrypted at rest and every decryption is logged with who and why.",
+      "Yes. Cadence generates the proofs, so it holds viewing keys and can read amounts. Payments are signed in your wallet, and Cadence does not custody your funds or store your signing key. Viewing keys are encrypted at rest, and reads are meant to be recorded in an audit log with who and why.",
   },
   {
     question: "Is this anonymous?",
@@ -74,7 +74,7 @@ const faqs: { question: string; answer: string; icon: LucideIcon }[] = [
     question: "What does someone need to get paid?",
     icon: Mail,
     answer:
-      "An email. They sign in with it or with the wallet they already use. If they have neither, a wallet is created behind the scenes without a seed phrase in sight.",
+      "An email. They sign in with it, and a wallet is created for them behind the scenes, without a seed phrase in sight.",
   },
   {
     question: "What if Solana switches confidential transfers off?",

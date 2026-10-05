@@ -35,7 +35,7 @@ export function SectionHero() {
           >
             Cadence seals the amount of every USDC payment your company sends.
             The people you choose can read it. Anyone watching the chain sees
-            that a payment happened, and nothing more.
+            that a payment happened, not how much.
           </p>
           <div
             className="mt-9 flex flex-wrap items-center justify-center gap-3"

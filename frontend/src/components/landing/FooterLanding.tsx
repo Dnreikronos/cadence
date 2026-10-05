@@ -68,8 +68,8 @@ export function FooterLanding() {
         <div className="grid gap-10 px-3 pt-16 pb-12 text-sm sm:grid-cols-2 sm:px-6 lg:grid-cols-4">
           <div className="lg:col-span-2">
             <p className="max-w-[320px] text-ink-muted">
-              Cadence never holds your funds or your signing keys. Built on
-              Solana Token-2022 confidential balances.
+              Cadence does not custody your funds or store your signing keys.
+              Built on Solana Token-2022 confidential balances.
             </p>
           </div>
           {columns.map((column) => (

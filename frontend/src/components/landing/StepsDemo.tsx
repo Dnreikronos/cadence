@@ -337,7 +337,7 @@ function DemoPay({ isActive, onDone }: DemoProps) {
         })}
       </ul>
       <p className="absolute inset-x-0 bottom-5 text-center font-mono text-[11px] text-ink-muted">
-        Sealed on the wire. Readable on arrival, by the recipient only.
+        Sealed on the wire. Readable on arrival by the recipient.
       </p>
       {!isReduced && (
         <DemoCursor
