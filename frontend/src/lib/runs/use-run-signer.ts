@@ -8,15 +8,14 @@ import { invalidateBalances } from "@/lib/queries/invalidate"
 import { queryKeys } from "@/lib/queries/keys"
 import { useSignAndConfirm, useWallet } from "@/lib/wallet/context"
 import {
-  payOne,
   paySequence,
   recheckOne,
   retryOne,
   type RunApi,
   type RunContext,
 } from "./executor"
-import { createHeldStore, keepsHeld } from "./held"
-import { cancelledStaleMessage, describeFailure } from "./messages"
+import { createHeldStore } from "./held"
+import { holdingRetries, runEvents, signAgain } from "./sign-again"
 import { localReducer } from "./progress"
 
 const runApi: RunApi = {
@@ -59,47 +58,19 @@ export function useRunSigner() {
         await task({
           runId,
           sign,
-          api: {
-            ...runApi,
-            // A transaction prepared by a retry is held like the first ones.
-            retryPayment: async (id, paymentId) => {
-              const prepared = await runApi.retryPayment(id, paymentId)
-              if (prepared.payment_id === paymentId) held.hold(prepared)
-              return prepared
-            },
-          },
+          api: holdingRetries(runApi, held),
           signal: controller.current?.signal,
-          events: {
-            signing: (id) => dispatch({ type: "signing", id }),
-            waiting: (id) => dispatch({ type: "waiting", id }),
-            submitted: (id, signature) => {
-              // Handed to the network: this transaction is never signed again.
-              held.drop(id)
-              dispatch({ type: "submitted", id, signature })
-            },
-            confirmed: (id) => {
-              held.drop(id)
-              dispatch({ type: "confirmed", id })
-              // Money moved: the sidebar balance and the payment lists are stale.
+          events: runEvents(held, dispatch, {
+            // Money moved: the sidebar balance and the payment lists are stale.
+            confirmed: () => {
               void invalidateBalances(queryClient)
               void queryClient.invalidateQueries({
                 queryKey: queryKeys.payments.all,
               })
               void refreshRun()
             },
-            failed: (id, error) => {
-              // Cancelled before anything was sent: it stays held, to sign again.
-              const cancelled = keepsHeld(error)
-              if (!cancelled) held.drop(id)
-              dispatch({
-                type: "failed",
-                id,
-                cancelled,
-                ...describeFailure(error),
-              })
-              void refreshRun()
-            },
-          },
+            failed: () => void refreshRun(),
+          }),
         })
       } finally {
         working.current = false
@@ -124,19 +95,9 @@ export function useRunSigner() {
     // Signs the held transaction again, without preparing a new one. Past its blockhash
     // it is dropped and the payment is shown as failed, so the normal retry applies.
     signAgain: (runId: string, paymentId: string) =>
-      exclusive(runId, async (context) => {
-        const found = held.lookup(paymentId)
-        if (found.status === "ready") return payOne(context, found.prepared)
-        if (found.status === "stale") {
-          held.drop(paymentId)
-          dispatch({
-            type: "failed",
-            id: paymentId,
-            message: cancelledStaleMessage,
-            sent: false,
-          })
-        }
-      }),
+      exclusive(runId, (context) =>
+        signAgain(context, held, dispatch, paymentId),
+      ),
     retry: (runId: string, paymentId: string) =>
       exclusive(runId, (context) => retryOne(context, paymentId)),
     recheck: (runId: string, paymentId: string, signature: string) =>

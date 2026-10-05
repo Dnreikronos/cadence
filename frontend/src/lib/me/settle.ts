@@ -15,6 +15,43 @@ export function settleReadDelay(readsDone: number): number | null {
   return SETTLE_BACKOFF_MS[readsDone] ?? null
 }
 
+type Timer = ReturnType<typeof setTimeout>
+
+// The loop that reads the balance while it catches up. Before each read it asks whether
+// the balance is still waiting, so a read that showed the change (or a slot past the
+// confirmation) is the last one even if nothing cancelled the loop yet. The returned
+// function stops it. The timers are injectable so the loop can be tested.
+export function startSettleReads({
+  waiting,
+  read,
+  schedule = setTimeout,
+  cancel = clearTimeout,
+}: {
+  waiting: () => boolean
+  read: () => void
+  schedule?: (run: () => void, ms: number) => Timer
+  cancel?: (timer: Timer) => void
+}): () => void {
+  let reads = 0
+  let stopped = false
+  let timer: Timer | undefined
+  const next = () => {
+    const delay = settleReadDelay(reads)
+    if (delay === null) return
+    timer = schedule(() => {
+      if (stopped || !waiting()) return
+      reads += 1
+      read()
+      next()
+    }, delay)
+  }
+  next()
+  return () => {
+    stopped = true
+    if (timer !== undefined) cancel(timer)
+  }
+}
+
 export type Confirmed = {
   // The pending amount when Apply was pressed.
   pendingBefore: string

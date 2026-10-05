@@ -15,20 +15,17 @@ import { COMPANY_WALLET, db, resetDb, seedPeople } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
 import { mockSigner, mockSubmit } from "@/lib/api/mocks/signer"
-import {
-  payOne,
-  type RunApi,
-  type RunContext,
-  type RunEvents,
-} from "./executor"
-import { createHeldStore, keepsHeld } from "./held"
-import { describeFailure } from "./messages"
+import { payOne, type RunApi, type RunContext } from "./executor"
+import { createHeldStore, heldMaxAgeMs, keepsHeld } from "./held"
+import { cancelledStaleMessage } from "./messages"
+import { holdingRetries, runEvents, signAgain } from "./sign-again"
 import {
   canRecheck,
   canRetry,
   canSignAgain,
   localReducer,
   mergeRow,
+  type LocalAction,
   type LocalRows,
 } from "./progress"
 import { isSignatureRejection } from "./errors"
@@ -60,8 +57,8 @@ const payees = [
 const refusal = () =>
   Object.assign(new Error("denied"), { name: "UserRejectedRequestError" })
 
-// Mirrors the hook: a held store beside the reducer, and the same rules for what is
-// kept and what is dropped.
+// The hook's own wiring (`runEvents`, `holdingRetries`, `signAgain`) over the reducer, a
+// held store on a clock the test moves, and the real signing flow.
 function harness(signer: Signer, submit = mockSubmit) {
   const retryPayment = vi.fn((runId: string, paymentId: string) =>
     api.runs.retryPayment(runId, paymentId),
@@ -72,30 +69,12 @@ function harness(signer: Signer, submit = mockSubmit) {
     retryPayment,
   }
   const create = vi.spyOn(api.runs, "create")
-  const held = createHeldStore()
+  let clock = 0
+  const held = createHeldStore(() => clock)
   let local: LocalRows = {}
-  const events: RunEvents = {
-    signing: (id) => (local = localReducer(local, { type: "signing", id })),
-    waiting: (id) => (local = localReducer(local, { type: "waiting", id })),
-    submitted: (id, signature) => {
-      held.drop(id)
-      local = localReducer(local, { type: "submitted", id, signature })
-    },
-    confirmed: (id) => {
-      held.drop(id)
-      local = localReducer(local, { type: "confirmed", id })
-    },
-    failed: (id, error) => {
-      const cancelled = keepsHeld(error)
-      if (!cancelled) held.drop(id)
-      local = localReducer(local, {
-        type: "failed",
-        id,
-        cancelled,
-        ...describeFailure(error),
-      })
-    },
-  }
+  const dispatch = (action: LocalAction) =>
+    (local = localReducer(local, action))
+  const events = runEvents(held, dispatch)
   let time = 0
   const sign: RunContext["sign"] = (prepared, confirm, onStep, extra) =>
     signAndConfirm(prepared, {
@@ -113,10 +92,22 @@ function harness(signer: Signer, submit = mockSubmit) {
   const context = (created: RunCreated): RunContext => ({
     runId: created.run_id,
     sign,
-    api: runApi,
+    api: holdingRetries(runApi, held),
     events,
   })
-  return { held, events, context, retryPayment, create, local: () => local }
+  return {
+    held,
+    events,
+    context,
+    retryPayment,
+    create,
+    local: () => local,
+    dispatch,
+    advance: (ms: number) => (clock += ms),
+    // What the hook's `signAgain` does.
+    signAgain: (created: RunCreated, paymentId: string) =>
+      signAgain(context(created), held, dispatch, paymentId),
+  }
 }
 
 async function createRun() {
@@ -168,9 +159,7 @@ describe("a cancelled signature in a run", () => {
 
     // Sign again: the held transaction, as prepared.
     refuse = false
-    const found = h.held.lookup(first.payment_id)
-    if (found.status !== "ready") throw new Error("expected it to be held")
-    await payOne(h.context(created), found.prepared)
+    await h.signAgain(created, first.payment_id)
 
     const run = await api.runs.get(created.run_id)
     row = mergeRow(
@@ -257,6 +246,154 @@ describe("a cancelled signature in a run", () => {
     expect(canRetry(row)).toBe(true)
     expect(canSignAgain(row)).toBe(false)
     expect(h.held.has(first.payment_id)).toBe(false)
+  })
+})
+
+describe("signing again past the life of a blockhash", () => {
+  it("drops the held transaction and falls back to the normal retry path", async () => {
+    scenarios.set("instant")
+    const created = await createRun()
+    const first = created.payments[0]
+    const base = mockSigner(COMPANY_WALLET)
+    const signTransaction = vi.fn(async () => {
+      throw refusal()
+    })
+    const h = harness({ address: base.address, signTransaction })
+    h.held.holdAll(created.payments)
+    await payOne(h.context(created), first)
+    expect(signTransaction).toHaveBeenCalledTimes(1)
+    expect(h.local()[first.payment_id].status).toBe("cancelled")
+
+    h.advance(heldMaxAgeMs)
+    await h.signAgain(created, first.payment_id)
+
+    // Nothing was signed or submitted again, and nothing was prepared.
+    expect(signTransaction).toHaveBeenCalledTimes(1)
+    expect(h.retryPayment).not.toHaveBeenCalled()
+    expect(h.held.has(first.payment_id)).toBe(false)
+    const row = mergeRow(h.local()[first.payment_id], {
+      status: "pending",
+      failure: null,
+    })
+    expect(row).toMatchObject({
+      status: "failed",
+      message: cancelledStaleMessage,
+    })
+    expect(canRetry(row)).toBe(true)
+    expect(canSignAgain(row)).toBe(false)
+  })
+
+  it("still signs it again one millisecond before", async () => {
+    scenarios.set("instant")
+    const created = await createRun()
+    const first = created.payments[0]
+    let refuse = true
+    const base = mockSigner(COMPANY_WALLET)
+    const h = harness({
+      address: base.address,
+      signTransaction: async (bytes) => {
+        if (refuse) throw refusal()
+        return base.signTransaction(bytes)
+      },
+    })
+    h.held.holdAll(created.payments)
+    await payOne(h.context(created), first)
+    refuse = false
+
+    h.advance(heldMaxAgeMs - 1)
+    await h.signAgain(created, first.payment_id)
+
+    expect(h.local()[first.payment_id].status).toBe("confirmed")
+  })
+
+  it("leaves a transaction this page does not hold as it is", async () => {
+    const created = await createRun()
+    const base = mockSigner(COMPANY_WALLET)
+    const signTransaction = vi.fn(base.signTransaction)
+    const h = harness({ address: base.address, signTransaction })
+
+    await h.signAgain(created, created.payments[0].payment_id)
+
+    expect(signTransaction).not.toHaveBeenCalled()
+    expect(h.local()).toEqual({})
+  })
+})
+
+describe("a retry's transaction", () => {
+  it("is held like the first ones, and only when it is for the payment asked about", async () => {
+    scenarios.set("partial-failure", "instant")
+    const created = await createRun()
+    const h = harness(mockSigner(COMPANY_WALLET))
+    const api2 = holdingRetries(
+      {
+        confirmPayment: async () => {
+          throw new Error("unused")
+        },
+        retryPayment: async () => created.payments[1],
+      },
+      h.held,
+    )
+
+    await api2.retryPayment(created.run_id, created.payments[1].payment_id)
+    expect(h.held.has(created.payments[1].payment_id)).toBe(true)
+
+    // An answer for another payment is refused by the executor, and never held.
+    await api2.retryPayment(created.run_id, created.payments[0].payment_id)
+    expect(h.held.has(created.payments[0].payment_id)).toBe(false)
+  })
+})
+
+describe("what each event does to a held transaction", () => {
+  const held = (...ids: string[]) => {
+    const store = createHeldStore(() => 0)
+    for (const id of ids) {
+      store.hold({
+        request_id: "a".repeat(64),
+        transaction: "AQID",
+        transaction_version: 1,
+        required_signers: ["wallet"],
+        recent_blockhash: "blockhash",
+        last_valid_block_height: 1,
+        payment_id: id,
+        person_id: id,
+      })
+    }
+    return store
+  }
+
+  it("drops it once it was handed to the network, and once it was confirmed", () => {
+    const store = held("a", "b", "c")
+    const events = runEvents(store, () => {})
+    events.signing("a")
+    events.waiting("a")
+    expect(store.has("a")).toBe(true)
+    events.submitted("a", "5Sig")
+    events.confirmed("b")
+    expect(store.has("a")).toBe(false)
+    expect(store.has("b")).toBe(false)
+    expect(store.has("c")).toBe(true)
+  })
+
+  it("keeps it for a refused signature only, and tells the reducer which it was", () => {
+    const store = held("a", "b")
+    const actions: LocalAction[] = []
+    const events = runEvents(store, (action) => actions.push(action))
+    events.failed("a", refusal())
+    events.failed("b", new Error("boom"))
+    expect(store.has("a")).toBe(true)
+    expect(store.has("b")).toBe(false)
+    expect(
+      actions.map((action) => "cancelled" in action && action.cancelled),
+    ).toEqual([true, false])
+  })
+
+  it("runs what the hook adds after a confirmation and after a failure", () => {
+    const after = { confirmed: vi.fn(), failed: vi.fn() }
+    const events = runEvents(held("a"), () => {}, after)
+    events.confirmed("a")
+    events.failed("a", new Error("x"))
+    expect(after.confirmed).toHaveBeenCalledTimes(1)
+    expect(after.failed).toHaveBeenCalledTimes(1)
   })
 })
 

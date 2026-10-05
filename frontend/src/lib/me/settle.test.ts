@@ -4,6 +4,7 @@ import {
   SETTLE_TIMEOUT_MS,
   settleReadDelay,
   settleState,
+  startSettleReads,
   type BalanceRead,
   type Confirmed,
 } from "./settle"
@@ -97,39 +98,98 @@ describe("settleReadDelay", () => {
     const last = SETTLE_BACKOFF_MS.reduce((total, wait) => total + wait, 0)
     expect(last).toBeLessThan(SETTLE_TIMEOUT_MS)
   })
+})
 
-  // The loop of `useApplyPending`, played on a clock: read after each delay, and stop as
-  // soon as `settleState` is not "waiting" any more.
-  function play(reads: (at: number) => BalanceRead | undefined) {
-    const at: number[] = []
+// The loop `useApplyPending` runs, on a clock the test moves. The balance each read
+// returns is the test's, and `waiting` is what the hook asks: `settleState` over the
+// latest read, as the hook's own effect keeps it.
+describe("startSettleReads", () => {
+  function run(
+    balanceAt: (elapsed: number) => BalanceRead | undefined,
+    cancelAt?: number,
+  ) {
     let now = confirmed.at
-    for (let done = 0; ; done++) {
-      const delay = settleReadDelay(done)
-      if (delay === null) break
-      now += delay
-      at.push(now - confirmed.at)
-      if (settleState(confirmed, reads(now), now) !== "waiting") break
+    let latest: BalanceRead | undefined
+    const timers: { at: number; run: () => void; live: boolean }[] = []
+    const reads: number[] = []
+    const stop = startSettleReads({
+      waiting: () => settleState(confirmed, latest, now) === "waiting",
+      read: () => {
+        reads.push(now - confirmed.at)
+        // The answer lands before the next timer.
+        latest = balanceAt(now - confirmed.at)
+      },
+      schedule: (fn, ms) => {
+        const timer = { at: now + ms, run: fn, live: true }
+        timers.push(timer)
+        return timer as never
+      },
+      cancel: (timer) =>
+        void ((timer as never as { live: boolean }).live = false),
+    })
+    // Fire the timers in order, as the clock reaches each. A cancelled timer does not
+    // fire, but a loop that was never cancelled must still stop on its own.
+    for (;;) {
+      const due = timers.filter((t) => t.live).sort((a, b) => a.at - b.at)[0]
+      if (!due) break
+      if (cancelAt !== undefined && due.at - confirmed.at > cancelAt) {
+        stop()
+        // What a missing `stop` would do: the timer fires anyway.
+        due.live = true
+      }
+      now = due.at
+      due.live = false
+      due.run()
     }
-    return at
+    return reads
   }
 
   it("reads four times, at 2, 6, 14 and 26 s, when the balance never catches up", () => {
-    expect(play(() => stale)).toEqual([2_000, 6_000, 14_000, 26_000])
+    expect(run(() => stale)).toEqual([2_000, 6_000, 14_000, 26_000])
   })
 
-  it("stops at the read that shows the pending amount changed", () => {
+  it("stops at the read that shows the pending amount changed, with no cancel needed", () => {
     expect(
-      play((now) =>
-        now - confirmed.at >= 6_000 ? { ...stale, pending: "0" } : stale,
-      ),
+      run((elapsed) => (elapsed >= 6_000 ? { ...stale, pending: "0" } : stale)),
     ).toEqual([2_000, 6_000])
   })
 
-  it("stops at the read that is past the confirmed slot", () => {
+  it("stops at the read that shows a slot past the confirmation", () => {
     expect(
-      play((now) =>
-        now - confirmed.at >= 2_000 ? { ...stale, as_of_slot: 501 } : stale,
+      run((elapsed) =>
+        elapsed >= 2_000 ? { ...stale, as_of_slot: 501 } : stale,
       ),
     ).toEqual([2_000])
+  })
+
+  it("stops when the balance changes between two reads, before the next one is made", () => {
+    // The read at 6 s is stale, but the change shows up before the timer for 14 s.
+    let seen: BalanceRead | undefined = stale
+    expect(
+      run((elapsed) => {
+        if (elapsed >= 6_000) seen = { ...stale, pending: "0" }
+        return seen
+      }),
+    ).toEqual([2_000, 6_000])
+  })
+
+  it("makes no read once it is stopped", () => {
+    expect(run(() => stale, 2_000)).toEqual([2_000])
+  })
+
+  it("waits the backoff delays before each read, and never more than four reads", () => {
+    const delays: number[] = []
+    const stop = startSettleReads({
+      waiting: () => true,
+      read: () => {},
+      schedule: (fn, ms) => {
+        delays.push(ms)
+        fn()
+        return 0 as never
+      },
+      cancel: () => {},
+    })
+    stop()
+    expect(delays).toEqual([...SETTLE_BACKOFF_MS])
   })
 })

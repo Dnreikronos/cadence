@@ -26,8 +26,8 @@ import {
 } from "@/lib/me/last-apply"
 import {
   SETTLE_TIMEOUT_MS,
-  settleReadDelay,
   settleState,
+  startSettleReads,
   type BalanceRead,
   type Confirmed,
 } from "@/lib/me/settle"
@@ -154,29 +154,28 @@ export function useApplyPending(balance: BalanceRead | undefined) {
 
   const confirmed = mutation.data?.confirmed ?? recovered
   const settle = settleState(confirmed, balance, now)
+  // What the read loop asks before each read, without restarting it on every change.
+  const latestSettle = useRef(settle)
+  useEffect(() => {
+    latestSettle.current = settle
+  })
   useEffect(() => {
     if (settle !== "waiting" || !confirmed) return
-    // Bounded backoff (see `settleReadDelay`), and it stops as soon as `settle` is no
-    // longer "waiting": the effect is cleaned up when the balance shows the change.
-    let reads = 0
-    let poll: ReturnType<typeof setTimeout> | undefined
-    const scheduleRead = () => {
-      const delay = settleReadDelay(reads)
-      if (delay === null) return
-      poll = setTimeout(() => {
-        reads += 1
+    // Bounded backoff (see `startSettleReads`): it stops by itself once `settle` is no
+    // longer "waiting", and when the effect is cleaned up.
+    const stopReads = startSettleReads({
+      waiting: () => latestSettle.current === "waiting",
+      read: () => {
         setNow(Date.now())
         void invalidateBalances(queryClient)
-        scheduleRead()
-      }, delay)
-    }
-    scheduleRead()
+      },
+    })
     const giveUp = setTimeout(
       () => setNow(Date.now()),
       Math.max(0, confirmed.at + SETTLE_TIMEOUT_MS - Date.now()) + 50,
     )
     return () => {
-      clearTimeout(poll)
+      stopReads()
       clearTimeout(giveUp)
     }
   }, [settle, confirmed, queryClient])
