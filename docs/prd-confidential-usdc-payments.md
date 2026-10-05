@@ -90,7 +90,7 @@ Cadence never holds anyone's money and never holds a signing key — the USDC si
 
 ## How people use it
 
-**Ana, COO of Solaris, runs payroll.** First time, about ten minutes: she signs in with the company wallet, adds twenty people with name, email and monthly amount. Each person gets an invite by email. Every month after that, about two minutes: she opens a new run, sees the list and the $84,000 total, deposits, reviews and approves. If the company uses a multisig, the other partners approve too. The payments land in seconds and she can download every receipt. A competitor watching the chain sees twenty payments from Solaris and no amounts.
+**Ana, COO of Solaris, runs payroll.** First time, about ten minutes: she signs in with the company wallet, adds twenty people with name, email and monthly amount. Each person gets an invite by email. Every month after that, about two minutes: she opens a new run, sees the list and the $84,000 total, deposits, reviews and approves. In the planned Squads integration, the other partners co-approve each confidential vault payment. The payments land in seconds and she can download every receipt. A competitor watching the chain sees twenty payments from Solaris and no amounts.
 
 **Bruno, a developer, gets paid.** He clicks the invite and signs in with email or the wallet he already uses; if he has neither, one is created behind the scenes without him learning what a seed phrase is. When the payment lands he gets an email with the amount, the date and who sent it. His dashboard shows his real balance and every past payment. When he wants the money he withdraws — and if he tries to withdraw exactly what he was paid, the dashboard warns him first.
 
@@ -108,10 +108,16 @@ To be validated in the conversations, not assumed.
 | ------- | --------------------- | ---------------------------------- | ----------------------------------------- |
 | Free    | Trying it             | $0                                 | Up to 3 people per month                  |
 | Team    | Small startups        | $199/mo                            | Up to 25 people, receipts                 |
-| Company | Larger teams and DAOs | $799/mo                            | Unlimited people, multisig, auditor panel |
+| Company | Larger teams and DAOs | $799/mo                            | Unlimited people, Squads approvals (planned), auditor panel |
 | API     | Platforms             | From $2,000/mo + $0.05 per payment | Embedded in their product                 |
 
 The fee is for software. It is never a spread on the amount transferred and Cadence never holds balances to earn on them — both would change what kind of business this is.
+
+Direct confidential payments from a 2-of-2 Squads vault were
+[confirmed on devnet](dev/spikes/2026-10-04-squads-confidential.md). Company
+multisig remains planned until bound encryption-key enrollment, persistence and
+recovery, and member-signed review/approval are integrated. It promises quorum
+approval of each vault payment; treasury funding and deposit amounts stay public.
 
 ## Requirements
 
@@ -168,7 +174,7 @@ TODO(João): the deposit figure cited for Umbra and Circle Arc's launch status b
 | Circle, Arcium or Solana ship the same thing                        | Medium      | Arrive first, be the easiest, own the auditor panel                                                                                                                                    |
 | Solana switches the feature off again                               | Low         | R9 — payments continue as ordinary transfers                                                                                                                                           |
 | Someone associates the product with laundering                      | Medium      | Auditor from day one; say explicitly it is not anonymity                                                                                                                               |
-| Multisig cannot originate a hidden payment                          | Unknown     | Q4 — a paid tier depends on this and nobody has checked                                                                                                                                |
+| Company multisig ships without safe key enrollment/recovery or member approval | Known integration work | Q4 proves a direct vault payment is feasible. Bind setup to a stored key proof and finish the member approval workflow before enabling the tier's multisig feature                     |
 
 ## Validation
 
@@ -200,6 +206,6 @@ Resolved 2026-09-27: **proof generation runs in the browser** — WASM cost is j
 | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------- |
 | Q2  | Auditor access via an app-level grant on a shared mint, or a mint per company with its own auditor key? The second is better and needs a deeper `token-wrap` fork; moving from the first to the second is a migration, not a key rotation | João               | Before the wrapped mint is created |
 | Q3  | Which embedded-wallet provider works with hidden payments? Turnkey's Solana policy engine parses instructions and may not handle confidential-transfer ones                                                                               | João               | Before the provider is locked      |
-| Q4  | Can a Squads multisig originate a hidden payment? Proof generation needs the sender's ElGamal secret, and a multisig vault is a PDA with no private key. The Company tier sells multisig                                                  | João               | Before the Company tier is sold    |
+| ~~Q4~~ | **Resolved 2026-10-04:** a 2-of-2 Squads vault originated a confidential wrapped-USDC payment using independent encryption keys. [Evidence](dev/spikes/2026-10-04-squads-confidential.md). Production enrollment must bind the chosen key, and key recovery/member approval remain implementation work | João               | Feasibility closed; integration before Company multisig is sold |
 | Q5  | Is the pricing right?                                                                                                                                                                                                                     | Team               | After the ten conversations        |
 | Q6  | Verify every number in this document and the source deck                                                                                                                                                                                  | TODO(João): assign | Before anything external           |
