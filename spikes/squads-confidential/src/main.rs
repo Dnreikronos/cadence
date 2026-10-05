@@ -364,3 +364,6 @@ async fn main() -> Result<()> {
     println!("confirmed direct confidential payment from a 2-of-2 vault");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

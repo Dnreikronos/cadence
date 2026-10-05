@@ -84,3 +84,23 @@ pub async fn verify_run(run: &Path) -> Result<()> {
     )?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solana_signer::Signer;
+
+    #[test]
+    fn independent_keys_survive_the_private_checkpoint() -> Result<()> {
+        let original = ConfidentialAccount::new(Keypair::new().pubkey());
+        let restored = restore(&original.secrets())?;
+        assert_eq!(restored.owner, original.owner);
+        assert_eq!(restored.token.pubkey(), original.token.pubkey());
+        assert_eq!(restored.elgamal.pubkey(), original.elgamal.pubkey());
+        assert_eq!(
+            restored.aes.decrypt(&original.aes.encrypt(PAYMENT)),
+            Some(PAYMENT)
+        );
+        Ok(())
+    }
+}
