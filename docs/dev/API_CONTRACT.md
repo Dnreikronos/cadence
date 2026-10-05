@@ -61,7 +61,7 @@ details are easy to over-read, so they are stated exactly:
 | Cluster          | Devnet only today. On another cluster `/wrap` and `/wrap/confirm` fail with `wrap_requires_devnet`. Only `/transfer` and `/transfer/confirm` remap it to `transfer_requires_devnet` (`client.rs:68`, `transfer.rs:335-340`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Rate limits      | Fixed 60 s windows, held in memory per service instance and reset on restart. The wrap routes and the transfer routes each have their own limiter, so a wrap call does not spend transfer quota. Per window and limiter: 120 requests in total, 30 per direct socket peer, and (prepare only) 10 per `company_wallet`. Forwarded IP headers are ignored, so behind a proxy all users share the proxy's peer quota. These are **not** windows: at most 8 requests in flight per limiter, and on `/transfer` at most 4 proof workers. Every limit returns `429` with `Retry-After: 60` and the route's `wrap_rate_limited` or `transfer_rate_limited` code, concurrency caps included. A confirm call spends the same peer and global quota as a prepare call, so polling uses budget. The runs routes use the transfer codes, have their own 120 and 30 per window and share the four proof workers with `/transfer` (see [`RUNS_API.md`](RUNS_API.md)). `/transfer` and `/transfer/confirm` also give up after 30 s with `503 transfer_timeout` (`wrap_limits.rs:41-115`, `transfer.rs:89`). `/health` is not limited. |
 | `Retry-After`    | CORS sets no `expose_headers`, and `Retry-After` is not a CORS-safelisted response header, so cross-origin browser code reads `null` for it. Until the backend exposes it, the web app waits a fixed 60 s on any `429` whose `Retry-After` it cannot read (60 is the only value the service sends) and does not auto-retry in a loop: `ApiError.retryAfter` is 60 then, or the header's value when it is readable (the mock sends it from the same origin, so it is readable there only). **Backend request:** add `Access-Control-Expose-Headers: Retry-After`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Caching          | `Cache-Control: no-store` on every response that carries an amount. The web app fetches every request, downloads included, with `cache: "no-store"` and keeps amounts in memory only (React Query's cache; nothing is written to `localStorage`, and the persisted submission records hold no amount except a withdrawal's, kept in `sessionStorage` until its outcome is final). The service sets no `Cache-Control` on any route today (the only response header it sets itself is `Retry-After`), so this is a backend request.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Caching          | `Cache-Control: no-store` on every response that carries an amount. The web app fetches every request, downloads included, with `cache: "no-store"` and keeps amounts in memory only (React Query's cache; the only thing written to `localStorage` is the saved submission records, which hold no amount except a withdrawal's, kept until its outcome is final and removed when the person signs out). The service sets no `Cache-Control` on any route today (the only response header it sets itself is `Retry-After`), so this is a backend request.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Request checks   | The client parses every request body with a strict schema before it leaves the browser, so an unknown field or a malformed value throws in the browser and nothing is sent. Amounts: `1` to `2^48 - 1`, digits only, no leading zero (a read may be `"0"`). Wallets, accounts and `company_wallet`: base58, 32 to 44 characters; the curve is not checked. Request signatures (`signature`, `wallet_signature`): base58, 43 to 88 characters. `request_id`: 64 lowercase hex. `aes_key`: base64 of exactly 16 bytes (22 characters, a last one of `A`, `Q`, `g` or `w`, then `==`). `setup` artifacts: base64. A path segment that is not a GUID is refused before the call, so `..` or `/` never reaches a path. Responses are checked too: one that does not match its schema is a `ContractError`, not an `ApiError`.                                                                                                                                                                                                                                                                                               |
 | Retryable errors | `ApiError.isRetryable` is true for `transaction_not_finalized`, any `429`, `502` to `504` (so `503` too) and `network_error` (the browser could not reach the server). It is false for `500`, every other `4xx` and a `ContractError`. Confirm polling and the screens' "Try again" use that one flag. React Query retries a failed read once, and never a `4xx`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Compatibility    | Additive only. See [Evolving the contract](#evolving-the-contract).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -424,31 +424,55 @@ exception is `transaction_failed`: the network ran the transaction and refused i
 so nothing moved. Every flow that moves money applies the rule, but they do not keep
 the evidence equally:
 
-| Flow                                    | After "may have been sent"                                                                                                                                                                                                                   | Evidence kept across a reload                                                    |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| Deposit, wrap step (`/company/deposit`) | no new wrap until the earlier one is reconciled; "Check my balances"                                                                                                                                                                         | yes: a submission record in `sessionStorage` (this tab)                          |
-| Deposit, apply step                     | past "signing", every failure except `transaction_failed` is sent: no retry; "Check my balances", and "Check again" (re-confirms the saved signature) when there is one                                                                      | no: kept in memory for the screen only                                           |
-| Apply pending (`/me`)                   | no retry; the button locks while the saved signature is re-confirmed; "Check my balance", "Check again"                                                                                                                                      | yes: a submission record                                                         |
-| Withdraw (`/me/withdraw`)               | no retry, and the same amount is held back until a lookup of its saved signature settles it; the form waits while it runs                                                                                                                    | yes: a list of held withdrawals in `sessionStorage`, per viewer (this tab)       |
-| Payroll payment (`/company/runs/...`)   | that payment is never retried or signed again; "Check again" re-confirms with its signature, and a payment with no signature only says to check the company's payments and balance. A cancelled signature (nothing sent) may be signed again | yes: the run attempt and each payment that reached the submit step, per viewer   |
-| Activation, account step (`/activate`)  | the next try settles the saved transaction instead of preparing a second one                                                                                                                                                                 | no: an in-memory map per wallet                                                  |
+| Flow                                    | After "may have been sent"                                                                                                                                                                                                                   | Evidence kept across a reload                                                              |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Deposit, wrap step (`/company/deposit`) | no new wrap until the earlier one is reconciled; "Check my balances"                                                                                                                                                                         | yes: a submission record in `localStorage`, per viewer (every tab of the browser)          |
+| Deposit, apply step                     | past "signing", every failure except `transaction_failed` is sent: no retry; "Check my balances", and "Check again" (re-confirms the saved signature) when there is one                                                                      | no: kept in memory for the screen only                                                     |
+| Apply pending (`/me`)                   | no retry; the button locks while the saved signature is re-confirmed; "Check my balance", "Check again"                                                                                                                                      | yes: a submission record, per viewer (every tab of the browser)                            |
+| Withdraw (`/me/withdraw`)               | no retry, and the same amount is held back until a lookup of its saved signature settles it; the form waits while it runs                                                                                                                    | yes: a list of held withdrawals in `localStorage`, per viewer (every tab)                  |
+| Payroll payment (`/company/runs/...`)   | that payment is never retried or signed again; "Check again" re-confirms with its signature, and a payment with no signature only says to check the company's payments and balance. A cancelled signature (nothing sent) may be signed again | yes: the run attempt and each payment that reached the submit step, per viewer (every tab) |
+| Activation, account step (`/activate`)  | the next try settles the saved transaction instead of preparing a second one                                                                                                                                                                 | no: an in-memory map per wallet                                                            |
 
 A submission record is `{ kind, request_id, signature | null, last_valid_block_height,
-wallet, at }`, one per kind, under `cadence:submission:<kind>` in `sessionStorage`
-(`frontend/src/lib/submissions.ts`). It holds no secret and no amount, is written just
-before `submit` runs (signature `null`) and updated when the network returns the
-signature, and is cleared once the outcome is final. Four rows of the table keep
-evidence across a reload: the deposit's wrap step, apply pending, withdraw and payroll,
-so a reload finds out what became of a transaction before anything is sent. The
-deposit's apply step and the activation account step keep theirs in memory only, as the
-table says. Withdraw and payroll keep a list, under
-`cadence:submissions:<kind>:<viewer>` (the viewer is a hash of the company id and the
-email, so two people on one tab never read each other's records, a rename of the
-company orphans nothing, and signing out clears none of them; records saved under the
-company name by an earlier version are read once, merged in and deleted):
+wallet, at }`, one per kind and viewer, under `cadence:submission:<kind>:<viewer>` in
+`localStorage` (`frontend/src/lib/submissions.ts`). It holds no secret and no amount, is
+written just before `submit` runs (signature `null`) and updated when the network
+returns the signature, and is cleared once the outcome is final. Four rows of the table
+keep evidence across a reload and across tabs: the deposit's wrap step, apply pending,
+withdraw and payroll, so a reload, or a second tab, finds out what became of a
+transaction before anything is sent. The deposit's apply step and the activation
+account step keep theirs in memory only, as the table says. Withdraw and payroll keep a
+list, under `cadence:submissions:<kind>:<viewer>`. The viewer is a hash of the company
+id and the email, so two people on one browser never read each other's records and a
+rename of the company orphans nothing; records saved under the company name by an
+earlier version are read once, merged in and deleted. Every read looks at what is stored
+(a record another tab wrote or removed is seen at once) and a screen is told when
+another tab changes it (the `storage` event), so a second tab's roster, held amounts and
+buttons follow the first's. Where the records live, and when they go:
+
+- **`localStorage`, not `sessionStorage`.** The records of what may have been sent have
+  to be seen by every tab of the browser profile, or a second tab could send again what
+  the first holds as "may have gone through". A tab that is closed and opened again
+  finds them, and so does Chrome's "Duplicate tab" (which copies `sessionStorage`): that
+  no longer matters, because every tab reads the same store.
+- **Removed when settled.** A record goes as soon as its outcome is final (it landed, or
+  the network refused it); an unresolved one is kept until the person releases it.
+- **Removed on sign-out.** Signing out of this device or of every device removes the
+  viewer's records from the browser, including the set-aside unreadable ones, so a shared
+  computer keeps no amount for the next person. This is a deliberate trade: a person who
+  signs out with a withdrawal that may have gone through finds nothing held when they
+  sign back in, and has to check their history. A session that ends without a sign-out
+  (it expired, the cookie was cleared) removes nothing, and the next person to sign in
+  never reads it: the keys carry the viewer.
+- **Pruned.** Once per page load, records older than 30 days are dropped, whatever
+  their outcome: by then a transaction can no longer be in doubt (a blockhash lives
+  about 90 seconds) and the person has long had the chance to check. Entries that cannot
+  be read or dated are left alone: those are released by the person, never by the clock.
+- **Not read from `sessionStorage`.** Records an earlier build kept there are not
+  migrated; nothing was live in real mode when this changed.
 
 - A withdrawal record is `{ amount_units, request_id?, signature?,
-  last_valid_block_height?, at }`, one per amount. It **does** hold the amount, which is
+last_valid_block_height?, at }`, one per amount. It **does** hold the amount, which is
   what keeps the same amount from being withdrawn twice, so it is dropped as soon as the
   outcome is final. On mount, each one with a signature is re-confirmed; it is released
   when the network confirmed it, refused it (`transaction_failed`), or the service said
@@ -457,7 +481,7 @@ company name by an earlier version are read once, merged in and deleted):
 - Payroll keeps the run attempt `{ idempotency_key, fingerprint, run_id?, created_at }`
   (the fingerprint is a hash of the wallet and the sorted person ids with their amounts)
   and, for each payment that reached the submit step, `{ payment_id, run_id, person_id,
-  request_id, signature | null, last_valid_block_height, at }`. The same list sent again
+request_id, signature | null, last_valid_block_height, at }`. The same list sent again
   within a day reuses the saved key, so the service answers with the run it already made;
   a run the browser had been given before, or one with payments that may have been sent,
   is shown and never signed again. Each saved payment with a signature is re-confirmed
@@ -477,15 +501,30 @@ goes on, in memory only. A saved entry that cannot be read is never dropped or e
 a later write: it is set aside, and the whole withdraw or payroll list for that viewer
 counts as held ("Unreadable saved state") until the person releases it.
 
-**One tab at a time.** The records are per tab. A second tab cannot see the first tab's
-records, so a Web Lock (`navigator.locks`, one per flow kind and viewer) is held for the
-whole window of a withdrawal or a payroll run, from the prepare through the
-confirmation, and while saved records are looked up: a second tab that cannot get it
-says "Another tab is sending or checking a withdrawal for this account: wait for it to
-finish" and refuses to start. Web Locks cover the in-flight window only. Where
-`navigator.locks` is missing, a BroadcastChannel ping only warns. A tab that is closed
-and opened again loses its records (`sessionStorage` is gone with the tab), so a
-withdrawal or run sent from a tab that was then closed is not held in the new one.
+**One tab at a time.** A tab writes a record only once it is about to send, so a Web
+Lock (`navigator.locks`, one per flow kind and viewer) covers the time before it: it is
+held for the whole window of a withdrawal, a payroll run, a deposit (the wrap and the
+apply step) or an apply, from the prepare through the confirmation, and while saved
+records are looked up. A second tab that cannot get it says "Another tab is sending or
+checking a withdrawal (a run, a deposit, an update) for this account: wait for it to
+finish" and refuses to start; one that opens while the first has a record waits for the
+lock, then looks again at what is saved, which the first tab has usually settled. Once
+the lock is held, a tab reads the saved records again before it sends (another tab may
+have sent the amount, or the person, since the form was filled in). The locks cover the
+in-flight window, and the records cover everything after it. Where `navigator.locks` is
+missing, a BroadcastChannel ping only warns.
+
+**What is still not covered.** The evidence is per browser profile. Another browser, a
+private window, another device, and cleared site data do not see it, and a transaction
+sent from one of them is not held in another: the real fix is idempotency in the
+service (a key that makes a repeated prepare or send answer with what it already did),
+noted for the backend integration. The deposit's apply step and the activation account
+step keep no record, so another tab does not learn of an apply that was sent and not
+seen through there (the lock covers the time it is in flight). A transaction still in
+flight when the person signs out writes its record after the sign-out removed theirs.
+After a deposit's earlier wrap is found `unknown` (the service no longer has it, or no
+signature came back, and 90 seconds have passed) its record is cleared and the person is
+told to check both balances: from then on any tab is as free as the one that said so.
 
 **Deliberate release.** A hold that does not resolve (no signature to ask with, or a
 lookup that stays unknown) is offered for release after two minutes: "I checked my
@@ -974,8 +1013,9 @@ A payment item:
 Amounts are strings of base units in these success responses, because the caller
 is authorized to read them. They stay out of errors, logs, analytics and any
 cache the browser persists. The web app keeps them in memory only, with one exception:
-a withdrawal that may have been sent keeps its amount in `sessionStorage` (this tab,
-per viewer) until its outcome is final, so the same amount cannot be sent twice.
+a withdrawal that may have been sent keeps its amount in `localStorage` (per viewer,
+shared by the tabs of the browser) until its outcome is final or the person signs out,
+so the same amount cannot be sent twice.
 
 An auditor with a grant on company A who asks for company B gets `404`.
 
@@ -1192,7 +1232,8 @@ other role gets `403 forbidden_role`. It returns four booleans and nothing else:
 - It never prepares a replacement for a transaction that may have been broadcast
   (see [The sent-failure rule](#the-sent-failure-rule)); where it keeps evidence of a
   send it keeps only ids, a signature, a block height and a wallet address, and for a
-  withdrawal the amount, in `sessionStorage` until the outcome is final.
+  withdrawal the amount, in `localStorage` until the outcome is final or the person
+  signs out.
 - It ignores unknown response fields and maps unknown enum values to their safest
   class, with the one known gap in
   [Evolving the contract](#evolving-the-contract).

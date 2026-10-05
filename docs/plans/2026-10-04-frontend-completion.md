@@ -122,9 +122,12 @@ that needs a deployed backend.
   with Supabase configured; in real mode they are the Supabase rows, and real mode
   without Supabase shows "Sign-in is not configured".
 - **A generic submissions helper.** `src/lib/submissions.ts` keeps one record per kind of
-  flow in `sessionStorage` (`request_id`, signature, block height, wallet, time). It was
-  written for the deposit's wrap and reused by apply-pending. Withdraw and payroll now
-  use it too, through a list of records per viewer.
+  flow and viewer in `localStorage` (`request_id`, signature, block height, wallet, time),
+  so every tab of the browser sees what another holds as "may have gone through". It was
+  written for the deposit's wrap and reused by apply-pending. Withdraw and payroll use it
+  too, through a list of records per viewer. It started in `sessionStorage`; the
+  second-tab QA pass (below) moved it, and added a Web Lock to the deposit and to apply
+  pending, as withdraw and payroll already had. Signing out removes the viewer's records.
 - **A 100-recipient cap on a run.** A run request takes 1 to 100 payments: each entry
   is about 80 bytes, sized for the 8 KiB body of the wrap and transfer routes. The
   client schema enforces it and the new-run screen blocks above it. The plan had no
@@ -154,8 +157,8 @@ mock signer and a fake submit, and in real mode `useWallet()` is unavailable.
 
 - [x] Persist submissions for withdraw and for payroll with `src/lib/submissions.ts`, and
       check them on return as deposit and apply-pending do. Done: a reload no longer
-      forgets a withdrawal or a run payment that may have landed, and signing out keeps
-      them per viewer.
+      forgets a withdrawal or a run payment that may have landed, and a second tab of the
+      same browser sees it too. They are kept per viewer, and signing out removes them.
 - [ ] Get the canonical key-derivation message from the SDK (and the token account it is
       for). `keyDerivationMessage` in `src/lib/activation/message.ts` is a mock
       placeholder that throws outside mock mode. Real `signMessage` must refuse any
@@ -205,10 +208,21 @@ mock signer and a fake submit, and in real mode `useWallet()` is unavailable.
   built a different shape from the one the client and mock use; see
   [Payroll run](../dev/API_CONTRACT.md#payroll-run-one-approval-many-recipients-). The
   run screens work on the mock only.
-- **A reload does not lose a sent payment or withdrawal, but unsigned run payments are
-  still lost.** Sent run payments and held withdrawals are kept per viewer in this tab's
-  `sessionStorage` and checked on return; a run payment that was not sent cannot be
+- **A reload or a new tab does not lose a sent payment or withdrawal, but unsigned run
+  payments are still lost.** Sent run payments, held withdrawals, and the deposit's wrap and
+  apply-pending records are kept per viewer in `localStorage`, shared by every tab of the
+  browser, and checked on return; a tab that is closed and opened again finds them (and
+  Chrome's "Duplicate tab" no longer matters). A run payment that was not sent cannot be
   signed after a reload, and a new run is for it.
+- **The evidence is per browser profile.** Another browser, a private window, another
+  device and cleared site data do not see it, so a transaction sent from one is not held in
+  another; signing out removes it, so a person who signs out with a withdrawal in doubt finds
+  nothing held and has to check their history; and records older than 30 days are pruned.
+  The deposit's apply step and the activation account step still keep no record, only the
+  Web Lock while they are in flight. Server-side idempotency (a key that makes a repeated
+  prepare or send answer with what it already did) is the real fix, and belongs to the
+  integration. The contract's [The sent-failure rule](../dev/API_CONTRACT.md#the-sent-failure-rule)
+  has the detail.
 - **Unknown payment and run statuses are tolerated, not understood.** Since #130 they
   parse like the other tolerant enums (the reveal-risk level, the auditor status, the
   access-log enums): a run row shows "Unknown" with no action, and the repay guard treats
