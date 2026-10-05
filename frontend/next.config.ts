@@ -6,7 +6,7 @@ import {
 } from "next/constants"
 import { readApiConfig } from "./src/lib/api/config"
 import { readSiteUrl } from "./src/lib/auth/site-url"
-import { readCluster } from "./src/lib/solana/cluster"
+import { readCluster } from "./src/lib/solana/cluster-config"
 import { connectSources, headerRules } from "./src/lib/security-headers"
 import { isSupabaseConfigured } from "./src/lib/supabase/env"
 

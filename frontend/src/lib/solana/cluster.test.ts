@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { readCluster } from "./cluster"
 
 describe("readCluster", () => {
@@ -52,5 +52,23 @@ describe("readCluster", () => {
   it("keeps the devnet default for development and tests", () => {
     expect(readCluster({ nodeEnv: "development" }).name).toBe("devnet")
     expect(readCluster({ nodeEnv: "test" }).name).toBe("devnet")
+  })
+})
+
+describe("cluster-config", () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it("reads nothing when imported, so next.config.ts can load it under `next start`", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    vi.stubEnv("NEXT_PUBLIC_SOLANA_CLUSTER", "")
+    vi.resetModules()
+    await expect(import("./cluster-config")).resolves.toHaveProperty(
+      "readCluster",
+    )
+    // The app's own module still reads at import, and fails the build.
+    vi.resetModules()
+    await expect(import("./cluster")).rejects.toThrow(
+      /NEXT_PUBLIC_SOLANA_CLUSTER must be set/,
+    )
   })
 })
