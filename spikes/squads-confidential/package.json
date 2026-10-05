@@ -7,8 +7,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "tsc --allowJs --checkJs --noEmit --skipLibCheck --module nodenext --target es2023 squads.mjs",
-    "lint": "biome check squads.mjs"
+    "check": "tsc --allowJs --checkJs --noEmit --skipLibCheck --module nodenext --target es2023 squads.mjs verify.mjs",
+    "lint": "biome check squads.mjs verify.mjs"
   },
   "dependencies": {
     "@solana/web3.js": "1.99.0",
