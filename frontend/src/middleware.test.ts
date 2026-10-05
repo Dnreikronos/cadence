@@ -383,3 +383,39 @@ describe("a configuration that throws", () => {
     )
   })
 })
+
+describe("without Supabase configured (real mode, no demo)", () => {
+  beforeEach(() => {
+    config.mode = "real"
+    config.supabaseConfigured = false
+    vi.spyOn(console, "error").mockImplementation(() => {})
+  })
+
+  it("keeps the guarded areas closed, quietly, and never builds a client for it", async () => {
+    for (const path of ["/company", "/company/runs/new", "/me", "/audit"]) {
+      expect(outcome(await visit(path))).toBe(
+        `/sign-in?next=${encodeURIComponent(path)}`,
+      )
+    }
+    expect(createMiddlewareClient).not.toHaveBeenCalled()
+    // It is every request: nothing is logged for the configuration, so no log is flooded.
+    expect(console.error).not.toHaveBeenCalled()
+  })
+
+  it("serves the public pages and never throws on any request", async () => {
+    for (const path of ["/", "/sign-in", "/sign-up", "/auth/confirm"]) {
+      expect(outcome(await visit(path))).toBe("next")
+    }
+    expect(console.error).not.toHaveBeenCalled()
+  })
+
+  it("logs only the kind of error when a configured client cannot be made, and still fails closed", async () => {
+    config.supabaseConfigured = true
+    createMiddlewareClient.mockImplementation(() => {
+      throw new TypeError("https://secret-project.supabase.co is unreachable")
+    })
+    expect(outcome(await visit("/company"))).toBe("/sign-in?next=%2Fcompany")
+    expect(console.error).toHaveBeenCalledExactlyOnceWith("TypeError")
+    expect(outcome(await visit("/sign-in"))).toBe("next")
+  })
+})

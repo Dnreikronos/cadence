@@ -34,8 +34,13 @@ export async function signIn(
   form: FormData,
 ): Promise<SignInState> {
   const step = form.get("step")
-  if (step === "verify") return verifyCode(state, form)
   if (step === "change") return backToEmail(state, null)
+  // Without Supabase there is no code to send or check: the form says so, and nothing
+  // reaches the client (which would throw for want of its URL).
+  if (!isSupabaseConfigured()) {
+    return backToEmail(state, signInErrorMessage("not_configured"))
+  }
+  if (step === "verify") return verifyCode(state, form)
   return sendCode(state, form)
 }
 

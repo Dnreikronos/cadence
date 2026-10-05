@@ -7,6 +7,7 @@ import { signIn, type SignInState } from "@/lib/auth/actions"
 import type { SignInIntent } from "@/lib/auth/complete-sign-in"
 import { buttonVariants } from "@/components/ui/button"
 import { fieldClass } from "@/components/ui/field"
+import { signInErrorMessage } from "@/lib/auth/sign-in-errors"
 
 const field = `h-10 ${fieldClass}`
 const quiet = "text-ui text-ink-muted hover:text-ink"
@@ -18,6 +19,7 @@ export function EmailCodeForm({
   error,
   noCompany,
   retryHref,
+  notConfigured = false,
 }: {
   mode: "sign-in" | "sign-up"
   intent: SignInIntent
@@ -26,6 +28,8 @@ export function EmailCodeForm({
   noCompany: boolean
   // Set when the account lookup failed: the form stays, with a way to try again.
   retryHref: string | null
+  // This deployment has no Supabase: the form says so and cannot be submitted.
+  notConfigured?: boolean
 }) {
   const [state, action, isPending] = useActionState<SignInState, FormData>(
     signIn,
@@ -65,6 +69,7 @@ export function EmailCodeForm({
           intent={intent}
           title={title}
           retryHref={retryHref}
+          notConfigured={notConfigured}
         />
       )}
     </>
@@ -79,6 +84,7 @@ function Card({
   intent,
   title,
   retryHref,
+  notConfigured,
 }: {
   state: Exclude<SignInState, { step: "no_company" }>
   action: (form: FormData) => void
@@ -87,6 +93,7 @@ function Card({
   intent: SignInIntent
   title: string
   retryHref: string | null
+  notConfigured: boolean
 }) {
   return (
     <div className="rounded-2xl border border-line bg-surface p-6 shadow-card">
@@ -102,6 +109,11 @@ function Card({
               : "We will email you a 6-digit code. No password needed."}
           </p>
           <IntentFields intent={intent} />
+          {notConfigured && (
+            <p role="status" className="text-ui/normal text-warning-fg">
+              {signInErrorMessage("not_configured")}
+            </p>
+          )}
           {mode === "sign-up" && (
             <label className="block space-y-1.5">
               <span className="text-label text-ink-muted">Company name</span>
@@ -110,7 +122,8 @@ function Card({
                 required
                 maxLength={200}
                 autoComplete="organization"
-                autoFocus
+                autoFocus={!notConfigured}
+                disabled={notConfigured}
                 defaultValue={state.company}
                 className={field}
               />
@@ -123,7 +136,8 @@ function Card({
               type="email"
               autoComplete="email"
               required
-              autoFocus={mode === "sign-in"}
+              autoFocus={mode === "sign-in" && !notConfigured}
+              disabled={notConfigured}
               defaultValue={state.email}
               className={field}
             />
@@ -136,7 +150,7 @@ function Card({
           )}
           <button
             type="submit"
-            disabled={isPending}
+            disabled={isPending || notConfigured}
             className={buttonVariants({ className: "w-full" })}
           >
             {isPending ? "Sending…" : "Email me a code"}

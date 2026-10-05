@@ -4,6 +4,7 @@ import { isDemoEnabled } from "@/lib/demo/mode"
 import { isDevPath } from "@/lib/dev-tools"
 import { devToolsOff } from "@/lib/dev-tools-env"
 import { DEMO_COOKIE, parseDemoRole } from "@/lib/demo/viewer"
+import { isSupabaseConfigured } from "@/lib/supabase/env"
 import { membershipOf } from "@/lib/supabase/membership"
 import { createMiddlewareClient } from "@/lib/supabase/middleware"
 
@@ -21,13 +22,20 @@ export async function middleware(request: NextRequest) {
     return decide(request, role, NextResponse.next())
   }
   const guarded = requiredRole(request.nextUrl.pathname) !== null
+  // Without Supabase configured nobody can sign in: fail closed on guarded areas only,
+  // quietly (this is every request, and the configuration is not news to anyone).
+  if (!isSupabaseConfigured()) {
+    return guarded
+      ? decide(request, null, NextResponse.next())
+      : NextResponse.next()
+  }
   let session: ReturnType<typeof createMiddlewareClient>
   try {
     session = createMiddlewareClient(request)
   } catch (error) {
-    // Without Supabase configured nobody can sign in: fail closed on guarded areas only.
+    // Configured, yet the client could not be made: fail closed on guarded areas.
     if (!guarded) return NextResponse.next()
-    console.error(error)
+    console.error(error instanceof Error ? error.name : typeof error)
     return decide(request, null, NextResponse.next())
   }
 
