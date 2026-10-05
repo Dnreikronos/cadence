@@ -4,14 +4,9 @@ import { useMemo } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import type { RunRequest } from "@/lib/api/schemas"
-import { collectPages } from "@/lib/runs/pages"
+import { readRecentlyPaid } from "@/lib/runs/recent"
 import { runPollInterval } from "@/lib/runs/poll"
-import {
-  recentWindowMs,
-  recentlyPaidIds,
-  withAmounts,
-  type PayrollPerson,
-} from "@/lib/runs/plan"
+import { withAmounts, type PayrollPerson } from "@/lib/runs/plan"
 import { isApiError } from "@/lib/api/errors"
 import { queryKeys, type ViewerScope } from "./keys"
 import { usePeople, usePersonAmounts } from "./people"
@@ -74,27 +69,19 @@ export function useRecentPayments(limit: number) {
   })
 }
 
-const recentPages = 5
-
 // Who was paid in the last 24 hours, from the company's payments (newest first), read
 // fresh each time the new-run page opens: it is what keeps a second run from paying the
 // same people twice. Under the `payments` prefix, so a confirmed payment refreshes it.
+// More payments than five pages hold inside the window is an error, not a partial answer.
 export function useRecentlyPaid() {
   return useQuery({
     queryKey: [...queryKeys.payments.all, "recently-paid"],
     refetchOnMount: "always",
-    queryFn: async ({ signal }) => {
-      const now = Date.now()
-      const payments = await collectPages(
+    queryFn: ({ signal }) =>
+      readRecentlyPaid(
         (cursor) => api.company.payments({ limit: 100, cursor }, { signal }),
-        recentPages,
-        // Newest first: a page that ends before the window has nothing more to add.
-        (page) =>
-          page.length > 0 &&
-          Date.parse(page[page.length - 1].paid_at) < now - recentWindowMs,
-      )
-      return recentlyPaidIds(payments, now)
-    },
+        Date.now(),
+      ),
   })
 }
 

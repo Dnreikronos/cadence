@@ -123,8 +123,8 @@ that needs a deployed backend.
   without Supabase shows "Sign-in is not configured".
 - **A generic submissions helper.** `src/lib/submissions.ts` keeps one record per kind of
   flow in `sessionStorage` (`request_id`, signature, block height, wallet, time). It was
-  written for the deposit's wrap and reused by apply-pending. It is not used by
-  withdraw or payroll yet (see the checklist below).
+  written for the deposit's wrap and reused by apply-pending. Withdraw and payroll now
+  use it too, through a list of records per viewer.
 - **A 100-recipient cap on a run.** A run request takes 1 to 100 payments: each entry
   is about 80 bytes, sized for the 8 KiB body of the wrap and transfer routes. The
   client schema enforces it and the new-run screen blocks above it. The plan had no
@@ -148,14 +148,14 @@ that needs a deployed backend.
 
 ## Before real signing
 
-Nothing below is done. Real signing means the Turnkey wallet signs, the app sends the
+Only the first item below is done. Real signing means the Turnkey wallet signs, the app sends the
 transaction to Solana and the real service confirms it; today every screen runs on the
 mock signer and a fake submit, and in real mode `useWallet()` is unavailable.
 
-- [ ] Persist submissions for withdraw and for payroll with `src/lib/submissions.ts`, and
-      check them on return as deposit and apply-pending do. Today a reload forgets a
-      withdrawal or a run payment that may have landed, and signing out clears the
-      held withdrawal amounts.
+- [x] Persist submissions for withdraw and for payroll with `src/lib/submissions.ts`, and
+      check them on return as deposit and apply-pending do. Done: a reload no longer
+      forgets a withdrawal or a run payment that may have landed, and signing out keeps
+      them per viewer.
 - [ ] Get the canonical key-derivation message from the SDK (and the token account it is
       for). `keyDerivationMessage` in `src/lib/activation/message.ts` is a mock
       placeholder that throws outside mock mode. Real `signMessage` must refuse any
@@ -205,11 +205,14 @@ mock signer and a fake submit, and in real mode `useWallet()` is unavailable.
   built a different shape from the one the client and mock use; see
   [Payroll run](../dev/API_CONTRACT.md#payroll-run-one-approval-many-recipients-). The
   run screens work on the mock only.
-- **A reload loses what a payroll run or a withdrawal was doing.** Signatures of sent
-  run payments and held withdrawal amounts are in memory; unsigned run payments cannot
-  be signed after a reload.
-- **Unknown payment and run statuses fail the response.** Those schemas are strict, unlike
-  the reveal-risk level, the auditor status and the access-log enums.
+- **A reload does not lose a sent payment or withdrawal, but unsigned run payments are
+  still lost.** Sent run payments and held withdrawals are kept per viewer in this tab's
+  `sessionStorage` and checked on return; a run payment that was not sent cannot be
+  signed after a reload, and a new run is for it.
+- **Unknown payment and run statuses are tolerated, not understood.** Since #130 they
+  parse like the other tolerant enums (the reveal-risk level, the auditor status, the
+  access-log enums): a run row shows "Unknown" with no action, and the repay guard treats
+  the payment as possibly paid. What a new status means is still for the backend to say.
 - **No service-status banner.** `api.health()` exists and no screen calls it.
 - **`/transfer` has no screen.** Payroll goes through `/runs`, so the client's `/transfer`
   and the `aes_key` it needs are never used.

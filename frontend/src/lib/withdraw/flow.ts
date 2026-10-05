@@ -16,7 +16,12 @@ import {
   UnexpectedSignerError,
   type SignStep,
 } from "@/lib/api/sign"
+import {
+  StorageUnavailableError,
+  storageBlockedMessage,
+} from "@/lib/storage-guard"
 import { WalletUnavailableError } from "@/lib/wallet/types"
+import type { SentEvidence } from "./held"
 
 // ---- Running a withdrawal ---------------------------------------------------
 
@@ -40,6 +45,13 @@ export type WithdrawInput = {
   acknowledged: boolean
   onPrepared?: (level: RevealRiskLevel) => void
   onStep?: (step: SignStep) => void
+  // The transaction is about to be handed to the network (no signature yet), and
+  // again once the network returned its signature: keep what is needed to find out
+  // what became of it, since from the first call on it may have been sent.
+  onSent?: (evidence: SentEvidence) => void
+  // The outcome is final: it landed, or the network refused it. What `onSent` kept
+  // can go.
+  onResolved?: () => void
 }
 
 export type WithdrawOutcome =
@@ -98,15 +110,33 @@ export async function runWithdraw(
       (sig) =>
         deps.confirm({ request_id: prepared.request_id, signature: sig }),
       (step) => {
+        // Before `submit` runs, not after it returns: a submit that throws (a timeout,
+        // a dropped connection) may still have reached the network. The phase moves on
+        // only once the record is kept: if keeping it fails (it throws), nothing was
+        // sent and the failure is not "may have been sent".
+        if (step === "submitting") {
+          input.onSent?.({
+            request_id: prepared.request_id,
+            last_valid_block_height: prepared.last_valid_block_height,
+            signature: null,
+          })
+        }
         phase = step
         input.onStep?.(step)
       },
       (sig) => {
         signature = sig
+        input.onSent?.({
+          request_id: prepared.request_id,
+          last_valid_block_height: prepared.last_valid_block_height,
+          signature: sig,
+        })
       },
     )
+    input.onResolved?.()
     return { kind: "done", level: prepared.reveal_risk.level, receipt }
   } catch (error) {
+    if (rejected(error)) input.onResolved?.()
     if (
       (phase === "submitting" || phase === "confirming") &&
       !rejected(error)
@@ -192,6 +222,9 @@ export function failureOf(error: unknown): Failure {
       retryable: false,
     }
   }
+  if (error instanceof StorageUnavailableError) {
+    return { ...base, message: storageBlockedMessage, retryable: true }
+  }
   if (isSignatureRejection(error)) {
     return {
       ...base,
@@ -215,7 +248,7 @@ export function failureOf(error: unknown): Failure {
 export type Phase = "preparing" | SignStep
 
 // A withdrawal that may have gone through. Asking for the same amount again could
-// pay out twice, so the reducer refuses until the person has reloaded.
+// pay out twice, so the reducer refuses until a lookup settles it (see `held.ts`).
 export type Held = { amount: string; signature: string | null }
 
 // Every unresolved withdrawal stays held, not only the latest. One entry per amount;
@@ -298,12 +331,15 @@ export type WithdrawEvent =
   | { type: "reset" }
   // A withdrawal from earlier in the session turned out to be unresolved.
   | { type: "hold"; held: readonly Held[] }
+  // The held list as it is kept now, whole: a withdrawal found settled by looking it up
+  // is released, which `hold` never does.
+  | { type: "sync-held"; held: readonly Held[] }
 
 export const initialWithdraw: WithdrawState = { stage: "form", held: [] }
 
 // The agreement is for one amount: it is asked for again whenever the amount changes,
 // and nothing is sent until the box is ticked. An amount that may already have gone
-// out stays blocked, however many times the field is edited, until the page reloads.
+// out stays blocked, however many times the field is edited, until it is settled.
 export function withdrawReducer(
   state: WithdrawState,
   event: WithdrawEvent,
@@ -381,8 +417,14 @@ export function withdrawReducer(
       const merged = mergeHeld(held, event.held)
       return merged === held ? state : { ...state, held: merged }
     }
+    case "sync-held":
+      return sameHeld(held, event.held) ? state : { ...state, held: event.held }
   }
 }
+
+const sameHeld = (a: readonly Held[], b: readonly Held[]) =>
+  a.length === b.length &&
+  a.every((h, i) => h.amount === b[i].amount && h.signature === b[i].signature)
 
 function working(
   amount: string,

@@ -210,3 +210,91 @@ test("people who were just paid are not ticked for the next run, and ticking the
     dialog.getByRole("button", { name: "Pay again and sign" }),
   ).toBeVisible()
 })
+
+test("a reload mid-run keeps who may have been paid out of the next run, and says so", async ({
+  page,
+  watch,
+}) => {
+  // After the reload the mock is empty, so asking about the saved payment gets a 404:
+  // that is no answer about the payment, so the person stays out of the roster.
+  watch.allowStatus(404, /\/runs\/[^/]+\/payments\/[^/]+\/confirm$/)
+  watch.allowStatus(409, /\/runs\/[^/]+\/payments\/[^/]+\/confirm$/)
+  const prompts: string[] = []
+  page.on("dialog", (dialog) => {
+    prompts.push(dialog.type())
+    void dialog.accept()
+  })
+
+  await openNewRun(page)
+  // Without `instant` the network takes a few seconds to confirm: time to reload in.
+  await setMock(page)
+  await person(page, "Diego Martins").uncheck()
+  await person(page, "Northwind Audit").uncheck()
+  await payButton(page).click()
+  await page
+    .getByRole("dialog", { name: "Pay 1 person · $4,200.00" })
+    .getByRole("button", { name: "Confirm and sign" })
+    .click()
+  await expect(rowOf(page, "Bruno Costa")).toContainText("Waiting")
+  await page.reload()
+  expect(prompts).toContain("beforeunload")
+
+  // Bruno's payment was sent, and cannot be told from here: he is not payable, and the
+  // others still are.
+  await expect(
+    page.getByRole("heading", { name: "Last payment not settled (1)" }),
+  ).toBeVisible()
+  await expect(page.getByRole("checkbox", { name: /Bruno Costa/ })).toHaveCount(
+    0,
+  )
+  await expect(person(page, "Diego Martins")).toBeVisible()
+  await expect(payButton(page)).toHaveText("Pay 2 people · $15,800.00")
+  const checking = page.getByRole("region", {
+    name: "Last payment not settled (1)",
+  })
+  await expect(checking).toContainText("Bruno Costa")
+  await expect(checking).toContainText("could pay them twice")
+})
+
+test("the same list asked for again after a reload goes out with the saved key", async ({
+  page,
+}) => {
+  page.on("dialog", (dialog) => void dialog.accept())
+  const keys: string[] = []
+  page.on("request", (request) => {
+    if (request.method() !== "POST" || !/\/runs$/.test(request.url())) return
+    const key = request.postDataJSON()?.idempotency_key
+    if (typeof key === "string") keys.push(key)
+  })
+
+  await signInAs(page, "admin")
+  // `slow` holds the create for 1.5 s: the reload lands while its answer is not back.
+  await page.goto("/company/runs/new?mock=slow")
+  await expect(
+    page.getByRole("checkbox", { name: /Bruno Costa/ }),
+  ).toBeVisible()
+  await payButton(page).click()
+  await page
+    .getByRole("dialog", { name: "Pay 3 people · $20,000.00" })
+    .getByRole("button", { name: "Confirm and sign" })
+    .click()
+  await expect.poll(() => keys.length).toBe(1)
+  await page.reload()
+
+  await expect(
+    page.getByRole("checkbox", { name: /Bruno Costa/ }),
+  ).toBeVisible()
+  await setMock(page, "instant")
+  await payButton(page).click()
+  await page
+    .getByRole("dialog", { name: "Pay 3 people · $20,000.00" })
+    .getByRole("button", { name: "Confirm and sign" })
+    .click()
+  await expect.poll(() => keys.length).toBe(2)
+  expect(keys[1]).toBe(keys[0])
+  await expect(
+    page
+      .getByRole("region", { name: "Payments in this run" })
+      .getByRole("status"),
+  ).toContainText("3 of 3 confirmed")
+})

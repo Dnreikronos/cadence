@@ -117,6 +117,39 @@ const created = (count: number): RunCreated => ({
 })
 
 describe("payOne", () => {
+  it("says the payment is about to be sent before the send, once, with what was prepared", async () => {
+    const { context, log } = harness()
+    const sending = vi.fn<NonNullable<RunContext["events"]["sending"]>>(() => {
+      log.push("sending")
+    })
+    await payOne(
+      { ...context, events: { ...context.events, sending } },
+      prepared(1),
+    )
+    expect(sending).toHaveBeenCalledTimes(1)
+    expect(sending).toHaveBeenCalledWith(prepared(1))
+    // After the wallet signed, before the network was handed anything.
+    expect(log.indexOf("sending")).toBeGreaterThan(log.indexOf("signing 1"))
+    expect(log.indexOf("sending")).toBeLessThan(
+      log.indexOf("submitted 1 sig-1"),
+    )
+  })
+
+  it("does not say it when the wallet refuses to sign: nothing may have been sent", async () => {
+    const sending = vi.fn()
+    const { context } = harness({
+      sign: async (_p, _c, onStep) => {
+        onStep?.("signing")
+        throw new Error("You cancelled")
+      },
+    })
+    await payOne(
+      { ...context, events: { ...context.events, sending } },
+      prepared(1),
+    )
+    expect(sending).not.toHaveBeenCalled()
+  })
+
   it("reports each step, then confirms with the payment's own ids", async () => {
     const { context, log, api } = harness()
     await payOne(context, prepared(1))

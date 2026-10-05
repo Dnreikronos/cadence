@@ -3,6 +3,7 @@ import { ApiError, ContractError } from "@/lib/api/errors"
 import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
+  PaymentNotOnChainError,
   ResponseMismatchError,
   SentPaymentError,
   isSignatureRejection,
@@ -63,6 +64,13 @@ describe("failureCodeMessage", () => {
 })
 
 describe("describeFailure", () => {
+  it("treats a payment found not to be on the network as final, so a retry is offered", () => {
+    expect(describeFailure(new PaymentNotOnChainError())).toEqual({
+      message: failureCodeMessage(null),
+      sent: false,
+    })
+  })
+
   it("treats a payment that may have been sent as sent, and keeps its signature", () => {
     const failure = describeFailure(
       new SentPaymentError(new ApiError(500, "internal_error"), "sig-1"),

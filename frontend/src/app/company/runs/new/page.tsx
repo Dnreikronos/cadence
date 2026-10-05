@@ -11,7 +11,13 @@ export default async function NewRunPage() {
         title="New payroll run"
         description="Choose who to pay. You approve once, then sign each payment in turn."
       />
-      <NewRunScreen viewer={{ email, company: membership.company.name }} />
+      <NewRunScreen
+        viewer={{
+          email,
+          company: membership.company.name,
+          companyId: membership.company.id,
+        }}
+      />
     </div>
   )
 }

@@ -106,6 +106,7 @@ export function RunProgress({
             name={nameOf(entry.personId)}
             row={row}
             transparent={entry.transparent === true}
+            checking={signer.checking.has(entry.paymentId)}
             canSign={canSign}
             held={signer.canSignAgain(entry.paymentId)}
             onSignAgain={() => void signer.signAgain(runId, entry.paymentId)}
@@ -131,9 +132,10 @@ export function RunProgress({
       )}
       {!signer.busy && rows.some(({ row }) => row.status === "pending") && (
         <p className="text-ui/normal text-ink-muted">
-          Payments still pending were not signed in this session, and a payment
-          can only be signed in the session that created its run. Start a new
-          run for them, and don&apos;t include people shown as Confirmed.
+          Payments still pending were not paid: they were not signed in this
+          session, and a payment can only be signed in the session that created
+          its run. Start a new run for them only, and don&apos;t include people
+          shown as Confirmed or Checking.
         </p>
       )}
       {counts.open === 0 && (
@@ -151,6 +153,7 @@ function PaymentRow({
   name,
   row,
   transparent,
+  checking,
   canSign,
   held,
   onSignAgain,
@@ -160,6 +163,8 @@ function PaymentRow({
   name: string | undefined
   row: Row
   transparent: boolean
+  // Sent before a reload and being asked about again: not paid again, not settled yet.
+  checking: boolean
   canSign: boolean
   // This page still holds the transaction of a cancelled signature.
   held: boolean
@@ -199,7 +204,10 @@ function PaymentRow({
         )}
       </span>
       <span className="flex flex-wrap items-center gap-1.5">
-        <RunStatusPill status={row.status} />
+        <RunStatusPill
+          status={row.status}
+          label={checking && row.status === "waiting" ? "Checking" : undefined}
+        />
         {transparent && <TransparentBadge />}
       </span>
       {canSignAgain(row) && held && (
@@ -237,6 +245,12 @@ function PaymentRow({
           <RotateCw className="size-3.5" />
           Check again
         </button>
+      )}
+      {checking && row.status === "waiting" && (
+        <p className="basis-full text-caption/normal text-ink-muted">
+          This payment was sent before the page was reloaded. Checking whether
+          it went through; it won&apos;t be sent again.
+        </p>
       )}
       {message && (
         <p

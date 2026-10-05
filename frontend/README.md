@@ -230,11 +230,11 @@ this. The evidence is kept unevenly:
   (`request_id`, signature, block height, wallet, time; nothing secret). **Deposit (the
   wrap step) and apply-pending use it**, so a reload finds out what became of the
   transaction before anything else is sent.
-- **Withdraw and payroll do not use it yet.** Withdraw holds the amounts in memory
-  (the mutation cache) and payroll holds signatures in component state, so a reload, or
-  for withdraw a sign-out, forgets a transaction that may have landed. A payroll
-  payment also can only be signed in the session that created its run. Persisting
-  both is a prerequisite for real signing.
+- **Withdraw and payroll keep a list per viewer** (`createRecordList`, under
+  `cadence:submissions:<kind>:<viewer>`), so a reload or a sign-out cannot forget a
+  transaction that may have landed. A withdrawal's record holds its amount, which is
+  what keeps it from being sent twice. A payroll payment that was not sent still cannot
+  be signed after a reload: it is not paid, and a new run is for it.
 
 The details, and the table of flows, are in the contract under
 [The sent-failure rule](../docs/dev/API_CONTRACT.md#the-sent-failure-rule).

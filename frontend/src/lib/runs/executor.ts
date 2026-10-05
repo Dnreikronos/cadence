@@ -37,6 +37,9 @@ export type RunApi = {
 // What happened to one payment. `failed` carries the raw error: the caller words it.
 export type RunEvents = {
   signing: (paymentId: string) => void
+  // About to hand the signed transaction to the network, before the send itself: from
+  // here it may be on the network whatever happens next.
+  sending?: (prepared: RunPaymentPrepared) => void
   waiting: (paymentId: string) => void
   submitted: (paymentId: string, signature: string) => void
   confirmed: (paymentId: string) => void
@@ -70,6 +73,9 @@ export async function payOne(
       prepared,
       (sig) => api.confirmPayment(runId, id, sig),
       (step) => {
+        // The record of the send comes first, and the phase moves on only once it is
+        // kept: if keeping it fails (it throws), nothing was sent.
+        if (step === "submitting") events.sending?.(prepared)
         phase = step
         events[stepEvent(step)](id)
       },

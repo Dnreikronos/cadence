@@ -1,7 +1,9 @@
 import type { PageQuery } from "@/lib/api/client"
 
 // Who a cached answer belongs to. Balances are private, so their keys carry it.
-export type ViewerScope = { email: string; company: string }
+// `companyId`, when the page knows it, is what saved records are scoped by (a rename of
+// the company must not orphan them); the balance keys keep using the name.
+export type ViewerScope = { email: string; company: string; companyId?: string }
 
 const people = ["people"] as const
 const balance = ["balance"] as const

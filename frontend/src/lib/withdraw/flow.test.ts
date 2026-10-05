@@ -512,6 +512,35 @@ describe("withdrawReducer", () => {
       )
     })
 
+    it("takes the kept list as it is, so a withdrawal a lookup settled is released", () => {
+      const state = run(
+        [
+          {
+            type: "sync-held",
+            held: [
+              { amount: "100", signature: "a" },
+              { amount: "200", signature: null },
+            ],
+          },
+        ],
+        failedSent("300"),
+      )
+      expect(state.held.map((h) => h.amount)).toEqual(["100", "200"])
+      expect(
+        withdrawReducer(state, { type: "submit", amount: "300" }).stage,
+      ).toBe("working")
+      expect(withdrawReducer(state, { type: "submit", amount: "100" })).toBe(
+        state,
+      )
+      // The same list again changes nothing.
+      expect(
+        withdrawReducer(state, {
+          type: "sync-held",
+          held: state.held.map((h) => ({ ...h })),
+        }),
+      ).toBe(state)
+    })
+
     it("does not hold anything for an ordinary failure", () => {
       const state = run([{ type: "failed", failure }], submitted())
       expect(state.held).toEqual([])

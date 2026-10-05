@@ -10,6 +10,8 @@ import {
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { apiConfig } from "@/lib/api/mode"
+import { requireDurable } from "@/lib/storage-guard"
 import { saveBlob } from "@/lib/download"
 import { applyUi, type Lock } from "@/lib/me/apply-ui"
 import {
@@ -96,6 +98,7 @@ export function useApplyPending(balance: BalanceRead | undefined) {
       wallet,
       run,
       store: applyStore,
+      requireStorage: () => requireDurable(apiConfig.mode),
       onPhase: setPhase,
       onApplied: () => toast.success("Pending balance is now available"),
       onSent: () => toast.error(sentMessage),

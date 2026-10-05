@@ -6,6 +6,10 @@ import {
   UnexpectedSignerError,
   type SignStep,
 } from "@/lib/api/sign"
+import {
+  StorageUnavailableError,
+  storageBlockedMessage,
+} from "@/lib/storage-guard"
 import type { Submission } from "@/lib/submissions"
 import type { bindSignAndConfirm } from "@/lib/wallet/sign-and-confirm"
 import { WalletUnavailableError, type Wallet } from "@/lib/wallet/types"
@@ -26,6 +30,10 @@ export type ApplyPendingDeps = {
   wallet: Wallet
   run: ReturnType<typeof bindSignAndConfirm>
   store: ApplyStore
+  // Throws when a record of the send cannot be kept and the mode forbids sending without
+  // one (`requireDurable`): asked before anything is prepared, and again right after the
+  // record is written, before the send.
+  requireStorage?: () => void
   now?: () => number
 }
 
@@ -63,12 +71,20 @@ const lostForGood = new Set(["transaction_failed"])
 // submit on, every failure but a dropped transaction is a SentApplyError, and the
 // submission stays recorded so a reload finds out what became of it.
 export async function applyPending(
-  { accounts, wallet, run, store, now = Date.now }: ApplyPendingDeps,
+  {
+    accounts,
+    wallet,
+    run,
+    store,
+    requireStorage,
+    now = Date.now,
+  }: ApplyPendingDeps,
   onPhase?: (phase: ApplyPhase) => void,
 ): Promise<Receipt> {
   if (wallet.status !== "ready") {
     throw new WalletUnavailableError(wallet.reason ?? "no wallet")
   }
+  requireStorage?.()
   let record: Submission | null = null
   let signature: string | null = null
   let submitted = false
@@ -86,7 +102,6 @@ export async function applyPending(
         // Before `submit` runs, not after it returns: a submit that throws (a
         // timeout, a dropped connection) may still have reached the network.
         if (step === "submitting") {
-          submitted = true
           record = store.record({
             kind: APPLY_KIND,
             request_id: prepared.request_id,
@@ -95,6 +110,9 @@ export async function applyPending(
             wallet: wallet.address,
             at: now(),
           })
+          // Before `submitted` is set: a record that cannot be kept stops it, unsent.
+          requireStorage?.()
+          submitted = true
         }
         onPhase?.(step)
       },
@@ -128,6 +146,7 @@ export const sentMessage =
 // Never the raw message: errors can carry request details.
 export function applyPendingMessage(error: unknown): string {
   if (error instanceof SentApplyError) return sentMessage
+  if (error instanceof StorageUnavailableError) return storageBlockedMessage
   if (error instanceof ApplyInProgressError) {
     return "An update is already in progress. Wait for it to finish."
   }
