@@ -111,10 +111,10 @@ describe("headerRules", () => {
     expect(forPath("/")["Strict-Transport-Security"]).toBeUndefined()
     expect(
       forPath("/", { production: true })["Strict-Transport-Security"],
-    ).toBe("max-age=63072000; includeSubDomains")
+    ).toBe("max-age=31536000")
     expect(
       forPath("/dev/api", { production: true })["Strict-Transport-Security"],
-    ).toBe("max-age=63072000; includeSubDomains")
+    ).toBe("max-age=31536000")
   })
 
   it("restricts only framing under `next dev`, whose refresh runtime needs eval", () => {

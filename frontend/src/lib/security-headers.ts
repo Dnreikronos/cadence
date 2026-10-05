@@ -41,11 +41,14 @@ export function connectSources({
   ]
 }
 
-// Stage 1: header-only, so every page stays static. The inline allowances are what
-// Next's own bootstrap scripts and the styles of the component libraries need; a
-// nonce-based stage 2 would drop them but makes every route dynamic, so it is a
-// decision for the team (docs/plans/2026-10-04-frontend-completion.md, "Before going
-// live"). No `unsafe-eval`: zod is told not to probe for it (src/lib/zod-config.ts).
+// Stage 1: a static header. The inline allowances are what Next's own bootstrap scripts
+// and the styles of the component libraries need. A nonce-based stage 2 (nonce plus
+// `strict-dynamic`, no `unsafe-inline`) would drop them. It costs little here: the app
+// routes and `/` already render per request (the viewer comes from cookies, and the
+// responses are no-store), so a nonce does not take static pages away. It is recommended
+// before the wallet lands and not done here (docs/plans/2026-10-04-frontend-completion.md,
+// "Before going live"). No `unsafe-eval`: zod is told not to probe for it
+// (src/lib/zod-config.ts).
 export function contentSecurityPolicy(
   connect: string[],
   frameAncestors: "'none'" | "'self'",
@@ -73,7 +76,10 @@ export type HeaderOptions = {
   // cannot allow without weakening it: in development only framing is restricted.
   development?: boolean
   // HSTS is sent by production builds only: a dev or preview host on plain http must not
-  // pin a browser to https.
+  // pin a browser to https. A year, without includeSubDomains, for the first deploy: a
+  // mistake costs a year of https-only on this host rather than two on every subdomain
+  // of the domain, whose other services nobody here has checked. Raise it, and add
+  // includeSubDomains (and preload, if wanted), once the deploy has run clean.
   production?: boolean
 }
 
@@ -109,7 +115,7 @@ export function headerRules({
           ? [
               {
                 key: "Strict-Transport-Security",
-                value: "max-age=63072000; includeSubDomains",
+                value: "max-age=31536000",
               },
             ]
           : []),
