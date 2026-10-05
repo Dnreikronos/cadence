@@ -1,5 +1,5 @@
 import { expectNoSeriousA11yViolations } from "./support/a11y"
-import { signInAs } from "./support/demo"
+import { signInAs, type Role } from "./support/demo"
 import { openScreen, screens } from "./support/screens"
 import { expect, test } from "./support/test"
 
@@ -52,6 +52,74 @@ for (const [viewport, size] of Object.entries(viewports) as [
         viewport,
       )
     })
+
+    for (const role of ["admin", "recipient", "auditor"] as Role[]) {
+      test(`the account menu of the ${role} has a name and no serious violations`, async ({
+        page,
+      }) => {
+        await signInAs(page, role)
+        // The button is the email on a wide screen, and just "Account" on a phone.
+        await page
+          .getByRole("banner")
+          .getByRole("button", {
+            name: /@solaris\.test|@acme-audit\.test|^Account$/,
+          })
+          .click()
+        await expect(
+          page.getByRole("dialog", { name: "Account menu" }),
+        ).toBeVisible()
+
+        await expectNoSeriousA11yViolations(
+          page,
+          `account menu (${role})`,
+          viewport,
+        )
+      })
+    }
+
+    // The amount that is not there yet is a shape, not faded text: faded text fails the
+    // contrast rule. Each screen is looked at while its balance is loading (held back) and
+    // after it failed.
+    for (const { name, role, path } of [
+      { name: "company people", role: "admin", path: "/company/people" },
+      { name: "company deposit", role: "admin", path: "/company/deposit" },
+      { name: "recipient home", role: "recipient", path: "/me" },
+    ] as const) {
+      test(`${name} has no serious violations while its balance loads`, async ({
+        page,
+      }) => {
+        // Held for longer than the check takes.
+        await page.addInitScript(() => {
+          const original = window.fetch
+          window.fetch = async (input, init) => {
+            const url = input instanceof Request ? input.url : String(input)
+            if (new URL(url, location.href).pathname.endsWith("/balance")) {
+              await new Promise((resolve) => setTimeout(resolve, 20_000))
+            }
+            return original(input, init)
+          }
+        })
+        await signInAs(page, role)
+        await page.goto(path)
+        await expect(page.getByText("Decrypting amount").first()).toBeAttached()
+
+        await expectNoSeriousA11yViolations(page, `${name} (loading)`, viewport)
+      })
+
+      test(`${name} has no serious violations when its balance fails`, async ({
+        page,
+        watch,
+      }) => {
+        watch.allowStatus(503, /mock\.cadence\.test\//)
+        await signInAs(page, role)
+        await page.goto(`${path}?mock=service-down`)
+        await expect(
+          page.getByRole("main").getByRole("alert").first(),
+        ).toBeVisible()
+
+        await expectNoSeriousA11yViolations(page, `${name} (error)`, viewport)
+      })
+    }
 
     test("a payment receipt has no serious violations", async ({ page }) => {
       await signInAs(page, "admin")

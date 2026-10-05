@@ -181,7 +181,7 @@ function UserMenu({
         <ChevronDown aria-hidden className="size-3.5" />
         <span className="sr-only sm:hidden">Account</span>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-60">
+      <PopoverContent align="end" className="w-60" aria-label="Account menu">
         <p className="truncate text-label text-ink-muted">Signed in as</p>
         <p className="-mt-1.5 truncate font-medium text-ink">{email}</p>
         {/* Clears the Supabase session; the Turnkey session joins it with the wallet (#77). */}

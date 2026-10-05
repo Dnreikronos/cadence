@@ -3,7 +3,9 @@ import { cn } from "@/lib/utils"
 
 export type AmountState = "revealed" | "hidden" | "loading"
 
-// Stands in for an amount the viewer can't or can't yet read, so the real figure never reaches the DOM.
+// Stands in for an amount the viewer can't or can't yet read: it only gives the shape its
+// width (it is never visible), so the real figure never reaches the DOM and a figure that
+// arrives does not move what is around it.
 const placeholder = "$0,000.00"
 
 export function AmountDisplay({
@@ -15,10 +17,7 @@ export function AmountDisplay({
   state?: AmountState
   className?: string
 }) {
-  const text =
-    state === "revealed" && amount !== undefined
-      ? formatUsd(amount)
-      : placeholder
+  const shown = state === "revealed" && amount !== undefined
   return (
     <span
       aria-busy={state === "loading" || undefined}
@@ -28,17 +27,20 @@ export function AmountDisplay({
         className,
       )}
     >
+      {/* Not the text, blurred and faded: text at that contrast fails WCAG's minimum, and a
+          shape says "not here yet" as well. The text below is only there for the width. */}
       <span
-        aria-hidden={state !== "revealed"}
-        className={cn(
-          "inline-block transition-[filter,opacity] duration-500 ease-out",
-          state === "revealed"
-            ? "opacity-100 blur-none"
-            : "opacity-55 blur-[0.3em] select-none",
-        )}
+        aria-hidden={!shown || undefined}
+        className={cn(!shown && "invisible")}
       >
-        {text}
+        {shown ? formatUsd(amount) : placeholder}
       </span>
+      {!shown && (
+        <span
+          aria-hidden
+          className="absolute inset-x-0 inset-y-[0.2em] rounded-[0.2em] bg-ink/15 blur-[0.04em]"
+        />
+      )}
       {state === "loading" && (
         <span
           aria-hidden
