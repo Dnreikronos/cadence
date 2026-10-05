@@ -30,4 +30,27 @@ describe("readCluster", () => {
       /NEXT_PUBLIC_SOLANA_CLUSTER/,
     )
   })
+
+  it("requires a production build to name its cluster", () => {
+    expect(() => readCluster({ nodeEnv: "production" })).toThrow(
+      /NEXT_PUBLIC_SOLANA_CLUSTER must be set/,
+    )
+    expect(() => readCluster({ nodeEnv: "production", cluster: "" })).toThrow(
+      /NEXT_PUBLIC_SOLANA_CLUSTER must be set/,
+    )
+  })
+
+  it("accepts an explicit cluster in a production build", () => {
+    expect(readCluster({ nodeEnv: "production", cluster: "devnet" }).name).toBe(
+      "devnet",
+    )
+    expect(
+      readCluster({ nodeEnv: "production", cluster: "mainnet" }).isMainnet,
+    ).toBe(true)
+  })
+
+  it("keeps the devnet default for development and tests", () => {
+    expect(readCluster({ nodeEnv: "development" }).name).toBe("devnet")
+    expect(readCluster({ nodeEnv: "test" }).name).toBe("devnet")
+  })
 })

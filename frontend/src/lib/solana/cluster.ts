@@ -9,14 +9,27 @@ export type ClusterName = keyof typeof publicRpc
 
 export type Cluster = { name: ClusterName; rpcUrl: string; isMainnet: boolean }
 
-type ClusterEnv = { cluster?: string; rpcUrl?: string }
+type ClusterEnv = {
+  cluster?: string
+  rpcUrl?: string
+  // process.env.NODE_ENV: "production" under `next build` and `next start`.
+  nodeEnv?: string
+}
 
 const schema = z.object({
   cluster: z.enum(["devnet", "mainnet"]).default("devnet"),
   rpcUrl: z.url().optional(),
 })
 
+// Devnet is the default for `next dev` and tests only. A production build must name its
+// cluster: one that forgot the variable would otherwise ship pointing at devnet, with
+// the DEVNET badge and test money, and nothing would say so.
 export function readCluster(env: ClusterEnv): Cluster {
+  if (env.nodeEnv === "production" && !env.cluster) {
+    throw new Error(
+      'NEXT_PUBLIC_SOLANA_CLUSTER must be set to "devnet" or "mainnet" in a production build',
+    )
+  }
   const parsed = schema.safeParse({
     cluster: env.cluster || undefined,
     rpcUrl: env.rpcUrl || undefined,
@@ -39,4 +52,5 @@ export function readCluster(env: ClusterEnv): Cluster {
 export const cluster = readCluster({
   cluster: process.env.NEXT_PUBLIC_SOLANA_CLUSTER,
   rpcUrl: process.env.NEXT_PUBLIC_SOLANA_RPC_URL,
+  nodeEnv: process.env.NODE_ENV,
 })
