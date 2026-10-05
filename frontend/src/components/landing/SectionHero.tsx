@@ -103,7 +103,7 @@ function GridCells() {
       {cells.map(([column, row, delay]) => (
         <span
           key={`${column}-${row}`}
-          className="absolute size-15.75 animate-[cell_7s_ease-in-out_infinite] bg-ink/[0.035]"
+          className="absolute size-15.75 animate-[cell_7s_ease-in-out_infinite] bg-ink/[0.035] motion-reduce:animate-none"
           style={{
             left: column * 64,
             top: row * 64,
