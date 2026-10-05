@@ -1,6 +1,9 @@
+import type { Metadata } from "next"
 import { PageHeader } from "@/components/app/page-header"
 import { requireMember } from "@/lib/auth/viewer"
 import { WithdrawScreen } from "./withdraw-screen"
+
+export const metadata: Metadata = { title: "Withdraw" }
 
 export default async function WithdrawPage() {
   const { email, membership } = await requireMember("recipient")

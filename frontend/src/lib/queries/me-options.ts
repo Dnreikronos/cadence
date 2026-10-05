@@ -4,11 +4,13 @@ import {
   type QueryClient,
 } from "@tanstack/react-query"
 import type { ApiClient } from "@/lib/api/client"
+import type { Acquired } from "@/lib/flow-lock"
 import type { Receipt } from "@/lib/api/schemas"
 import { datedFilename } from "@/lib/download"
 import {
   applyPending,
   ApplyInProgressError,
+  ApplyOtherTabError,
   SentApplyError,
   type ApplyPendingDeps,
   type ApplyPhase,
@@ -85,6 +87,7 @@ export function applyPendingMutation({
   onPhase,
   onApplied,
   onSent,
+  lock,
   now = Date.now,
   ...deps
 }: ApplyPendingDeps & {
@@ -93,6 +96,9 @@ export function applyPendingMutation({
   onApplied?: () => void
   // The apply may have gone through: told even when the screen is gone.
   onSent?: (error: SentApplyError) => void
+  // One tab at a time (`flow-lock.ts`): held for the whole apply, from the prepare to the
+  // confirmation. A tab that cannot get it sends nothing.
+  lock?: () => Promise<Acquired>
 }) {
   return {
     mutationKey: applyKey,
@@ -112,13 +118,24 @@ export function applyPendingMutation({
         throw new ApplyInProgressError()
       }
       applying.add(queryClient)
+      let lease: { release: () => void } | undefined
       try {
+        if (lock) {
+          const got = await lock()
+          if (got.status === "busy") throw new ApplyOtherTabError()
+          lease = got.lease
+          // Another tab may have sent one while this one asked for the lock.
+          if (sentApply(deps.store, deps.wallet.address)) {
+            throw new ApplyInProgressError()
+          }
+        }
         const receipt = await applyPending({ ...deps, now }, onPhase)
         return {
           receipt,
           confirmed: { pendingBefore, slot: receipt.slot, at: now() },
         }
       } finally {
+        lease?.release()
         applying.delete(queryClient)
       }
     },
@@ -129,7 +146,12 @@ export function applyPendingMutation({
       void queryClient.invalidateQueries({ queryKey: queryKeys.status.all })
     },
     onError: (error: Error) => {
-      if (error instanceof ApplyInProgressError) return
+      if (
+        error instanceof ApplyInProgressError ||
+        error instanceof ApplyOtherTabError
+      ) {
+        return
+      }
       // The service compares the credit counter after the first apply, so a failure
       // can be an apply that landed: the balance is worth a fresh read either way.
       void invalidateBalances(queryClient)

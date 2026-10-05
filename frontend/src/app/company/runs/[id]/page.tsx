@@ -1,8 +1,11 @@
+import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import { PageHeader } from "@/components/app/page-header"
 import { idSchema } from "@/lib/api/schemas"
 import { requireMember } from "@/lib/auth/viewer"
 import { RunScreen } from "./run-screen"
+
+export const metadata: Metadata = { title: "Run progress" }
 
 export default async function RunPage({
   params,

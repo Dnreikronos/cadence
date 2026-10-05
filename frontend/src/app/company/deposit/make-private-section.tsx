@@ -2,12 +2,17 @@
 
 import { useEffect, useId, useRef, useState } from "react"
 import { Check, CircleAlert, Eye, Loader2, RotateCw } from "lucide-react"
+import { ReleaseAction } from "@/components/app/release-action"
+import { releaseMessage, type ReleaseOutcome } from "@/lib/release"
+import { useViewerScope } from "@/components/app/viewer-scope"
 import { AmountDisplay } from "@/components/ui/amount-display"
 import { buttonVariants } from "@/components/ui/button"
 import { fieldClass } from "@/components/ui/field"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
 import { describeUsdc } from "@/lib/deposit/controller"
+import { otherTabMessage } from "@/lib/flow-lock"
+import { canRelease, heldMessage, releaseWarning } from "@/lib/deposit/held"
 import { confirmedMessage, doneMessage } from "@/lib/deposit/message"
 import { formatBaseUnits, toBaseUnits } from "@/lib/deposit/schema"
 import { makePrivateSteps, stepLabels } from "@/lib/deposit/types"
@@ -26,7 +31,7 @@ import { StepHeading } from "./receive-section"
 
 export function MakePrivateSection({ wallet }: { wallet: string }) {
   const id = useId()
-  const flow = useMakePrivate(wallet)
+  const flow = useMakePrivate(wallet, useViewerScope())
   const publicUsdc = usePublicUsdc(wallet)
   const privateBalance = useCompanyBalance(wallet)
   const auditors = useAuditors()
@@ -63,7 +68,11 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
       if (!sectionRef.current?.contains(document.activeElement)) {
         statusRef.current?.focus()
       }
-    } else if (state.status === "resolved") {
+    } else if (
+      state.status === "resolved" ||
+      state.status === "held" ||
+      state.status === "other-tab"
+    ) {
       statusRef.current?.focus()
     } else if (state.status === "idle") {
       amountRef.current?.focus()
@@ -71,8 +80,9 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
   }, [state.status])
 
   const isBusy = state.status === "running" || state.status === "checking"
-  // A failed attempt is resolved with Try again or Dismiss, not by starting another.
-  const locked = isBusy || state.status === "failed"
+  // A failed attempt is resolved with Try again or Dismiss, and a held one with a check
+  // or a release, not by starting another.
+  const locked = isBusy || state.status === "failed" || state.status === "held"
   const publicUnits = publicUsdc.data ? BigInt(publicUsdc.data) : undefined
   const hasFunds = publicUnits !== undefined && publicUnits > 0n
   const pending = privateBalance.data ? BigInt(privateBalance.data.pending) : 0n
@@ -255,10 +265,19 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
         {state.status === "running" && (
           <Progress step={state.step} className="mt-4" />
         )}
-        {state.status === "checking" && <Checking />}
+        {state.status === "checking" && <Checking otherTab={state.otherTab} />}
+        {state.status === "other-tab" && <OtherTab onDismiss={flow.dismiss} />}
         {state.status === "done" && <Done state={state} />}
         {state.status === "resolved" && (
           <Resolved state={state} onDismiss={flow.dismiss} />
+        )}
+        {state.status === "held" && (
+          <Held
+            at={state.at}
+            onCheck={flow.check}
+            onRelease={flow.release}
+            afterRelease={() => amountRef.current}
+          />
         )}
       </div>
 
@@ -393,18 +412,39 @@ function Progress({
   )
 }
 
-function Checking() {
+function Checking({ otherTab = false }: { otherTab?: boolean }) {
   return (
-    <p className="mt-4 flex items-start gap-2 text-ui/normal text-ink">
-      <Loader2
-        aria-hidden
-        className="mt-0.5 size-4 shrink-0 animate-spin motion-reduce:animate-none"
-      />
-      <span>
-        Checking your last deposit. It was sent a moment ago, and a new one
-        waits until we know what became of it. This can take a minute or two.
-      </span>
-    </p>
+    <div className="mt-4 space-y-2 text-ui/normal text-ink">
+      <p className="flex items-start gap-2">
+        <Loader2
+          aria-hidden
+          className="mt-0.5 size-4 shrink-0 animate-spin motion-reduce:animate-none"
+        />
+        <span>
+          Checking your last deposit. It was sent a moment ago, and a new one
+          waits until we know what became of it. This can take a minute or two.
+        </span>
+      </p>
+      {otherTab && (
+        <p className="text-warning-fg">{otherTabMessage("deposit")}</p>
+      )}
+    </div>
+  )
+}
+
+// Another tab holds the deposit lock: nothing was sent from this one.
+function OtherTab({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-ui/normal text-warning-fg">
+      <p className="min-w-0">{otherTabMessage("deposit")}</p>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className={buttonVariants({ variant: "secondary", size: "sm" })}
+      >
+        Dismiss
+      </button>
+    </div>
   )
 }
 
@@ -425,8 +465,6 @@ const resolvedText = {
   confirmed:
     "Your last deposit went through. If it is still pending, make it available above.",
   failed: "Your last deposit didn't go through, and nothing left your wallet.",
-  unknown:
-    "We couldn't tell whether your last deposit went through. Check both balances above before you deposit again.",
 } as const
 
 function Resolved({
@@ -450,6 +488,47 @@ function Resolved({
       >
         Dismiss
       </button>
+    </div>
+  )
+}
+
+// The earlier wrap's outcome cannot be told. It stays held, here and in every other tab,
+// until the person has checked and releases it: two minutes after the send.
+function Held({
+  at,
+  onCheck,
+  onRelease,
+  afterRelease,
+}: {
+  at: number
+  onCheck: () => void
+  onRelease: () => Promise<ReleaseOutcome>
+  afterRelease: () => HTMLElement | null
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 15_000)
+    return () => clearInterval(timer)
+  }, [])
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-ui/normal text-warning-fg">
+      <p className="min-w-0 basis-full">{heldMessage}</p>
+      <button
+        type="button"
+        onClick={onCheck}
+        className={buttonVariants({ variant: "secondary", size: "sm" })}
+      >
+        <RotateCw className="size-3.5" /> Check again
+      </button>
+      {canRelease({ at }, now) && (
+        <ReleaseAction
+          label="Release this amount"
+          prompt="I checked my history, release this amount"
+          warning={releaseWarning}
+          onRelease={async () => releaseMessage(await onRelease(), "deposit")}
+          afterRelease={afterRelease}
+        />
+      )}
     </div>
   )
 }

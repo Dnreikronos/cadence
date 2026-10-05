@@ -55,3 +55,11 @@ describe("signInErrorMessage", () => {
     },
   )
 })
+
+describe("the not-configured notice", () => {
+  it("says sign-in is not configured, in the words the README promises", () => {
+    expect(signInErrorMessage("not_configured")).toMatch(
+      /^Sign-in is not configured/,
+    )
+  })
+})

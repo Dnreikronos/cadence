@@ -5,6 +5,7 @@ import { signedInView } from "@/lib/auth/signed-in-view"
 import { signInErrorMessage } from "@/lib/auth/sign-in-errors"
 import { currentViewer, type CurrentViewer } from "@/lib/auth/viewer"
 import { isDemoEnabled } from "@/lib/demo/mode"
+import { isSupabaseConfigured } from "@/lib/supabase/env"
 import { AlreadyMember } from "./already-member"
 import { ClearQueryCache } from "./clear-query-cache"
 import { DemoPanel } from "./demo-panel"
@@ -71,6 +72,7 @@ export async function AuthPage({
               : signInErrorMessage(params.get("error"))
           }
           retryHref={lookupFailed ? `/${mode}?${retry}` : null}
+          notConfigured={!isSupabaseConfigured()}
         />
       )}
     </>

@@ -17,7 +17,9 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "Cadence",
+  // Each screen names itself (`metadata` in its page); the landing page and anything
+  // without a name are just "Cadence".
+  title: { template: "%s · Cadence", default: "Cadence" },
   description:
     "Confidential USDC payments for teams, freelancers and suppliers.",
 }

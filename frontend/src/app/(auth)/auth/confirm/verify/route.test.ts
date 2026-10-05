@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const verifyOtp = vi.hoisted(() => vi.fn())
 const completeSignIn = vi.hoisted(() => vi.fn())
@@ -38,6 +38,13 @@ const place = (response: Response) => response.headers.get("location")
 beforeEach(() => {
   verifyOtp.mockReset().mockResolvedValue({ error: null })
   completeSignIn.mockReset().mockResolvedValue({ to: "/company" })
+  // Supabase is configured, as it is where anyone can sign in.
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "http://127.0.0.1:54321")
+  vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "publishable")
+})
+afterEach(() => {
+  vi.unstubAllEnvs()
+  vi.restoreAllMocks()
 })
 
 describe("POST /auth/confirm/verify", () => {
@@ -172,5 +179,65 @@ describe("POST /auth/confirm/verify", () => {
     expect(place(await post({ token_hash: "abc", type: "email" }))).toBe(
       "/sign-in?error=no_company",
     )
+  })
+
+  describe("without Supabase configured", () => {
+    beforeEach(() => {
+      vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "")
+      vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "")
+    })
+
+    it("goes back to the form with the not-configured notice, never a 500", async () => {
+      const response = await post({ token_hash: "abc", type: "email" })
+      expect(response.status).toBe(303)
+      expect(place(response)).toBe("/sign-in?error=not_configured")
+      expect(response.headers.get("cache-control")).toBe("no-store")
+      expect(verifyOtp).not.toHaveBeenCalled()
+      expect(completeSignIn).not.toHaveBeenCalled()
+    })
+
+    it("keeps the form it came from, with its intent", async () => {
+      expect(
+        place(
+          await post({
+            token_hash: "abc",
+            type: "signup",
+            company: "Solaris",
+          }),
+        ),
+      ).toBe("/sign-up?company=Solaris&error=not_configured")
+    })
+
+    it("still refuses another site first", async () => {
+      const response = await post(
+        { token_hash: "abc", type: "email" },
+        { origin: "https://evil.example" },
+      )
+      expect(response.status).toBe(403)
+    })
+  })
+
+  describe("when Supabase cannot be reached", () => {
+    it("goes back to the form, and logs the kind of error and nothing it carried", async () => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {})
+      verifyOtp.mockRejectedValue(new TypeError("fetch failed: token abc123"))
+
+      const response = await post({ token_hash: "abc123", type: "email" })
+
+      expect(response.status).toBe(303)
+      expect(place(response)).toBe("/sign-in?error=sign_in_failed")
+      expect(log).toHaveBeenCalledExactlyOnceWith(
+        "confirm verify failed",
+        "TypeError",
+      )
+      expect(JSON.stringify(log.mock.calls)).not.toContain("abc123")
+    })
+
+    it("does the same when finishing the sign-in throws", async () => {
+      vi.spyOn(console, "error").mockImplementation(() => {})
+      completeSignIn.mockRejectedValue(new Error("lookup failed"))
+      const response = await post({ token_hash: "abc", type: "email" })
+      expect(place(response)).toBe("/sign-in?error=sign_in_failed")
+    })
   })
 })

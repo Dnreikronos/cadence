@@ -86,7 +86,7 @@ PR and are recorded there, not repeated here.
 | I   | Recipient: withdraw with the reveal-risk warning                      | #87           | `/me/withdraw`                                        | F1         | #116, merged              | Withdraw with the acknowledgement step, risk levels, and held amounts after a possible send. The held amounts are in memory only.                                                                                                                           |
 | J   | Auditor panel and access log                                          | #88           | `/audit`, `/audit/access-log`                         | F1, F2     | #117, merged              | Company payments with client-side filters, receipts and CSV export; the paged access log.                                                                                                                                                                   |
 | K   | Sign-in completion: invite acceptance, sign-out, empty states         | #76           | `(auth)`, `/auth/confirm`                             | F1         | #122, merged              | Emailed link opens a confirm page that spends the token only on a POST, invite acceptance, sign-out of this device and of all devices, `frame-ancestors 'none'` and no-store headers, and the sign-in that does not reveal whether an email has an account. |
-| Q   | End-to-end tests, accessibility and design pass, docs                 | all           | none                                                  | A to K     | #126, merged              | The Playwright suite in `frontend/e2e` (it runs against the production demo build) and its `e2e` CI job, with an accessibility pass. The docs part is the sync of the contract, this plan, `docs/README.md` and `frontend/README.md`.                                               |
+| Q   | End-to-end tests, accessibility and design pass, docs                 | all           | none                                                  | A to K     | #126, merged              | The Playwright suite in `frontend/e2e` (it runs against the production demo build) and its `e2e` CI job, with an accessibility pass. The docs part is the sync of the contract, this plan, `docs/README.md` and `frontend/README.md`.                       |
 
 Parallelism: F1 and F2 first, in parallel. Then A to K in parallel in separate
 worktrees; merge in the order they are green, rebasing the rest. Q last.
@@ -122,9 +122,12 @@ that needs a deployed backend.
   with Supabase configured; in real mode they are the Supabase rows, and real mode
   without Supabase shows "Sign-in is not configured".
 - **A generic submissions helper.** `src/lib/submissions.ts` keeps one record per kind of
-  flow in `sessionStorage` (`request_id`, signature, block height, wallet, time). It was
-  written for the deposit's wrap and reused by apply-pending. Withdraw and payroll now
-  use it too, through a list of records per viewer.
+  flow and viewer in `localStorage` (`request_id`, signature, block height, wallet, time),
+  so every tab of the browser sees what another holds as "may have gone through". It was
+  written for the deposit's wrap and reused by apply-pending. Withdraw and payroll use it
+  too, through a list of records per viewer. It started in `sessionStorage`; the
+  second-tab QA pass (below) moved it, and added a Web Lock to the deposit and to apply
+  pending, as withdraw and payroll already had. Signing out keeps what may have been sent.
 - **A 100-recipient cap on a run.** A run request takes 1 to 100 payments: each entry
   is about 80 bytes, sized for the 8 KiB body of the wrap and transfer routes. The
   client schema enforces it and the new-run screen blocks above it. The plan had no
@@ -163,8 +166,8 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
 
 - [x] Persist submissions for withdraw and for payroll with `src/lib/submissions.ts`, and
       check them on return as deposit and apply-pending do. Done: a reload no longer
-      forgets a withdrawal or a run payment that may have landed, and signing out keeps
-      them per viewer.
+      forgets a withdrawal or a run payment that may have landed, and a second tab of the
+      same browser sees it too. They are kept per viewer, and a sign-out keeps what is unresolved.
 - [ ] **Strict CSP, stage 2, before the wallet lands (recommended).** Stage 1 allows
       `'unsafe-inline'` scripts. Once a session key can sign silently, an XSS is a wallet
       drain: move to a nonce with `'strict-dynamic'` and no `unsafe-inline`, plus Trusted
@@ -204,11 +207,12 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
       (`https://<site>/auth/confirm`, no wildcards), a short JWT expiry, and an RS256
       signing key (the spike's verdict is conditional on it and it has not been tried).
       Nothing has been run against a hosted project.
-- [ ] **Evidence off `sessionStorage`, and idempotency on the server.** The persisted
-      submission records (signature, block height, a withdrawal's amount) live in
-      `sessionStorage`, which script and extensions can read and a closed tab loses. Keep
-      the evidence where the service can see it, and make the service refuse a second
-      send for the same intent, instead of the client remembering to check.
+- [ ] **Evidence on the server, and idempotency.** The persisted submission records
+      (signature, block height, a withdrawal's amount) live in the browser's
+      `localStorage`, shared by its tabs, which script and extensions can read and which
+      another browser, a private window or cleared site data does not carry. Keep the
+      evidence where the service can see it, and make the service refuse a second send for
+      the same intent, instead of the client remembering to check.
 - [ ] **Block-height-based expiry** for a prepared transaction, not the 90-second clock
       the screens count down: a slow signer or a clock that is off should not decide
       whether a transaction can still land.
@@ -222,7 +226,7 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
       transfers; session length and an absolute maximum; recovery and export; splitting
       the parent key from the Supabase service role; email OTP as the root of trust; and
       how product copy states custody (the landing copy now says Cadence does not
-      *store* a signing key, not that it can never move funds). See
+      _store_ a signing key, not that it can never move funds). See
       [the spike](../dev/spikes/2026-10-03-embedded-wallet.md#decisions-for-the-team).
 - [ ] Replace the real-mode placeholder wallet with the Turnkey signer and a `submit`
       that sends the signed bytes to Solana, and test a real v1 transaction from a user
@@ -270,10 +274,27 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
   built a different shape from the one the client and mock use; see
   [Payroll run](../dev/API_CONTRACT.md#payroll-run-one-approval-many-recipients-). The
   run screens work on the mock only.
-- **A reload does not lose a sent payment or withdrawal, but unsigned run payments are
-  still lost.** Sent run payments and held withdrawals are kept per viewer in this tab's
-  `sessionStorage` and checked on return; a run payment that was not sent cannot be
+- **A reload or a new tab does not lose a sent payment or withdrawal, but unsigned run
+  payments are still lost.** Sent run payments, held withdrawals, and the deposit's wrap and
+  apply-pending records are kept per viewer in `localStorage`, shared by every tab of the
+  browser, and checked on return; a tab that is closed and opened again finds them (and
+  Chrome's "Duplicate tab" no longer matters). A run payment that was not sent cannot be
   signed after a reload, and a new run is for it.
+- **The evidence is per browser profile.** Another browser, a private window, another
+  device and cleared site data do not see it, so a transaction sent from one is not held in
+  another; signing out keeps what is unresolved (so the amount of a withdrawal in doubt
+  stays on that computer's disk, in `localStorage`, readable only through developer tools,
+  until it is released or pruned at 30 days; no other viewer reads it) and removes only what
+  is settled; and records older than 30 days are pruned. A release is checked under the
+  flow's lock against the record the person saw.
+  A deposit whose wrap cannot be accounted for stays held in every tab until the person
+  releases it (as a withdrawal does). The deposit's apply step and the activation account
+  step still keep no record, only the Web Lock while they are in flight; **the service
+  must refuse an apply it has already done** (the credit counter comparison), because the
+  screen cannot. Server-side idempotency (a key that makes a repeated
+  prepare or send answer with what it already did) is the real fix, and belongs to the
+  integration. The contract's [The sent-failure rule](../dev/API_CONTRACT.md#the-sent-failure-rule)
+  has the detail.
 - **Unknown payment and run statuses are tolerated, not understood.** Since #130 they
   parse like the other tolerant enums (the reveal-risk level, the auditor status, the
   access-log enums): a run row shows "Unknown" with no action, and the repay guard treats

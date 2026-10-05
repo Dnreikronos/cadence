@@ -15,6 +15,9 @@ import {
 } from "./controller"
 import { ConfirmTimeoutError } from "@/lib/api/sign"
 import { EXPIRY_MS } from "./reconcile"
+import { browserProfile } from "@/lib/browser-profile"
+import type { Acquired } from "@/lib/flow-lock"
+import { submissionStore } from "@/lib/submissions"
 import {
   StorageUnavailableError,
   storageBlockedMessage,
@@ -59,13 +62,16 @@ function setup(
     pendingUnits?: string | null
     signAndConfirm?: Deps["signAndConfirm"]
     requireStorage?: Deps["requireStorage"]
+    lock?: Deps["lock"]
+    // A store shared with other screens, in place of this one's own.
+    sharedStore?: Deps["store"]
   } = {},
 ) {
   let saved = options.saved ?? null
   let clock = 1_000_000
   const records: Submission[] = []
   const unavailable = options.storage === "unavailable"
-  const store: Deps["store"] = {
+  const store: Deps["store"] = options.sharedStore ?? {
     read: () => (unavailable ? null : saved),
     record: (record) => {
       const full = { ...record, at: record.at ?? clock }
@@ -117,6 +123,7 @@ function setup(
     toast,
     store,
     requireStorage: options.requireStorage,
+    lock: options.lock,
     // Not given: the balance was read and nothing was pending. `null`: not known.
     pendingUnits: () =>
       options.pendingUnits === null ? undefined : (options.pendingUnits ?? "0"),
@@ -219,7 +226,7 @@ describe("MakePrivateController", () => {
       status: "done",
       amount: "2500000000",
     })
-    expect(toast).toHaveBeenCalledWith("2500 USDC is now private")
+    expect(toast).toHaveBeenCalledWith("Your deposit is now private")
     // One refresh per confirmed transaction, so the sidebar follows each.
     expect(refresh).toHaveBeenCalledTimes(2)
     expect(saved()).toBeNull()
@@ -544,7 +551,7 @@ describe("MakePrivateController", () => {
     })
 
     it("submitting: a throw after the broadcast is checked, never retried into a second wrap", async () => {
-      const { controller, api, saved } = setup({
+      const { controller, api, saved, advance } = setup({
         wallet: {
           submit: vi.fn(async () => {
             throw new Error("RPC timed out")
@@ -563,13 +570,21 @@ describe("MakePrivateController", () => {
       expect(api.wrap.prepare).toHaveBeenCalledTimes(1)
 
       // Asking from here cannot confirm what has no signature: it waits out the
-      // blockhash, then says it does not know.
+      // blockhash, then says it does not know, and holds: the record stays, and no new
+      // wrap is sent until the person releases it.
       await controller.check()
-      expect(controller.getState()).toEqual({
-        status: "resolved",
-        outcome: "unknown",
-      })
+      expect(controller.getState()).toMatchObject({ status: "held" })
+      expect(saved()).toMatchObject({ signature: null })
+      await controller.deposit("1000000")
+      expect(api.wrap.prepare).toHaveBeenCalledTimes(1)
+      expect(controller.getState()).toMatchObject({ status: "held" })
+
+      advance(120_000)
+      await controller.release()
+      expect(controller.getState()).toEqual({ status: "idle" })
       expect(saved()).toBeNull()
+      await controller.deposit("1000000")
+      expect(api.wrap.prepare).toHaveBeenCalledTimes(2)
     })
 
     it("confirming: a transaction the network dropped is retried from the wrap and the record is cleared", async () => {
@@ -710,7 +725,7 @@ describe("MakePrivateController", () => {
           status: "done",
           amount: "1000000",
         })
-        expect(toast).toHaveBeenCalledWith("1 USDC is now private")
+        expect(toast).toHaveBeenCalledWith("Your deposit is now private")
         expect(refresh).toHaveBeenCalled()
         // Asking prepared and signed nothing.
         expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
@@ -848,9 +863,8 @@ describe("MakePrivateController", () => {
       amount: "1000000",
       earlierPending: "200000000",
     })
-    expect(toast).toHaveBeenCalledWith(
-      "1 USDC is now private, with your earlier pending deposit (200 USDC)",
-    )
+    // The toast has no amount; the notice on the page says what it covers.
+    expect(toast).toHaveBeenCalledWith("Your deposit is now private")
   })
 
   it("does not claim an earlier credit when none was pending", async () => {
@@ -871,9 +885,7 @@ describe("MakePrivateController", () => {
       amount: "1000000",
       earlierPending: null,
     })
-    expect(toast).toHaveBeenCalledWith(
-      "1 USDC is now private, with any earlier pending deposit",
-    )
+    expect(toast).toHaveBeenCalledWith("Your deposit is now private")
   })
 
   it("keeps what was pending in the record, for a deposit picked up after a reload", async () => {
@@ -957,5 +969,520 @@ describe("MakePrivateController", () => {
     gated.release()
     await run
     expect(controller.inFlight).toBe(false)
+  })
+})
+
+// One tab at a time: a lock for every run and every look at a saved wrap, and the saved
+// wrap itself, which the other tabs of the browser read.
+describe("MakePrivateController across tabs", () => {
+  // A lock that other tabs hold for `busyFor` asks, then free.
+  function lock(busyFor = 0) {
+    let asks = 0
+    let held = 0
+    const releases: string[] = []
+    return {
+      asks: () => asks,
+      held: () => held,
+      releases,
+      take: async (): Promise<Acquired> => {
+        asks++
+        if (asks <= busyFor) return { status: "busy" }
+        held++
+        return {
+          status: "held",
+          lease: {
+            release: () => {
+              held--
+              releases.push("released")
+            },
+          },
+        }
+      },
+    }
+  }
+
+  const SAVED: Submission = {
+    kind: "wrap",
+    request_id: prepared("a").request_id,
+    signature: SIG,
+    last_valid_block_height: 500,
+    wallet: COMPANY_WALLET,
+    at: 1_000_000,
+  }
+
+  it("holds the lock for the whole deposit, wrap and apply, and lets go at the end", async () => {
+    const taken = lock()
+    const { controller, api } = setup({ lock: taken.take })
+    api.accounts.applyPending.mockImplementation(async () => {
+      // Still held while the apply is prepared.
+      expect(taken.held()).toBe(1)
+      return prepared("b")
+    })
+
+    await controller.deposit("1000000")
+
+    expect(controller.getState().status).toBe("done")
+    expect(taken.asks()).toBe(1)
+    expect(taken.held()).toBe(0)
+    expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
+  })
+
+  it("lets go of the lock after a failure too", async () => {
+    const taken = lock()
+    const { controller, api } = setup({ lock: taken.take })
+    api.wrap.prepare.mockRejectedValue(new ApiError(503, "service_unavailable"))
+
+    await controller.deposit("1000000")
+
+    expect(controller.getState().status).toBe("failed")
+    expect(taken.held()).toBe(0)
+  })
+
+  it("sends nothing when another tab holds the lock, and says so", async () => {
+    const taken = lock(1)
+    const { controller, api, saved, wallet } = setup({ lock: taken.take })
+
+    await controller.deposit("1000000")
+
+    expect(controller.getState()).toEqual({ status: "other-tab" })
+    expect(api.wrap.prepare).not.toHaveBeenCalled()
+    expect(wallet.submit).not.toHaveBeenCalled()
+    expect(saved()).toBeNull()
+    // Informational: nothing is locked, and the next try goes through.
+    expect(controller.inFlight).toBe(false)
+    await controller.deposit("1000000")
+    expect(controller.getState().status).toBe("done")
+    expect(api.wrap.prepare).toHaveBeenCalledTimes(1)
+  })
+
+  it("is a second click only once while it waits for the lock", async () => {
+    const taken = lock()
+    const { controller, api } = setup({ lock: taken.take })
+
+    const first = controller.deposit("1000000")
+    const second = controller.deposit("1000000")
+    await first
+    await second
+
+    expect(taken.asks()).toBe(1)
+    expect(api.wrap.prepare).toHaveBeenCalledTimes(1)
+  })
+
+  it("applies a pending credit under the lock too, and is refused without it", async () => {
+    const busy = setup({ lock: lock(1).take })
+    await busy.controller.applyPending()
+    expect(busy.controller.getState()).toEqual({ status: "other-tab" })
+    expect(busy.api.accounts.applyPending).not.toHaveBeenCalled()
+
+    const taken = lock()
+    const free = setup({ lock: taken.take })
+    await free.controller.applyPending()
+    expect(free.controller.getState().status).toBe("done")
+    expect(taken.asks()).toBe(1)
+    expect(taken.held()).toBe(0)
+  })
+
+  it("looks into a wrap another tab saved while the lock was being asked for, and sends nothing", async () => {
+    const store: { current: () => void } = { current: () => {} }
+    const taken = lock()
+    const {
+      controller,
+      api,
+      saved,
+      store: fake,
+    } = setup({
+      lock: async () => {
+        // The other tab's record lands before this tab's turn.
+        store.current()
+        return taken.take()
+      },
+    })
+    store.current = () => void fake.record(SAVED)
+    expect(saved()).toBeNull()
+
+    await controller.deposit("1000000")
+    await vi.waitFor(() =>
+      expect(controller.getState().status).toBe("resolved"),
+    )
+
+    expect(api.wrap.prepare).not.toHaveBeenCalled()
+    expect(api.wrap.confirm).toHaveBeenCalledWith(
+      { request_id: SAVED.request_id, signature: SIG },
+      expect.anything(),
+    )
+    expect(saved()).toBeNull()
+    expect(taken.held()).toBe(0)
+  })
+
+  it("looks into a wrap another tab saved after this screen opened, instead of ignoring the click", async () => {
+    const harness = setup()
+    expect(harness.controller.getState()).toEqual({ status: "idle" })
+    harness.store.record(SAVED)
+
+    await harness.controller.deposit("1000000")
+
+    expect(harness.api.wrap.prepare).not.toHaveBeenCalled()
+    expect(harness.controller.getState()).toMatchObject({
+      status: "resolved",
+      outcome: "confirmed",
+    })
+  })
+
+  describe("opening a screen with a saved wrap", () => {
+    it("waits for the lock another tab holds, shows that it does, then looks", async () => {
+      const taken = lock(2)
+      const harness = setup({ saved: SAVED, lock: taken.take })
+      const states: string[] = []
+      harness.controller.subscribe(() => {
+        const state = harness.controller.getState()
+        states.push(
+          state.status === "checking" && state.otherTab
+            ? "checking:other-tab"
+            : state.status,
+        )
+      })
+
+      harness.controller.start()
+      await vi.waitFor(() =>
+        expect(harness.controller.getState().status).toBe("resolved"),
+      )
+
+      expect(taken.asks()).toBe(3)
+      expect(states).toContain("checking:other-tab")
+      // It waited in half-second steps (the clock the tests run on is faked).
+      expect(harness.sleep).toHaveBeenCalledWith(500, expect.anything())
+      expect(harness.api.wrap.confirm).toHaveBeenCalledTimes(1)
+      expect(harness.saved()).toBeNull()
+      expect(taken.held()).toBe(0)
+    })
+
+    it("finds nothing to look into when the other tab settled it meanwhile", async () => {
+      const taken = lock(1)
+      const harness = setup({ saved: SAVED, lock: taken.take })
+      harness.sleep.mockImplementationOnce(async () => {
+        // The tab that had the lock finished and cleared the record.
+        harness.store.clear()
+      })
+
+      harness.controller.start()
+      await vi.waitFor(() =>
+        expect(harness.controller.getState().status).toBe("idle"),
+      )
+
+      expect(harness.api.wrap.confirm).not.toHaveBeenCalled()
+      expect(harness.refresh).toHaveBeenCalled()
+      expect(taken.held()).toBe(0)
+    })
+
+    it("stops waiting when the screen is left, and lets go of a lock it got after that", async () => {
+      let answer: (value: Acquired) => void = () => {}
+      const released: string[] = []
+      const harness = setup({
+        saved: SAVED,
+        lock: () => new Promise<Acquired>((resolve) => (answer = resolve)),
+      })
+
+      harness.controller.start()
+      harness.controller.dispose()
+      answer({
+        status: "held",
+        lease: { release: () => void released.push("released") },
+      })
+      await vi.waitFor(() => expect(released).toEqual(["released"]))
+
+      expect(harness.api.wrap.confirm).not.toHaveBeenCalled()
+    })
+
+    it("lets go of the lock after looking, whatever it found", async () => {
+      const taken = lock()
+      const harness = setup({ saved: SAVED, lock: taken.take })
+      harness.api.wrap.confirm.mockRejectedValue(
+        new ApiError(409, "transaction_failed"),
+      )
+
+      harness.controller.start()
+      await vi.waitFor(() =>
+        expect(harness.controller.getState().status).toBe("resolved"),
+      )
+
+      expect(taken.held()).toBe(0)
+    })
+
+    it("does not need a lock where there is none to take", async () => {
+      const harness = setup({ saved: SAVED })
+
+      harness.controller.start()
+      await vi.waitFor(() =>
+        expect(harness.controller.getState().status).toBe("resolved"),
+      )
+
+      expect(harness.api.wrap.confirm).toHaveBeenCalledTimes(1)
+    })
+  })
+})
+
+// A wrap whose outcome cannot be told is held in every tab of the browser, like a
+// withdrawal: the record stays, nothing new is sent, and a release anywhere frees them all.
+describe("MakePrivateController: an unknown outcome held across tabs", () => {
+  const viewer = { company: "Solaris", email: "ana@solaris.test" }
+  const SAVED: Submission = {
+    kind: "wrap",
+    request_id: prepared("a").request_id,
+    signature: SIG,
+    last_valid_block_height: 500,
+    wallet: COMPANY_WALLET,
+    at: 1_000_000,
+  }
+
+  // Two screens of one browser: the same store, each tab with its own view of it, told of
+  // the other's writes, and a controller wired to hear it as the screen does.
+  function twoTabs(seed: Submission | null = SAVED) {
+    const profile = browserProfile()
+    const storeA = submissionStore("wrap", viewer, profile.tab())
+    const storeB = submissionStore("wrap", viewer, profile.tab())
+    if (seed) storeA.record(seed)
+    const a = setup({ sharedStore: storeA })
+    const b = setup({ sharedStore: storeB })
+    // 404: the service has no record of it, which says nothing about whether it landed.
+    for (const tab of [a, b]) {
+      tab.api.wrap.confirm.mockRejectedValue(
+        new ApiError(404, "wrap_not_found"),
+      )
+    }
+    storeA.subscribe(() => a.controller.storeChanged())
+    storeB.subscribe(() => b.controller.storeChanged())
+    return { a, b, storeA, storeB }
+  }
+
+  const settle = (controller: MakePrivateController, status: string) =>
+    vi.waitFor(() => expect(controller.getState().status).toBe(status))
+
+  it("keeps the record, and says so, when the outcome cannot be told", async () => {
+    const { a, storeA } = twoTabs()
+
+    a.controller.start()
+    await settle(a.controller, "held")
+
+    expect(a.controller.getState()).toMatchObject({
+      status: "held",
+      at: SAVED.at,
+    })
+    expect(storeA.read()).toMatchObject({ request_id: SAVED.request_id })
+    expect(a.controller.inFlight).toBe(false)
+  })
+
+  it("holds the second tab too, which sends nothing", async () => {
+    const { a, b } = twoTabs()
+    a.controller.start()
+    await settle(a.controller, "held")
+
+    b.controller.start()
+    await settle(b.controller, "held")
+    await b.controller.deposit("1000000")
+    await b.controller.applyPending()
+
+    expect(b.api.wrap.prepare).not.toHaveBeenCalled()
+    expect(b.wallet.submit).not.toHaveBeenCalled()
+    expect(b.controller.getState()).toMatchObject({ status: "held" })
+  })
+
+  it("is released in every tab by a release in one", async () => {
+    const { a, b, storeB } = twoTabs()
+    a.controller.start()
+    b.controller.start()
+    await settle(a.controller, "held")
+    await settle(b.controller, "held")
+
+    a.advance(120_000)
+    await a.controller.release()
+
+    expect(a.controller.getState()).toEqual({ status: "idle" })
+    expect(storeB.read()).toBeNull()
+    // The other tab hears the record go and lets go of its hold.
+    expect(b.controller.getState()).toEqual({ status: "idle" })
+    // And can send: nothing is held any more.
+    await b.controller.deposit("1000000")
+    expect(b.api.wrap.prepare).toHaveBeenCalledTimes(1)
+    expect(a.api.wrap.prepare).not.toHaveBeenCalled()
+  })
+
+  it("looks into a wrap another tab sends after this one opened, and holds when it cannot tell", async () => {
+    const { a, b, storeA } = twoTabs(null)
+    expect(b.controller.getState()).toEqual({ status: "idle" })
+
+    storeA.record(SAVED)
+
+    await settle(b.controller, "held")
+    expect(b.api.wrap.prepare).not.toHaveBeenCalled()
+    // The tab that wrote it is not told to look at its own record.
+    expect(a.controller.getState()).toEqual({ status: "idle" })
+  })
+
+  it("is let go in the other tab when the wrap is found confirmed there", async () => {
+    const { a, b } = twoTabs()
+    a.controller.start()
+    b.controller.start()
+    await settle(a.controller, "held")
+    await settle(b.controller, "held")
+
+    a.api.wrap.confirm.mockReset().mockResolvedValue(receipt("a"))
+    await a.controller.check()
+    await settle(a.controller, "resolved")
+
+    expect(a.controller.getState()).toMatchObject({
+      status: "resolved",
+      outcome: "confirmed",
+    })
+    expect(b.controller.getState()).toEqual({ status: "idle" })
+  })
+
+  it("can be asked about again from a held tab", async () => {
+    const { a } = twoTabs()
+    a.controller.start()
+    await settle(a.controller, "held")
+
+    a.api.wrap.confirm
+      .mockReset()
+      .mockRejectedValue(new ApiError(409, "transaction_failed"))
+    await a.controller.check()
+
+    expect(a.controller.getState()).toMatchObject({
+      status: "resolved",
+      outcome: "failed",
+    })
+  })
+
+  it("releases nothing unless it is held, and not while it is working", async () => {
+    const { a, storeA } = twoTabs()
+    a.controller.release()
+    expect(storeA.read()).not.toBeNull()
+
+    const fresh = setup()
+    fresh.controller.release()
+    expect(fresh.controller.getState()).toEqual({ status: "idle" })
+  })
+
+  it("ignores another wallet's record", async () => {
+    const { b, storeA } = twoTabs(null)
+    storeA.record({
+      ...SAVED,
+      wallet: "SomeOtherWallet1111111111111111111111111111",
+    })
+    expect(b.controller.getState()).toEqual({ status: "idle" })
+  })
+})
+
+// The release is made on the record the person saw, under the lock, and refused otherwise.
+describe("MakePrivateController: releasing a hold on a stale view", () => {
+  const viewer = { company: "Solaris", email: "ana@solaris.test" }
+  const SAVED: Submission = {
+    kind: "wrap",
+    request_id: prepared("a").request_id,
+    signature: SIG,
+    last_valid_block_height: 500,
+    wallet: COMPANY_WALLET,
+    at: 1_000_000,
+  }
+
+  // The second tab's storage events are swallowed: it never hears of the first's changes.
+  async function frozenTab() {
+    const profile = browserProfile()
+    const storeA = submissionStore("wrap", viewer, profile.tab())
+    const storeB = submissionStore("wrap", viewer, profile.tab())
+    storeA.record(SAVED)
+    const a = setup({ sharedStore: storeA })
+    const b = setup({ sharedStore: storeB })
+    for (const tab of [a, b]) {
+      tab.api.wrap.confirm.mockRejectedValue(
+        new ApiError(404, "wrap_not_found"),
+      )
+    }
+    b.controller.start()
+    await vi.waitFor(() => expect(b.controller.getState().status).toBe("held"))
+    return { a, b, storeA, storeB }
+  }
+
+  it("does not clear the wrap another tab sent after releasing the one this tab saw", async () => {
+    const { a, b, storeA, storeB } = await frozenTab()
+    // The first tab releases, and sends a new wrap that is in flight (no signature yet).
+    storeA.clear()
+    const fresh = {
+      ...SAVED,
+      request_id: prepared("f").request_id,
+      signature: null,
+      at: 1_000_473,
+    }
+    storeA.record(fresh)
+    b.advance(1_000_000)
+
+    expect(await b.controller.release()).toBe("changed")
+
+    expect(storeB.read()).toMatchObject({ request_id: fresh.request_id })
+    expect(b.api.wrap.prepare).not.toHaveBeenCalled()
+    expect(a.api.wrap.prepare).not.toHaveBeenCalled()
+  })
+
+  it("looks again at what is saved now when its release was refused", async () => {
+    const { b, storeA } = await frozenTab()
+    storeA.clear()
+    storeA.record({
+      ...SAVED,
+      request_id: prepared("f").request_id,
+      at: 2_000_000,
+    })
+    b.advance(1_000_000)
+    b.api.wrap.confirm
+      .mockReset()
+      .mockRejectedValue(new ApiError(404, "wrap_not_found"))
+
+    await b.controller.release()
+
+    // It is looking into the other record (and will hold on that one), not the stale one.
+    await vi.waitFor(() =>
+      expect(b.controller.getState()).toMatchObject({
+        status: "held",
+        requestId: prepared("f").request_id,
+      }),
+    )
+  })
+
+  it("refuses while another tab holds the lock, and keeps the record", async () => {
+    const profile = browserProfile()
+    const store = submissionStore("wrap", viewer, profile.tab())
+    store.record(SAVED)
+    const tab = setup({
+      sharedStore: store,
+      lock: async () => ({ status: "busy" }),
+    })
+    tab.api.wrap.confirm.mockRejectedValue(new ApiError(404, "wrap_not_found"))
+    // Held on mount needs the lock to look: take it for that, then let another tab have it.
+    let busy = false
+    const open = setup({
+      sharedStore: store,
+      lock: async () =>
+        busy
+          ? { status: "busy" }
+          : { status: "held", lease: { release: () => {} } },
+    })
+    open.api.wrap.confirm.mockRejectedValue(new ApiError(404, "wrap_not_found"))
+    open.controller.start()
+    await vi.waitFor(() =>
+      expect(open.controller.getState().status).toBe("held"),
+    )
+    busy = true
+    open.advance(1_000_000)
+
+    expect(await open.controller.release()).toBe("busy")
+
+    expect(store.read()).not.toBeNull()
+    expect(open.controller.getState()).toMatchObject({ status: "held" })
+  })
+
+  it("refuses before two minutes, even on the record it saw", async () => {
+    const { b, storeB } = await frozenTab()
+
+    expect(await b.controller.release()).toBe("too-soon")
+
+    expect(storeB.read()).not.toBeNull()
   })
 })

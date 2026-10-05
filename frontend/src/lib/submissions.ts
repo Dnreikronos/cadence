@@ -1,8 +1,15 @@
 import { z } from "zod"
 
 // A transaction the person signed and sent (or is about to), kept so a screen can
-// find out what became of it after a reload or a visit elsewhere. Nothing here
-// is secret: ids, a signature, a block height and a wallet address.
+// find out what became of it after a reload, a visit elsewhere or another tab. Nothing
+// here is secret: ids, a signature, a block height and a wallet address.
+//
+// The records live in `localStorage`, which every tab of the browser profile shares: a
+// second tab must see what the first one holds as "may have gone through", or it could
+// send it again. Keys carry the viewer (a hash of company id and email), so one person's
+// records are never read as another's. Signing out keeps what may have been sent (the
+// next sign-in of the same person must still find it held) and removes only what is
+// settled (`clearSettledEvidence`); `pruneEvidence` drops what is old enough to be of no use.
 export const submissionSchema = z.object({
   kind: z.string().min(1),
   request_id: z.string().min(1),
@@ -26,15 +33,52 @@ export type Submission = z.infer<typeof submissionSchema>
 export type SubmissionStorage = Pick<
   Storage,
   "getItem" | "setItem" | "removeItem"
->
+> & {
+  // Told when ANOTHER tab changes the store (the key, or null when it was cleared): what
+  // `localStorage` says with its `storage` event, which never fires in the tab that
+  // wrote. Absent where there is no other tab to hear from.
+  subscribe?: (listener: (key: string | null) => void) => () => void
+  // Every key, for removing a viewer's records or pruning old ones.
+  keys?: () => string[]
+}
 
-const keyOf = (kind: string) => `cadence:submission:${kind}`
+// One record per kind of flow, and per viewer once `scope` is given.
+const keyOf = (kind: string, scope?: string) =>
+  scope ? `cadence:submission:${kind}:${scope}` : `cadence:submission:${kind}`
+
+// A page's `localStorage` as a `SubmissionStorage`: the same object every time, because
+// what `persisted()` remembers is kept per storage object.
+let browser: { raw: Storage; view: SubmissionStorage } | null = null
+
+function browserView(raw: Storage): SubmissionStorage {
+  return {
+    getItem: (key) => raw.getItem(key),
+    setItem: (key, value) => raw.setItem(key, value),
+    removeItem: (key) => raw.removeItem(key),
+    keys: () =>
+      Array.from({ length: raw.length }, (_, i) => raw.key(i)).filter(
+        (key): key is string => key !== null,
+      ),
+    subscribe: (listener) => {
+      const onStorage = (event: StorageEvent) => {
+        if (event.storageArea === raw || event.storageArea === null) {
+          listener(event.key)
+        }
+      }
+      window.addEventListener("storage", onStorage)
+      return () => window.removeEventListener("storage", onStorage)
+    },
+  }
+}
 
 // Storage can be missing or throw (private windows, blocked site data, server
 // render), and a screen has to work without it.
 function defaultStorage(): SubmissionStorage | null {
   try {
-    return typeof window === "undefined" ? null : window.sessionStorage
+    if (typeof window === "undefined") return null
+    const raw = window.localStorage
+    if (browser?.raw !== raw) browser = { raw, view: browserView(raw) }
+    return browser.view
   } catch {
     return null
   }
@@ -82,14 +126,15 @@ export function noteWriteFailure(storage: SubmissionStorage | null) {
   writeFailed.add(storage)
 }
 
-// One record per kind of flow: a new one replaces the last.
+// One record per kind of flow (and viewer, with a `scope`): a new one replaces the last.
 export function recordSubmission(
   record: Omit<Submission, "at"> & { at?: number },
   storage: SubmissionStorage | null = defaultStorage(),
+  scope?: string,
 ): Submission {
   const full = { ...record, at: record.at ?? Date.now() }
   try {
-    storage?.setItem(keyOf(record.kind), JSON.stringify(full))
+    storage?.setItem(keyOf(record.kind, scope), JSON.stringify(full))
   } catch {
     // The flow decides whether it may go on without a record (`persisted()` says): it
     // does in the mock, never in real mode.
@@ -103,17 +148,18 @@ export function recordSubmission(
 export function readSubmission(
   kind: string,
   storage: SubmissionStorage | null = defaultStorage(),
+  scope?: string,
 ): Submission | null {
   try {
-    const raw = storage?.getItem(keyOf(kind))
+    const raw = storage?.getItem(keyOf(kind, scope))
     if (!raw) return null
     const parsed = submissionSchema.safeParse(JSON.parse(raw))
     if (parsed.success && parsed.data.kind === kind) return parsed.data
-    storage?.removeItem(keyOf(kind))
+    storage?.removeItem(keyOf(kind, scope))
   } catch {
     // Unreadable or not JSON.
     try {
-      storage?.removeItem(keyOf(kind))
+      storage?.removeItem(keyOf(kind, scope))
     } catch {
       // Nothing to remove.
     }
@@ -124,9 +170,10 @@ export function readSubmission(
 export function clearSubmission(
   kind: string,
   storage: SubmissionStorage | null = defaultStorage(),
+  scope?: string,
 ) {
   try {
-    storage?.removeItem(keyOf(kind))
+    storage?.removeItem(keyOf(kind, scope))
   } catch {
     // Nothing to clear.
   }
@@ -191,9 +238,13 @@ const listKey = (kind: string, scope: string) =>
   `cadence:submissions:${kind}:${scope}`
 
 // A list of records under one key, for flows that can have several unresolved at once
-// (a withdrawal per amount, a payroll payment per payment). Read from storage once, then
-// kept here and written through. When storage is missing or refuses, the list still
-// works for as long as this object lives, and `upsert` says it did not reach storage.
+// (a withdrawal per amount, a payroll payment per payment). Storage is the truth: every
+// `read()` looks at the stored value and parses it again only when it is not the one
+// this object last saw, so a record another tab wrote or removed is seen at once, and
+// the same array comes back until something changes (a React store can read it on every
+// render). `subscribe` listeners are told when another tab changes the key. When storage
+// is missing or refuses, the list still works for as long as this object lives, and
+// `upsert` says it did not reach storage.
 //
 // An entry that cannot be read is never dropped and never erased by a later write: it is
 // moved to a key of its own, and `unreadable()` stays true until it is released on
@@ -210,8 +261,21 @@ export function createRecordList<T>({
   const key = listKey(kind, scope)
   const setAsideKey = `${key}:unreadable`
   const listeners = new Set<() => void>()
+  let stopWatching: (() => void) | undefined
   let records: readonly T[] | null = null
-  let setAside = false
+  // The stored value `records` stands for.
+  let seen: string | null = null
+  // Unreadable entries that could not be written to storage: held for this page only.
+  let memoryAside = false
+
+  // What is stored now; undefined when storage cannot be read.
+  const peek = (): string | null | undefined => {
+    try {
+      return storage ? storage.getItem(key) : null
+    } catch {
+      return undefined
+    }
+  }
 
   const parseList = (raw: string): { valid: T[]; bad: unknown[] } => {
     let parsed: unknown
@@ -233,16 +297,20 @@ export function createRecordList<T>({
 
   function keepAside(bad: unknown[]) {
     if (bad.length === 0) return
-    setAside = true
+    if (!storage) {
+      memoryAside = true
+      return
+    }
     try {
-      const earlier = storage?.getItem(setAsideKey)
+      const earlier = storage.getItem(setAsideKey)
       const before: unknown = earlier ? JSON.parse(earlier) : []
-      storage?.setItem(
+      storage.setItem(
         setAsideKey,
         JSON.stringify([...(Array.isArray(before) ? before : []), ...bad]),
       )
     } catch {
-      // Held in memory: `setAside` stays true for this page.
+      // Held in memory: `memoryAside` stays true for this page.
+      memoryAside = true
     }
   }
 
@@ -276,7 +344,6 @@ export function createRecordList<T>({
         if (valid.length === 0) storage?.removeItem(key)
         else storage?.setItem(key, JSON.stringify(valid))
       }
-      if (!setAside && storage?.getItem(setAsideKey)) setAside = true
     } catch {
       // Storage refused: what was read so far stands.
     }
@@ -293,35 +360,72 @@ export function createRecordList<T>({
       stored = false
       noteWriteFailure(storage)
     }
+    seen = peek() ?? seen
     for (const listener of listeners) listener()
     return stored
   }
 
-  const read = () => (records ??= load())
+  // Read, change, write. A synchronous API cannot hold a Web Lock, so the stored value
+  // is looked at again right before the write: if another tab wrote since this one read,
+  // the change is made again on what that tab left, so its write is not lost. What is left
+  // is the gap between two synchronous storage calls.
+  function change(mutate: (current: readonly T[]) => readonly T[]): boolean {
+    for (let attempt = 0; ; attempt++) {
+      const current = read()
+      const based = seen
+      const next = mutate(current)
+      if (next === current) return storage != null
+      const now = peek()
+      if (attempt < 3 && now !== undefined && now !== based) continue
+      return commit(next)
+    }
+  }
+
+  function read(): readonly T[] {
+    if (records === null) {
+      records = load()
+      seen = peek() ?? null
+      return records
+    }
+    const raw = peek()
+    if (raw !== undefined && raw !== seen) {
+      records = load()
+      seen = peek() ?? raw
+    }
+    return records
+  }
+
+  const asideStored = () => {
+    try {
+      return !!storage?.getItem(setAsideKey)
+    } catch {
+      return false
+    }
+  }
 
   return {
     read,
     upsert(record) {
-      const current = read()
-      const at = current.findIndex((existing) => same(existing, record))
-      return commit(
-        at === -1
+      return change((current) => {
+        const at = current.findIndex((existing) => same(existing, record))
+        return at === -1
           ? [...current, record]
-          : current.map((existing, i) => (i === at ? record : existing)),
-      )
+          : current.map((existing, i) => (i === at ? record : existing))
+      })
     },
     remove(match) {
-      const current = read()
-      const kept = current.filter((record) => !match(record))
-      if (kept.length !== current.length) commit(kept)
+      change((current) => {
+        const kept = current.filter((record) => !match(record))
+        return kept.length === current.length ? current : kept
+      })
     },
     unreadable() {
       read()
-      return setAside
+      return memoryAside || asideStored()
     },
     clearUnreadable() {
       read()
-      setAside = false
+      memoryAside = false
       try {
         storage?.removeItem(setAsideKey)
       } catch {
@@ -331,7 +435,252 @@ export function createRecordList<T>({
     },
     subscribe(listener) {
       listeners.add(listener)
-      return () => void listeners.delete(listener)
+      if (listeners.size === 1) {
+        stopWatching = storage?.subscribe?.((changed) => {
+          if (changed === null || changed === key || changed === setAsideKey) {
+            for (const each of [...listeners]) each()
+          }
+        })
+      }
+      return () => {
+        listeners.delete(listener)
+        if (listeners.size === 0) {
+          stopWatching?.()
+          stopWatching = undefined
+        }
+      }
     },
   }
+}
+
+// ---- One viewer's single records ---------------------------------------------
+
+// The single record of a flow (the deposit's wrap, an apply) for one viewer, in the shape
+// the flows take: read, record, clear. Read from storage every time, so another tab's
+// record is there as soon as it is written; `subscribe` and `version` are for a screen
+// that must notice it (the version is the stored text, which is the same until it changes).
+export function submissionStore(
+  kind: string,
+  viewer: Viewer,
+  storage?: SubmissionStorage | null,
+) {
+  const scope = viewerScopeId(viewer)
+  const target = storage === undefined ? defaultStorage() : storage
+  const key = keyOf(kind, scope)
+  return {
+    read: () => readSubmission(kind, target, scope),
+    record: (record: Omit<Submission, "at"> & { at?: number }) =>
+      recordSubmission(record, target, scope),
+    clear: () => clearSubmission(kind, target, scope),
+    subscribe: (listener: () => void) =>
+      target?.subscribe?.((changed) => {
+        if (changed === null || changed === key) listener()
+      }) ?? (() => {}),
+    version: (): string | null => {
+      try {
+        return target?.getItem(key) ?? null
+      } catch {
+        return null
+      }
+    },
+  }
+}
+
+// ---- Leaving and tidying -----------------------------------------------------
+
+const evidenceKey = /^cadence:submissions?:[^:]+:([0-9a-f]{16})(:unreadable)?$/
+
+// Rewrites one stored value: `change` gets the text and returns the new text, null to
+// remove the key, or undefined to leave it. The value is looked at again right before the
+// write, and the change made again if another tab wrote meanwhile (see `change` in the
+// record list). Returns whether it wrote.
+function rewrite(
+  storage: SubmissionStorage,
+  key: string,
+  change: (raw: string) => string | null | undefined,
+): boolean {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const raw = storage.getItem(key)
+    if (!raw) return false
+    const next = change(raw)
+    if (next === undefined) return false
+    if (storage.getItem(key) !== raw) continue
+    if (next === null) storage.removeItem(key)
+    else storage.setItem(key, next)
+    return true
+  }
+  return false
+}
+
+const asList = (raw: string): unknown[] | null => {
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+// What signing out may remove of one viewer's records: only what is settled. A record of
+// something that may have been sent stays, so the same person signing back in still finds
+// it held (the keys carry the viewer, so no one else reads it). Settled is only a payroll
+// attempt whose run has no payment left in doubt. The set-aside unreadable entries are NOT
+// settled: nothing says what they were, so they keep the whole list held until the person
+// releases them (behind the two-minute gate and the warning), and only that release clears
+// them. Nobody else's are touched.
+export function clearSettledEvidence(
+  viewer: Viewer,
+  storage: SubmissionStorage | null = defaultStorage(),
+) {
+  if (!storage?.keys) return
+  const scopes = new Set([
+    viewerScopeId(viewer),
+    ...legacyViewerScopeIds(viewer),
+  ])
+  try {
+    const mine = storage.keys().filter((key) => {
+      const scope = evidenceKey.exec(key)?.[1]
+      return scope !== undefined && scopes.has(scope)
+    })
+    // The runs that still have a payment in doubt.
+    const open = new Set<unknown>()
+    for (const key of mine) {
+      if (!key.includes(":payroll-payment:") || key.endsWith(":unreadable")) {
+        continue
+      }
+      const list = asList(storage.getItem(key) ?? "")
+      for (const entry of list ?? []) {
+        if (typeof entry === "object" && entry !== null) {
+          open.add((entry as Record<string, unknown>).run_id)
+        }
+      }
+    }
+    for (const key of mine) {
+      if (key.includes(":payroll-attempt:") && !key.endsWith(":unreadable")) {
+        rewrite(storage, key, (raw) => {
+          const list = asList(raw)
+          if (!list) return undefined
+          const kept = list.filter((entry) => {
+            const run = (entry as Record<string, unknown> | null)?.run_id
+            return run === undefined || open.has(run)
+          })
+          if (kept.length === list.length) return undefined
+          return kept.length === 0 ? null : JSON.stringify(kept)
+        })
+      }
+    }
+  } catch {
+    // Nothing more can be removed.
+  }
+}
+
+// Signing out is a request that can fail, and the page stays signed in when it does: so
+// what it clears is cleared on the sign-in page it lands on, not before it is sent. The
+// person leaving is noted here (this tab's `sessionStorage`) until then.
+const leavingKey = "cadence:leaving"
+const viewerSchema = z.object({
+  email: z.string(),
+  company: z.string(),
+  companyId: z.string().optional(),
+})
+
+function leavingMarker(): Pick<
+  Storage,
+  "getItem" | "setItem" | "removeItem"
+> | null {
+  try {
+    return typeof window === "undefined" ? null : window.sessionStorage
+  } catch {
+    return null
+  }
+}
+
+export function markLeaving(
+  viewer: Viewer,
+  marker: Pick<Storage, "setItem"> | null = leavingMarker(),
+) {
+  try {
+    marker?.setItem(
+      leavingKey,
+      JSON.stringify({
+        email: viewer.email,
+        company: viewer.company,
+        ...(viewer.companyId ? { companyId: viewer.companyId } : {}),
+      }),
+    )
+  } catch {
+    // Nothing is noted: what was settled is removed by the next prune instead.
+  }
+}
+
+// On reaching a sign-in page: clears what is settled for whoever was noted as leaving.
+export function finishLeaving(
+  storage: SubmissionStorage | null = defaultStorage(),
+  marker: Pick<Storage, "getItem" | "removeItem"> | null = leavingMarker(),
+) {
+  try {
+    const raw = marker?.getItem(leavingKey)
+    if (!raw) return
+    marker?.removeItem(leavingKey)
+    const viewer = viewerSchema.safeParse(JSON.parse(raw))
+    if (viewer.success) clearSettledEvidence(viewer.data, storage)
+  } catch {
+    // Nothing noted, or nothing to clear.
+  }
+}
+
+// How long a record may stay, settled or not. Settled ones are removed as soon as the
+// outcome is final; unresolved ones are kept until the person releases them, and past this
+// age a transaction can no longer be in doubt (a blockhash lives about 90 seconds), so
+// they go too and nothing lives in the browser for ever.
+export const evidenceMaxAgeMs = 30 * 24 * 60 * 60 * 1000
+
+const stamp = (entry: unknown): number | null => {
+  if (typeof entry !== "object" || entry === null) return null
+  const { at, created_at } = entry as Record<string, unknown>
+  const time = typeof at === "number" ? at : created_at
+  return typeof time === "number" ? time : null
+}
+
+// Drops the records older than `maxAgeMs`, for every viewer, once per page load. Entries
+// that cannot be dated or read are left as they are: the set-aside ones are released by
+// the person, not by the clock. Returns how many records it removed.
+export function pruneEvidence(
+  now: number = Date.now(),
+  storage: SubmissionStorage | null = defaultStorage(),
+  maxAgeMs: number = evidenceMaxAgeMs,
+): number {
+  let removed = 0
+  try {
+    for (const key of storage?.keys?.() ?? []) {
+      if (!evidenceKey.test(key) || key.endsWith(":unreadable")) continue
+      const old = (entry: unknown) => {
+        const time = stamp(entry)
+        return time !== null && now - time > maxAgeMs
+      }
+      if (!storage) continue
+      let count = 0
+      rewrite(storage, key, (raw) => {
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(raw)
+        } catch {
+          return undefined
+        }
+        if (Array.isArray(parsed)) {
+          const kept = parsed.filter((entry) => !old(entry))
+          if (kept.length === parsed.length) return undefined
+          count = parsed.length - kept.length
+          return kept.length === 0 ? null : JSON.stringify(kept)
+        }
+        if (!old(parsed)) return undefined
+        count = 1
+        return null
+      })
+      removed += count
+    }
+  } catch {
+    // Pruning is housekeeping: whatever it could not reach stays.
+  }
+  return removed
 }

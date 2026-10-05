@@ -66,6 +66,41 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {})
 })
 
+describe("signIn without Supabase configured", () => {
+  beforeEach(() => {
+    config.supabaseConfigured = false
+  })
+
+  it("says sign-in is not configured instead of sending a code, and reaches no client", async () => {
+    const state = await signIn(email, form({ email: "ana@solaris.test" }))
+    expect(state).toMatchObject({
+      step: "email",
+      error: expect.stringMatching(/^Sign-in is not configured/),
+    })
+    expect(auth.signInWithOtp).not.toHaveBeenCalled()
+  })
+
+  it("says so for a code too, and goes back to the email step", async () => {
+    const state = await signIn(
+      codeStep(),
+      form({ step: "verify", code: "123456" }),
+    )
+    expect(state).toMatchObject({
+      step: "email",
+      email: "ana@solaris.test",
+      error: expect.stringMatching(/^Sign-in is not configured/),
+    })
+    expect(auth.verifyOtp).not.toHaveBeenCalled()
+  })
+
+  it("still lets the person go back to the email step", async () => {
+    expect(await signIn(codeStep(), form({ step: "change" }))).toMatchObject({
+      step: "email",
+      error: null,
+    })
+  })
+})
+
 afterEach(() => vi.unstubAllEnvs())
 
 describe("signIn: asking for a code", () => {

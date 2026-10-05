@@ -1,5 +1,8 @@
+import type { Metadata } from "next"
 import { PageHeader } from "@/components/app/page-header"
-import { MeScreen } from "./me-screen"
+import { MeScreen } from "../me-screen"
+
+export const metadata: Metadata = { title: "Your balance" }
 
 export default function MePage() {
   return (

@@ -157,10 +157,16 @@ export function ReceiptsScreen() {
         </div>
         <button
           type="button"
-          disabled={exporter.isPending}
+          // Not `disabled`: that would drop focus to the page while it exports.
+          aria-disabled={exporter.isPending || undefined}
           aria-busy={exporter.isPending || undefined}
-          onClick={() => exporter.mutate()}
-          className={buttonVariants({ variant: "secondary" })}
+          onClick={() => {
+            if (!exporter.isPending) exporter.mutate()
+          }}
+          className={buttonVariants({
+            variant: "secondary",
+            className: "aria-disabled:opacity-50",
+          })}
         >
           {exporter.isPending ? (
             <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />

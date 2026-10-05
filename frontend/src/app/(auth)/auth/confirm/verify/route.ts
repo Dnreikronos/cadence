@@ -5,6 +5,7 @@ import {
   readIntent,
 } from "@/lib/auth/complete-sign-in"
 import { confirmType, isSameOrigin } from "@/lib/auth/confirm-link"
+import { isSupabaseConfigured } from "@/lib/supabase/env"
 import { createClient } from "@/lib/supabase/server"
 
 // These responses carry or follow a session: no cache may keep or replay them.
@@ -40,17 +41,29 @@ export async function POST(request: NextRequest) {
     return to(`${path}?${query}`)
   }
 
+  // Without Supabase nothing can be verified: say so on the form, not with a 500.
+  if (!isSupabaseConfigured()) return back("not_configured")
   const tokenHash = form.get("token_hash")
   const type = confirmType(form.get("type"))
   if (typeof tokenHash !== "string" || !tokenHash || !type) {
     return back("link_expired")
   }
-  const supabase = await createClient()
-  const { error } = await supabase.auth.verifyOtp({
-    token_hash: tokenHash,
-    type,
-  })
-  if (error) return back("link_expired")
-  const outcome = await completeSignIn(supabase, intent)
-  return "error" in outcome ? back(outcome.error) : to(outcome.to)
+  try {
+    const supabase = await createClient()
+    const { error } = await supabase.auth.verifyOtp({
+      token_hash: tokenHash,
+      type,
+    })
+    if (error) return back("link_expired")
+    const outcome = await completeSignIn(supabase, intent)
+    return "error" in outcome ? back(outcome.error) : to(outcome.to)
+  } catch (error) {
+    // Supabase unreachable or a lookup that threw: the person goes back to the form, never
+    // to an error page. Only the kind of error is logged, never what it carried.
+    console.error(
+      "confirm verify failed",
+      error instanceof Error ? error.name : typeof error,
+    )
+    return back("sign_in_failed")
+  }
 }

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/errors"
 import type { Receipt, UnwrapPrepared } from "@/lib/api/schemas"
 import { ConfirmTimeoutError, type SignStep } from "@/lib/api/sign"
-import type { SubmissionStorage } from "@/lib/submissions"
+import { viewerScopeId, type SubmissionStorage } from "@/lib/submissions"
 import {
   initialWithdraw,
   runWithdraw,
@@ -15,6 +15,7 @@ import {
   heldCheckMessage,
   heldOf,
   heldRecords,
+  heldRecordSchema,
   heldRecordsFor,
   withdrawEvidence,
   type HeldRecord,
@@ -547,5 +548,48 @@ describe("heldCheckMessage", () => {
     expect(
       heldCheckMessage({ amount: "1000000000", outcome: "unknown" }),
     ).toBeNull()
+  })
+})
+
+describe("a saved amount that is not canonical", () => {
+  it("is set aside as unreadable, so the whole list is held, rather than read as a number", () => {
+    const storage = fakeStorage()
+    const key = `cadence:submissions:withdraw:${viewerScopeId(ana)}`
+    storage.setItem(
+      key,
+      JSON.stringify([
+        { amount_units: "0500000000", at: 1 },
+        { amount_units: "500000000", at: 1 },
+      ]),
+    )
+
+    const list = heldRecords(ana, storage)
+
+    expect(list.read().map((r) => r.amount_units)).toEqual(["500000000"])
+    expect(list.unreadable()).toBe(true)
+  })
+
+  it("reads 0 and ordinary amounts, and refuses a sign, a space or a decimal point", () => {
+    for (const amount of ["0", "1", "1234560000", "99999999999999999999"]) {
+      expect(
+        heldRecordSchema.safeParse({ amount_units: amount, at: 1 }).success,
+      ).toBe(true)
+    }
+    for (const amount of [
+      "",
+      "00",
+      "01",
+      "-1",
+      "+1",
+      " 1",
+      "1.5",
+      "1e6",
+      "123456789012345678901",
+    ]) {
+      expect(
+        heldRecordSchema.safeParse({ amount_units: amount, at: 1 }).success,
+        amount,
+      ).toBe(false)
+    }
   })
 })

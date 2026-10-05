@@ -1,5 +1,8 @@
+import type { Metadata } from "next"
 import { PageHeader } from "@/components/app/page-header"
 import { AuditorsScreen } from "./auditors-screen"
+
+export const metadata: Metadata = { title: "Auditors" }
 
 export default function AuditorsPage() {
   return (

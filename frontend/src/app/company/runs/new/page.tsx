@@ -1,6 +1,9 @@
+import type { Metadata } from "next"
 import { PageHeader } from "@/components/app/page-header"
 import { requireMember } from "@/lib/auth/viewer"
 import { NewRunScreen } from "./new-run-screen"
+
+export const metadata: Metadata = { title: "New payroll run" }
 
 export default async function NewRunPage() {
   const { email, membership } = await requireMember("admin")

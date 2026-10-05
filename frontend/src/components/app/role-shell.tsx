@@ -23,8 +23,8 @@ export function RoleShell({
   children: React.ReactNode
 }) {
   const viewer = useMemo(
-    () => ({ email, company: company.name }),
-    [email, company.name],
+    () => ({ email, company: company.name, companyId: company.id }),
+    [email, company.name, company.id],
   )
   // A recipient's balance cannot be read before their account is set up, and reading
   // it anyway is an error chip and an audit row. This is the same query, and so the

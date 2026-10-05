@@ -3,6 +3,7 @@ import {
   acquireFlowLock,
   flowLockName,
   otherTabMessage,
+  waitForFlowLock,
   type ChannelLike,
   type LockManagerLike,
 } from "./flow-lock"
@@ -44,6 +45,8 @@ describe("flowLockName", () => {
       "Another tab is sending or checking a withdrawal for this account: wait for it to finish.",
     )
     expect(otherTabMessage("run")).toContain("a run")
+    expect(otherTabMessage("deposit")).toContain("a deposit")
+    expect(otherTabMessage("update")).toContain("an update")
   })
 })
 
@@ -183,5 +186,93 @@ describe("without Web Locks", () => {
     expect(
       (await acquireFlowLock("w", { locks: null, channel: () => null })).status,
     ).toBe("held")
+  })
+})
+
+describe("waitForFlowLock", () => {
+  const noPause = vi.fn(async () => {})
+
+  it("takes a free lock at once, without waiting or telling anyone", async () => {
+    const { locks } = fakeLocks()
+    const onBusy = vi.fn()
+
+    const got = await waitForFlowLock("w", {
+      signal: new AbortController().signal,
+      onBusy,
+      env: { locks },
+      pause: noPause,
+    })
+
+    expect(got?.status).toBe("held")
+    expect(onBusy).not.toHaveBeenCalled()
+    expect(noPause).not.toHaveBeenCalled()
+  })
+
+  it("waits while another tab holds it, says so each time, and takes it when it is let go", async () => {
+    const { locks, held } = fakeLocks()
+    const other = await acquireFlowLock("w", { locks })
+    if (other.status !== "held") throw new Error("unreachable")
+    const onBusy = vi.fn()
+    const pauses: number[] = []
+
+    const got = await waitForFlowLock("w", {
+      signal: new AbortController().signal,
+      onBusy,
+      env: { locks },
+      pause: async (ms) => {
+        pauses.push(ms)
+        // The other tab finishes after the fifth time it was asked.
+        if (pauses.length === 5) {
+          other.lease.release()
+          await tick()
+        }
+      },
+    })
+
+    expect(got?.status).toBe("held")
+    expect(onBusy).toHaveBeenCalledTimes(5)
+    // Half a second a few times, then every three seconds.
+    expect(pauses).toEqual([500, 500, 500, 3_000, 3_000])
+    if (got) got.lease.release()
+    await tick()
+    expect(held.size).toBe(0)
+  })
+
+  it("gives up when the signal aborts while it waits", async () => {
+    const { locks } = fakeLocks()
+    const other = await acquireFlowLock("w", { locks })
+    expect(other.status).toBe("held")
+    const controller = new AbortController()
+
+    const got = await waitForFlowLock("w", {
+      signal: controller.signal,
+      onBusy: () => {},
+      env: { locks },
+      pause: async () => controller.abort(),
+    })
+
+    expect(got).toBeNull()
+  })
+
+  it("lets go of a lock it got after the signal aborted", async () => {
+    const { locks, held } = fakeLocks()
+    const controller = new AbortController()
+    const request = locks.request.bind(locks)
+    // The abort lands while the lock is being asked for.
+    vi.spyOn(locks, "request").mockImplementation(async (...args) => {
+      controller.abort()
+      return request(...args)
+    })
+
+    const got = await waitForFlowLock("w", {
+      signal: controller.signal,
+      onBusy: () => {},
+      env: { locks },
+      pause: noPause,
+    })
+
+    expect(got).toBeNull()
+    await tick()
+    expect(held.size).toBe(0)
   })
 })

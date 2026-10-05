@@ -51,8 +51,8 @@ const none: readonly SentPayment[] = []
 
 export const runLockName = (viewer: Viewer) => flowLockName("payroll", viewer)
 
-// The viewer's payments that may have been sent and are not settled, kept in this tab's
-// storage so they survive a reload and signing out (see `evidence.ts`).
+// The viewer's payments that may have been sent and are not settled, kept in the browser's
+// storage so they survive a reload and are seen by every tab (see `evidence.ts`).
 export function useSentPayments(viewer: Viewer): readonly SentPayment[] {
   const { payments } = runEvidenceFor(viewer)
   return useSyncExternalStore(payments.subscribe, payments.read, () => none)

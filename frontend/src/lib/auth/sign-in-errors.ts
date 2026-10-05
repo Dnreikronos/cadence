@@ -27,6 +27,8 @@ const messages = {
   sign_in_failed: "We could not sign you in. Try again.",
   send_failed: "We could not send the code. Try again.",
   too_many_attempts: "Too many attempts. Wait a minute and try again.",
+  not_configured:
+    "Sign-in is not configured on this deployment, so no code can be sent.",
 } as const
 
 export type InviteFailure = keyof typeof inviteMessages

@@ -1,10 +1,17 @@
 "use client"
 
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect, useRef, useState, useSyncExternalStore } from "react"
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { apiConfig } from "@/lib/api/mode"
+import { acquireFlowLock, flowLockName } from "@/lib/flow-lock"
 import { requireDurable } from "@/lib/storage-guard"
 import {
   MakePrivateController,
@@ -12,14 +19,10 @@ import {
   type Deps,
 } from "@/lib/deposit/controller"
 import { readPublicUsdc } from "@/lib/solana/balances"
-import {
-  clearSubmission,
-  readSubmission,
-  recordSubmission,
-} from "@/lib/submissions"
+import { submissionStore } from "@/lib/submissions"
 import { useSignAndConfirm } from "@/lib/wallet/context"
 import { invalidateBalances } from "./invalidate"
-import { queryKeys } from "./keys"
+import { queryKeys, type ViewerScope } from "./keys"
 
 // How old a balance may be and still say what was pending when a deposit started.
 const PENDING_FRESH_MS = 60_000
@@ -48,11 +51,16 @@ export function useCompanyBalance(wallet: string) {
 
 // Make a deposit private: wrap, sign, then apply the pending credit. Leaving the
 // screen stops the flow before anything more is sent. A wrap already handed to
-// the network is recorded, and checked when the screen comes back, before
-// another can be sent.
-export function useMakePrivate(wallet: string) {
+// the network is recorded for the viewer, and checked when the screen comes back (in
+// this tab or another), before another can be sent. One tab at a time works on it.
+export function useMakePrivate(wallet: string, viewer: ViewerScope) {
   const queryClient = useQueryClient()
   const signAndConfirm = useSignAndConfirm()
+  const { email, company, companyId } = viewer
+  const store = useMemo(
+    () => submissionStore(SUBMISSION_KIND, { email, company, companyId }),
+    [email, company, companyId],
+  )
   const deps = useRef<Deps>(null as never)
   deps.current = {
     wallet,
@@ -72,11 +80,8 @@ export function useMakePrivate(wallet: string) {
     toast: (message) => toast.success(message),
     // No send without a record of it, in real mode.
     requireStorage: () => requireDurable(apiConfig.mode),
-    store: {
-      read: () => readSubmission(SUBMISSION_KIND),
-      record: (record) => recordSubmission(record),
-      clear: () => clearSubmission(SUBMISSION_KIND),
-    },
+    store,
+    lock: () => acquireFlowLock(flowLockName("deposit", viewer)),
   }
   const [controller] = useState(
     () => new MakePrivateController(() => deps.current),
@@ -89,8 +94,13 @@ export function useMakePrivate(wallet: string) {
 
   useEffect(() => {
     controller.start()
-    return () => controller.dispose()
-  }, [controller])
+    // Another tab's change to the saved wrap: a hold released there, or a wrap sent there.
+    const stopWatching = store.subscribe(() => controller.storeChanged())
+    return () => {
+      stopWatching()
+      controller.dispose()
+    }
+  }, [controller, store])
 
   // A sent wrap is not undone by leaving: say so before the tab closes.
   const inFlight = controller.inFlight
@@ -110,5 +120,6 @@ export function useMakePrivate(wallet: string) {
     check: () => controller.check(),
     checkAgain: () => controller.checkAgain(),
     dismiss: () => controller.dismiss(),
+    release: () => controller.release(),
   }
 }

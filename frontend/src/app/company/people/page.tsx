@@ -1,5 +1,8 @@
+import type { Metadata } from "next"
 import { PageHeader } from "@/components/app/page-header"
 import { PeopleScreen } from "./people-screen"
+
+export const metadata: Metadata = { title: "People" }
 
 export default function PeoplePage() {
   return (

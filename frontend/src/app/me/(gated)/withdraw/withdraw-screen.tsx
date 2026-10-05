@@ -43,9 +43,12 @@ import {
   type WithdrawState,
 } from "@/lib/withdraw/flow"
 import { acquireFlowLock, otherTabMessage } from "@/lib/flow-lock"
+import { releaseMessage } from "@/lib/release"
 import { storageBlockedMessage } from "@/lib/storage-guard"
 import {
   heldCheckMessage,
+  heldOf,
+  heldRecordsFor,
   releaseWarning,
   unreadableMessage,
 } from "@/lib/withdraw/held"
@@ -54,6 +57,9 @@ import { maxWithdrawUnits, toWithdrawUnits } from "@/lib/withdraw/schema"
 import { cn } from "@/lib/utils"
 import { CashOutPanel } from "./cash-out-panel"
 import { RevealRiskBadge } from "./reveal-risk-badge"
+
+const heldAmountMessage =
+  "A withdrawal for this amount may already have gone through. Check your balance and history, or change the amount."
 
 export function WithdrawScreen({ viewer }: { viewer: ViewerScope }) {
   const wallet = useWallet()
@@ -95,7 +101,8 @@ export function WithdrawScreen({ viewer }: { viewer: ViewerScope }) {
               <HeldNotice
                 key={held.amount}
                 held={held}
-                onCheckAgain={check.checking ? undefined : check.checkAgain}
+                onCheckAgain={check.checkAgain}
+                checking={check.checking}
               />
             ))}
           </div>
@@ -164,6 +171,7 @@ function WithdrawCard({
   const amountField = useRef<HTMLInputElement>(null)
   const checkbox = useRef<HTMLInputElement>(null)
   const done = useRef<HTMLHeadingElement>(null)
+  const heading = useRef<HTMLHeadingElement>(null)
   const refocus = useRef(false)
 
   const isBusy = state.stage === "working"
@@ -230,9 +238,7 @@ function WithdrawCard({
         checkbox.current?.focus()
       } else {
         // The reducer holds an amount that may already have gone out.
-        setError(
-          "A withdrawal for this amount may already have gone through. Check your balance and history, or change the amount.",
-        )
+        setError(heldAmountMessage)
       }
       return
     }
@@ -243,6 +249,18 @@ function WithdrawCard({
     })
     if (got.status === "busy") {
       setError(otherTabMessage("withdrawal"))
+      return
+    }
+    // Another tab may have sent this amount, or left saved state this tab cannot read,
+    // while the lock was being asked for: look at what is saved now, with the lock held.
+    const saved = heldRecordsFor(viewer)
+    const latest = withdrawReducer(
+      withdrawReducer(state, { type: "sync-held", held: heldOf(saved.read()) }),
+      { type: "submit", amount: units },
+    )
+    if (latest.stage !== "working" || saved.unreadable()) {
+      got.lease.release()
+      setError(saved.unreadable() ? unreadableMessage : heldAmountMessage)
       return
     }
     setError(undefined)
@@ -279,6 +297,13 @@ function WithdrawCard({
     event.preventDefault()
     void start()
   }
+
+  // Where focus goes when a release removes the notice it was pressed in: the amount
+  // field, or the card's heading while the field is disabled.
+  const afterRelease = () =>
+    amountField.current && !amountField.current.disabled
+      ? amountField.current
+      : heading.current
 
   // The reducer refuses this amount while it may already have gone out; the button says so too.
   const typed = toWithdrawUnits(amount, available)
@@ -319,7 +344,13 @@ function WithdrawCard({
       aria-labelledby="withdraw-heading"
       className="rounded-xl border border-line bg-surface p-5"
     >
-      <h2 id="withdraw-heading" className="text-lead font-medium text-ink">
+      <h2
+        id="withdraw-heading"
+        ref={heading}
+        // Focusable so a release has somewhere to send focus when the field is disabled.
+        tabIndex={-1}
+        className="text-lead font-medium text-ink outline-none"
+      >
         Withdraw to your wallet
       </h2>
       <p className="mt-1 text-ui/normal text-ink-muted">
@@ -335,7 +366,12 @@ function WithdrawCard({
       )}
       <StorageNotice className="mt-4" />
       {release.unreadable && (
-        <UnreadableNotice onRelease={release.releaseUnreadable} />
+        <UnreadableNotice
+          onRelease={async () =>
+            releaseMessage(await release.releaseUnreadable(), "withdrawal")
+          }
+          afterRelease={afterRelease}
+        />
       )}
       {check.settled.map((settled) => (
         <p
@@ -490,9 +526,13 @@ function WithdrawCard({
               key={held.amount}
               held={held}
               summary={heldDetail(state, held) === "summary"}
-              onCheckAgain={checking ? undefined : check.checkAgain}
+              onCheckAgain={check.checkAgain}
+              checking={checking}
               canRelease={release.canRelease(held.amount)}
-              onRelease={() => release.release(held.amount)}
+              onRelease={async () =>
+                releaseMessage(await release.release(held.amount), "withdrawal")
+              }
+              afterRelease={afterRelease}
               isAlert={
                 state.stage === "failed" &&
                 state.failure.sent &&
@@ -618,8 +658,10 @@ function HeldNotice({
   isAlert = false,
   summary = false,
   onCheckAgain,
+  checking = false,
   canRelease = false,
   onRelease,
+  afterRelease,
 }: {
   held: Held
   isAlert?: boolean
@@ -627,9 +669,13 @@ function HeldNotice({
   summary?: boolean
   // Looks the withdrawal up again with its saved signature; nothing is sent.
   onCheckAgain?: () => void
+  // A lookup is under way: the button stays (focus is on it) but waits.
+  checking?: boolean
   // Offered once it has been unresolved for two minutes: lets the amount go on purpose.
   canRelease?: boolean
-  onRelease?: () => void
+  onRelease?: () => void | Promise<string | null>
+  // Where focus goes once the release has removed this notice.
+  afterRelease?: () => HTMLElement | null | undefined
 }) {
   if (summary) {
     return (
@@ -671,13 +717,21 @@ function HeldNotice({
           Another amount can still be withdrawn.{" "}
           {held.signature
             ? "This amount stays on hold until the network confirms or refuses this withdrawal, also if you reload."
-            : "This amount stays on hold until you close this tab, because there is nothing to look it up with. Check your balance and history first."}
+            : "This amount stays on hold until you release it, because there is nothing to look it up with. Check your balance and history first."}
         </p>
         {held.signature && onCheckAgain && (
           <button
             type="button"
-            onClick={onCheckAgain}
-            className={buttonVariants({ variant: "secondary", size: "sm" })}
+            // Not removed, nor `disabled`, while it looks: that would drop focus to the page.
+            aria-disabled={checking || undefined}
+            onClick={() => {
+              if (!checking) onCheckAgain()
+            }}
+            className={buttonVariants({
+              variant: "secondary",
+              size: "sm",
+              className: "aria-disabled:opacity-50",
+            })}
           >
             Check again
           </button>
@@ -688,6 +742,7 @@ function HeldNotice({
             prompt="I checked my history, release this amount"
             warning={releaseWarning}
             onRelease={onRelease}
+            afterRelease={afterRelease}
           />
         )}
       </div>
@@ -697,7 +752,13 @@ function HeldNotice({
 
 // Saved withdrawals that could not be read were set aside, not dropped: nothing can be
 // withdrawn until the person has checked their history and let them go.
-function UnreadableNotice({ onRelease }: { onRelease: () => void }) {
+function UnreadableNotice({
+  onRelease,
+  afterRelease,
+}: {
+  onRelease: () => void | Promise<string | null>
+  afterRelease: () => HTMLElement | null | undefined
+}) {
   return (
     <div
       role="alert"
@@ -709,6 +770,7 @@ function UnreadableNotice({ onRelease }: { onRelease: () => void }) {
         prompt="I checked my history, release this saved state"
         warning={releaseWarning}
         onRelease={onRelease}
+        afterRelease={afterRelease}
       />
     </div>
   )

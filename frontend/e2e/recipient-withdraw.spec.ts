@@ -32,16 +32,28 @@ async function signOut(page: Page, email: string) {
   await page.waitForURL("**/sign-in")
 }
 
-// The keys of the withdrawals this tab has saved, one list per person.
+// The keys of the withdrawals this browser has saved, one list per person. They are in
+// localStorage, which every tab of the browser shares.
 const savedKeys = (page: Page) =>
   page.evaluate(() =>
-    Object.keys(window.sessionStorage).filter((key) =>
+    Object.keys(window.localStorage).filter((key) =>
       key.startsWith("cadence:submissions:withdraw:"),
     ),
   )
 
 const amountField = (card: ReturnType<Page["locator"]>) =>
   card.getByLabel("Amount to withdraw (USDC)")
+
+// The withdrawals a tab has sent to the service: the amounts of its `POST /unwrap`
+// requests (the prepare; the lookups of a saved signature go to `/unwrap/confirm`).
+function withdrawalsSent(page: Page) {
+  const amounts: string[] = []
+  page.on("request", (request) => {
+    if (request.method() !== "POST" || !/\/unwrap$/.test(request.url())) return
+    amounts.push(String(request.postDataJSON()?.amount))
+  })
+  return amounts
+}
 
 test("an amount that matches a payment needs the acknowledgement", async ({
   page,
@@ -101,6 +113,22 @@ test("an amount that matches nothing goes straight through", async ({
   await expect(done).toContainText("$1,234.56")
   await expect(done).toContainText("No match")
   await expect(sidebar(page)).toContainText("$6,765.44")
+})
+
+test("the confirmation toast carries no amount: that stays on the page", async ({
+  page,
+}) => {
+  const card = await openWithdraw(page, "instant")
+
+  await amountField(card).fill("1234.56")
+  await card.getByRole("button", { name: "Withdraw", exact: true }).click()
+
+  const done = page.getByRole("region", { name: "Withdrawal complete" })
+  await expect(done).toContainText("$1,234.56")
+  const toast = page.locator("[data-sonner-toast]")
+  await expect(toast).toHaveText("Withdrawal complete. Withdrawals are public.")
+  await expect(toast).not.toContainText("1,234.56")
+  await expect(page.getByText(/Withdrew/)).toHaveCount(0)
 })
 
 test("an amount close to a payment is a warning too", async ({
@@ -317,6 +345,7 @@ test("signing out keeps what a person left held, for them and for no one else", 
   watch.allowStatus(409, /\/unwrap\/confirm$/)
   page.on("dialog", (dialog) => void dialog.accept())
   const stored = () => savedKeys(page)
+  const sent = withdrawalsSent(page)
 
   await signInAs(page, "recipient")
   await page.goto("/me/withdraw?mock=slow")
@@ -333,9 +362,24 @@ test("signing out keeps what a person left held, for them and for no one else", 
   expect(key).toBeDefined()
   // The key names a viewer by a hash, not by an email.
   expect(key).toMatch(/^cadence:submissions:withdraw:[0-9a-f]{16}$/)
+  expect(sent).toEqual(["1234560000"])
+
+  // What is settled goes with the sign-out (a payroll attempt whose run has nothing in
+  // doubt); what may have been sent does not.
+  await page.evaluate(
+    (name) =>
+      window.localStorage.setItem(
+        name.replace(":withdraw:", ":payroll-attempt:"),
+        JSON.stringify([{ fingerprint: "f", run_id: "done", created_at: 1 }]),
+      ),
+    key,
+  )
 
   // Another person signs in on the same tab: nothing of the first one's is shown, or removed.
   await signOut(page, "bruno@solaris.test")
+  await expect
+    .poll(() => page.evaluate(() => Object.keys(window.localStorage).sort()))
+    .toEqual([key])
   await signInAs(page, "admin")
   // Let the home page finish asking before it is left: a request cut off by the navigation
   // is logged by the browser as a failure.
@@ -347,7 +391,8 @@ test("signing out keeps what a person left held, for them and for no one else", 
   await expect(page.getByText("may have gone through")).toHaveCount(0)
   expect(await stored()).toEqual([key])
 
-  // The first one signs back in and still finds the amount held.
+  // The first one signs back in and still finds the amount held: the same amount is not
+  // offered again, and nothing is prepared for it.
   await page.waitForLoadState("networkidle")
   await signOut(page, "ana@solaris.test")
   await signInAs(page, "recipient")
@@ -357,9 +402,155 @@ test("signing out keeps what a person left held, for them and for no one else", 
   await expect(
     card.getByText("The withdrawal may have gone through"),
   ).toBeVisible()
+  await amountField(card).fill("1234.56")
+  const withdraw = card.getByRole("button", { name: "Withdraw", exact: true })
+  await expect(withdraw).toHaveAttribute("aria-disabled", "true")
+  await withdraw.click({ force: true })
+  await expect(
+    card.getByText(
+      "A withdrawal for this amount may already have gone through. Check your balance and history, or change the amount.",
+    ),
+  ).toBeVisible()
+  expect(sent).toEqual(["1234560000"])
 })
 
-test("a second tab cannot send while the first has a withdrawal in flight", async ({
+test("signing out keeps what could not be read held: only the release clears it", async ({
+  page,
+  watch,
+}) => {
+  test.setTimeout(60_000)
+  watch.allowStatus(404, /\/unwrap\/confirm$/)
+  watch.allowStatus(409, /\/unwrap\/confirm$/)
+  page.on("dialog", (dialog) => void dialog.accept())
+  const sent = withdrawalsSent(page)
+
+  await signInAs(page, "recipient")
+  await page.goto("/me/withdraw?mock=slow")
+  const card = page.getByRole("region", { name: "Withdraw to your wallet" })
+  await expect(card).toContainText("$8,000.00")
+  await amountField(card).fill("1234.56")
+  await card.getByRole("button", { name: "Withdraw", exact: true }).click()
+  await expect.poll(() => savedKeys(page)).toHaveLength(1)
+  // What is saved can no longer be read: it is set aside, and the list is held.
+  await page.evaluate(() => {
+    for (const key of Object.keys(window.localStorage)) {
+      if (key.startsWith("cadence:submissions:withdraw:")) {
+        window.localStorage.setItem(key, "not json")
+      }
+    }
+  })
+  await page.reload()
+  await expect(card.getByRole("alert")).toContainText("Unreadable saved state")
+  const aside = () =>
+    page.evaluate(() =>
+      Object.keys(window.localStorage).filter((key) =>
+        key.endsWith(":unreadable"),
+      ),
+    )
+  expect(await aside()).toHaveLength(1)
+
+  await signOut(page, "bruno@solaris.test")
+  await signInAs(page, "recipient")
+  await page.waitForLoadState("networkidle")
+  await page.goto("/me/withdraw")
+
+  // Still held: the notice is there, the set-aside entry is there, and a withdrawal is
+  // refused (the sign-out did not skip the two-minute gate and the warning).
+  await expect(card.getByRole("alert")).toContainText("Unreadable saved state")
+  expect(await aside()).toHaveLength(1)
+  await amountField(card).fill("500.25")
+  await expect(
+    card.getByRole("button", { name: "Withdraw", exact: true }),
+  ).toBeDisabled()
+  expect(sent).toEqual(["1234560000"])
+})
+
+test("signing out of every device keeps it too", async ({ page, watch }) => {
+  test.setTimeout(60_000)
+  watch.allowStatus(404, /\/unwrap\/confirm$/)
+  watch.allowStatus(409, /\/unwrap\/confirm$/)
+  page.on("dialog", (dialog) => void dialog.accept())
+  const sent = withdrawalsSent(page)
+
+  await signInAs(page, "recipient")
+  await page.goto("/me/withdraw?mock=slow")
+  const card = page.getByRole("region", { name: "Withdraw to your wallet" })
+  await expect(card).toContainText("$8,000.00")
+  await amountField(card).fill("1234.56")
+  await card.getByRole("button", { name: "Withdraw", exact: true }).click()
+  await expect.poll(() => savedKeys(page)).toHaveLength(1)
+  await page.reload()
+  await expect(
+    card.getByText("The withdrawal may have gone through"),
+  ).toBeVisible()
+
+  await page.getByRole("button", { name: /bruno@solaris\.test/ }).click()
+  await page.getByRole("button", { name: "Sign out of all devices" }).click()
+  await page.waitForURL("**/sign-in")
+  expect(await savedKeys(page)).toHaveLength(1)
+
+  await signInAs(page, "recipient")
+  await page.waitForLoadState("networkidle")
+  await page.goto("/me/withdraw")
+  await expect(
+    card.getByText("The withdrawal may have gone through"),
+  ).toBeVisible()
+  expect(sent).toEqual(["1234560000"])
+})
+
+test("a sign-out that fails leaves the page signed in, with nothing cleared", async ({
+  page,
+  context,
+  watch,
+}) => {
+  test.setTimeout(60_000)
+  watch.allowStatus(404, /\/unwrap\/confirm$/)
+  watch.allowStatus(409, /\/unwrap\/confirm$/)
+  page.on("dialog", (dialog) => void dialog.accept())
+  // The browser reports the sign-out request failing; that is the point of the test.
+  watch.allowNetworkFailure(/\/me\/withdraw/)
+
+  await signInAs(page, "recipient")
+  await page.goto("/me/withdraw?mock=slow")
+  const card = page.getByRole("region", { name: "Withdraw to your wallet" })
+  await expect(card).toContainText("$8,000.00")
+  await amountField(card).fill("1234.56")
+  await card.getByRole("button", { name: "Withdraw", exact: true }).click()
+  await expect.poll(() => savedKeys(page)).toHaveLength(1)
+  await page.reload()
+  await expect(
+    card.getByText("The withdrawal may have gone through"),
+  ).toBeVisible()
+  const [key] = await savedKeys(page)
+  // A settled leftover, which a sign-out that went through would remove.
+  await page.evaluate(
+    (name) =>
+      window.localStorage.setItem(
+        name.replace(":withdraw:", ":payroll-attempt:"),
+        JSON.stringify([{ fingerprint: "f", run_id: "done", created_at: 1 }]),
+      ),
+    key,
+  )
+
+  await context.setOffline(true)
+  await page.getByRole("button", { name: /bruno@solaris\.test/ }).click()
+  await page.getByRole("button", { name: "Sign out", exact: true }).click()
+  // Give the request time to fail: the page is still the withdraw screen, still signed in.
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Couldn't sign out" }),
+  ).toBeVisible()
+  await expect(page).toHaveURL(/\/me\/withdraw/)
+  await expect(
+    card.getByText("The withdrawal may have gone through"),
+  ).toBeVisible()
+  expect(
+    await page.evaluate(() => Object.keys(window.localStorage).sort()),
+  ).toEqual([key, key.replace(":withdraw:", ":payroll-attempt:")].sort())
+
+  await context.setOffline(false)
+})
+
+test("a second tab that was open before the first started cannot send while it is in flight", async ({
   page,
   context,
   watch,
@@ -369,6 +560,17 @@ test("a second tab cannot send while the first has a withdrawal in flight", asyn
   page.on("dialog", (dialog) => void dialog.accept())
 
   await signInAs(page, "recipient")
+  // A second tab in the same browser shares the session, the storage and the Web Lock. This
+  // one is opened first, so it has nothing saved to show yet.
+  const other = await context.newPage()
+  other.on("dialog", (dialog) => void dialog.accept())
+  const sent = withdrawalsSent(other)
+  await other.goto("/me/withdraw?mock=instant")
+  const otherCard = other.getByRole("region", {
+    name: "Withdraw to your wallet",
+  })
+  await expect(otherCard).toContainText("$8,000.00")
+
   // `slow` holds every answer for 1.5 s, so the withdrawal stays in flight for a while.
   await page.goto("/me/withdraw?mock=slow")
   const card = page.getByRole("region", { name: "Withdraw to your wallet" })
@@ -378,15 +580,6 @@ test("a second tab cannot send while the first has a withdrawal in flight", asyn
   // The record is written as it is handed to the network: the lock is held by then.
   await expect.poll(() => savedKeys(page)).toHaveLength(1)
 
-  // A second tab in the same browser shares the session and the Web Lock, not the
-  // storage, so it cannot see the first one's record and has to be told to wait.
-  const other = await context.newPage()
-  other.on("dialog", (dialog) => void dialog.accept())
-  await other.goto("/me/withdraw")
-  const otherCard = other.getByRole("region", {
-    name: "Withdraw to your wallet",
-  })
-  await expect(otherCard).toContainText("$8,000.00")
   await amountField(otherCard).fill("500.25")
   await otherCard.getByRole("button", { name: "Withdraw", exact: true }).click()
   await expect(
@@ -397,16 +590,17 @@ test("a second tab cannot send while the first has a withdrawal in flight", asyn
   await expect(
     other.getByRole("region", { name: "Withdrawal complete" }),
   ).toHaveCount(0)
+  expect(sent).toEqual([])
 
   // Once the first has run its course the lock is free, and the second can go.
   await expect(
     page.getByRole("region", { name: "Withdrawal complete" }),
   ).toBeVisible({ timeout: 40_000 })
-  await setMock(other, "instant")
   await otherCard.getByRole("button", { name: "Withdraw", exact: true }).click()
   await expect(
     other.getByRole("region", { name: "Withdrawal complete" }),
   ).toContainText("$500.25")
+  expect(sent).toHaveLength(1)
 })
 
 test("when the browser blocks storage the demo warns and still works", async ({
@@ -416,7 +610,7 @@ test("when the browser blocks storage the demo warns and still works", async ({
   await page.addInitScript(() => {
     const original = Storage.prototype.setItem
     Storage.prototype.setItem = function (key: string, value: string) {
-      if (this === window.sessionStorage) {
+      if (this === window.localStorage) {
         throw new DOMException("blocked", "QuotaExceededError")
       }
       return original.call(this, key, value)
