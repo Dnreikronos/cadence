@@ -15,6 +15,7 @@ import {
   type SignInIntent,
 } from "./complete-sign-in"
 import { signInErrorMessage, type SignInError } from "./sign-in-errors"
+import { emailLinkOrigin, readSiteUrl } from "./site-url"
 
 // React resets the form after an action, so the email step gets back what was typed.
 // The code step keeps the intent read at the email step, so sign-up's company name survives it.
@@ -72,9 +73,19 @@ async function sendCode(
   if (form.has("company") && !companyName.safeParse(intent.company).success) {
     return fail("Enter your company's name.")
   }
-  // The emailed link lands on /auth/confirm carrying the same intent.
-  // Supabase only sends links to allowlisted URLs, so a forged Origin cannot redirect elsewhere.
-  const origin = (await headers()).get("origin")
+  // The emailed link lands on /auth/confirm carrying the same intent. Its origin is the
+  // configured site (NEXT_PUBLIC_SITE_URL), never the request's: a forged Origin or
+  // forwarded host must not decide where Supabase sends the person. Development and tests
+  // fall back to the request's Origin.
+  const origin = emailLinkOrigin(
+    readSiteUrl({
+      siteUrl: process.env.NEXT_PUBLIC_SITE_URL,
+      supabaseConfigured: true,
+      nodeEnv: process.env.NODE_ENV,
+    }),
+    (await headers()).get("origin"),
+    process.env.NODE_ENV,
+  )
   if (!origin) return fail(signInErrorMessage("send_failed"))
   const confirm = new URL("/auth/confirm", origin)
   // The email template appends `&token_hash=…` to this URL, so it always needs a query.

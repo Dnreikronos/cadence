@@ -1,0 +1,45 @@
+version: 2
+
+updates:
+  # The web app. pnpm's lockfile is handled by the npm ecosystem.
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      frontend:
+        patterns: ['*']
+
+  # The embedded-wallet spike and its web page (unauthenticated routes that hold the
+  # Turnkey root key: it stays on the list until it is removed from main).
+  - package-ecosystem: npm
+    directories:
+      - /spikes/embedded-wallet
+      - /spikes/embedded-wallet/web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      embedded-wallet-spike:
+        patterns: ['*']
+
+  # The SHAs the workflows pin; Dependabot bumps the SHA and the version comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ['*']
+
+  # The proof service's crates.
+  - package-ecosystem: cargo
+    directory: /services/proof
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      proof-service:
+        patterns: ['*']
