@@ -98,7 +98,7 @@ test("an unactivated company wallet is told so, and nothing is deposited", async
   await expect(sidebar(page)).toContainText("$84,000.00")
 })
 
-test("a payment that arrived mid-flight leaves the deposit waiting, and trying again finishes it", async ({
+test("a payment that arrived mid-flight is a sent apply: it is checked again, never applied twice", async ({
   page,
   watch,
 }) => {
@@ -109,14 +109,16 @@ test("a payment that arrived mid-flight leaves the deposit waiting, and trying a
   await section.getByLabel("Amount to make private (USDC)").fill("1000")
   await section.getByRole("button", { name: "Make private" }).click()
 
-  // The deposit itself went through; making it available is what failed, and the screen
-  // says so instead of offering the deposit again.
+  // The deposit itself went through. The apply was sent, and the service answering with
+  // a mismatch can mean it landed, so the screen offers a look, never another apply.
   const alert = section.getByRole("alert")
-  await expect(alert).toContainText(
-    "A payment arrived while we were updating your balance. Try again.",
-  )
+  await expect(alert).toContainText("may already have gone through")
   await expect(alert).toContainText("The deposit went through.")
-  await expect(alert).toContainText("trying again only finishes that.")
+  await expect(alert).toContainText("Making it available isn't confirmed yet.")
+  await expect(
+    alert.getByRole("button", { name: "Check my balances" }),
+  ).toBeVisible()
+  await expect(alert.getByRole("button", { name: "Try again" })).toHaveCount(0)
   await expect(section).toContainText("$11,500.00")
   await expect(sidebar(page)).toContainText("$84,000.00")
   // The amount is not left in the field to be sent twice.
@@ -126,12 +128,12 @@ test("a payment that arrived mid-flight leaves the deposit waiting, and trying a
 
   await clearMock(page)
   await setMock(page, "instant")
-  await alert.getByRole("button", { name: "Try again" }).click()
+  await alert.getByRole("button", { name: "Check again" }).click()
 
+  // The same transaction is confirmed again: nothing is prepared or wrapped a second time.
   await expect(section.getByRole("status")).toContainText(
     "is now in your private balance",
   )
   await expect(sidebar(page)).toContainText("$85,000.00")
-  // Nothing was wrapped a second time.
   await expect(section).toContainText("$11,500.00")
 })
