@@ -1,6 +1,9 @@
+import type { Metadata } from "next"
 import { PageHeader } from "@/components/app/page-header"
 import { requireMember } from "@/lib/auth/viewer"
 import { AuditScreen } from "./audit-screen"
+
+export const metadata: Metadata = { title: "Payments" }
 
 export default async function AuditPage() {
   const { membership } = await requireMember("auditor")

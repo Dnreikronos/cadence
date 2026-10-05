@@ -1,7 +1,10 @@
+import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import { PageHeader } from "@/components/app/page-header"
 import { cluster } from "@/lib/solana/cluster"
 import { DepositScreen } from "./deposit-screen"
+
+export const metadata: Metadata = { title: "Deposit" }
 
 export default function DepositPage() {
   // The wallet address is a mock until it comes from the real wallet (#79),

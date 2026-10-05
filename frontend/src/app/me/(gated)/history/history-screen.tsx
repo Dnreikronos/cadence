@@ -10,7 +10,7 @@ import { messageFor } from "@/lib/api/errors"
 import { exportReaders } from "@/lib/me/copy"
 import { historyView, loadedMoreMessage } from "@/lib/me/history"
 import { useExportPayments, usePaymentHistory } from "@/lib/queries/me"
-import { PaymentList, PaymentListSkeleton } from "../payment-list"
+import { PaymentList, PaymentListSkeleton } from "../../payment-list"
 
 export function HistoryScreen() {
   return (
@@ -125,9 +125,15 @@ function ExportBar() {
         </p>
         <button
           type="button"
-          disabled={exporting.isPending}
-          onClick={() => exporting.mutate()}
-          className={buttonVariants({ variant: "secondary" })}
+          // Not `disabled`: that would drop focus to the page while it exports.
+          aria-disabled={exporting.isPending || undefined}
+          onClick={() => {
+            if (!exporting.isPending) exporting.mutate()
+          }}
+          className={buttonVariants({
+            variant: "secondary",
+            className: "aria-disabled:opacity-50",
+          })}
         >
           {exporting.isPending ? (
             <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />

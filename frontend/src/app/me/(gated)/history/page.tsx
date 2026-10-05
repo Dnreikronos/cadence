@@ -1,5 +1,8 @@
+import type { Metadata } from "next"
 import { PageHeader } from "@/components/app/page-header"
 import { HistoryScreen } from "./history-screen"
+
+export const metadata: Metadata = { title: "History" }
 
 export default function HistoryPage() {
   return (

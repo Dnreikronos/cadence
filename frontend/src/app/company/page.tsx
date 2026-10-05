@@ -1,5 +1,8 @@
+import type { Metadata } from "next"
 import { PageHeader } from "@/components/app/page-header"
 import { PaymentsHome } from "./payments-home"
+
+export const metadata: Metadata = { title: "Payments" }
 
 export default function CompanyPage() {
   return (
