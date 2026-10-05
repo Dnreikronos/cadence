@@ -1,4 +1,6 @@
 import { createBrowserClient } from "@supabase/ssr"
+import { browserCookies } from "./browser-cookies"
+import { cookieOptions, isHttps } from "./cookie-options"
 import { supabaseEnv } from "./env"
 
 let client: ReturnType<typeof createBrowserClient> | undefined
@@ -7,7 +9,14 @@ let client: ReturnType<typeof createBrowserClient> | undefined
 export function browserSupabase() {
   if (!client) {
     const { url, publishableKey } = supabaseEnv()
-    client = createBrowserClient(url, publishableKey)
+    client = createBrowserClient(url, publishableKey, {
+      cookies: browserCookies,
+      cookieOptions: cookieOptions(
+        isHttps(
+          typeof window === "undefined" ? null : window.location.protocol,
+        ),
+      ),
+    })
   }
   return client
 }
