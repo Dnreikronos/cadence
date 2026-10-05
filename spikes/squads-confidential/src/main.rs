@@ -9,6 +9,7 @@ mod rpc;
 mod token_wrap;
 #[path = "../../confidential-transfer/src/v1.rs"]
 mod v1;
+mod verification;
 
 use anyhow::{ensure, Context, Result};
 use chain::{address, bridge, decode, save_secrets, Chain, ConfidentialAccount, Vault, TOKEN};
@@ -95,6 +96,15 @@ async fn transfer(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if let Some(command) = std::env::args().nth(1) {
+        let run = std::env::args()
+            .nth(2)
+            .context("command needs a run directory")?;
+        return match command.as_str() {
+            "verify" => verification::verify_run(std::path::Path::new(&run)).await,
+            _ => anyhow::bail!("usage: cargo run [-- verify <run-directory>]"),
+        };
+    }
     let rpc_url =
         std::env::var("SQUADS_RPC_URL").unwrap_or_else(|_| "https://api.devnet.solana.com".into());
     let rpc = JsonRpc::new(&rpc_url);
