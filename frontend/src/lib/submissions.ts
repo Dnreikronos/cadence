@@ -523,9 +523,11 @@ const asList = (raw: string): unknown[] | null => {
 
 // What signing out may remove of one viewer's records: only what is settled. A record of
 // something that may have been sent stays, so the same person signing back in still finds
-// it held (the keys carry the viewer, so no one else reads it). Settled is the set-aside
-// unreadable entries, and a payroll attempt whose run has no payment left in doubt. Nobody
-// else's are touched.
+// it held (the keys carry the viewer, so no one else reads it). Settled is only a payroll
+// attempt whose run has no payment left in doubt. The set-aside unreadable entries are NOT
+// settled: nothing says what they were, so they keep the whole list held until the person
+// releases them (behind the two-minute gate and the warning), and only that release clears
+// them. Nobody else's are touched.
 export function clearSettledEvidence(
   viewer: Viewer,
   storage: SubmissionStorage | null = defaultStorage(),
@@ -554,9 +556,7 @@ export function clearSettledEvidence(
       }
     }
     for (const key of mine) {
-      if (key.endsWith(":unreadable")) {
-        storage.removeItem(key)
-      } else if (key.includes(":payroll-attempt:")) {
+      if (key.includes(":payroll-attempt:") && !key.endsWith(":unreadable")) {
         rewrite(storage, key, (raw) => {
           const list = asList(raw)
           if (!list) return undefined

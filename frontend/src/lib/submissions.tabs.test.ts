@@ -328,16 +328,13 @@ describe("clearSettledEvidence", () => {
     ])
   })
 
-  it("removes only what is settled: unreadable leftovers and attempts with nothing in doubt", () => {
+  it("removes only what is settled: attempts with nothing in doubt", () => {
     const shared = browserProfile()
     const tab = seed(shared)
 
     clearSettledEvidence(bruno, tab)
 
     const id = scope(bruno)
-    expect(
-      shared.items.has(`cadence:submissions:withdraw:${id}:unreadable`),
-    ).toBe(false)
     expect(
       JSON.parse(
         shared.items.get(`cadence:submissions:payroll-attempt:${id}`)!,
@@ -346,6 +343,22 @@ describe("clearSettledEvidence", () => {
       { fingerprint: "a", run_id: "open", created_at: 5 },
       { fingerprint: "b", created_at: 5 },
     ])
+  })
+
+  it("leaves unreadable entries alone: only the release clears them, so the list stays held", () => {
+    const shared = browserProfile()
+    const tab = seed(shared)
+    const key = `cadence:submissions:withdraw:${scope(bruno)}`
+    const list = heldList(shared.tab())
+    expect(list.unreadable()).toBe(true)
+
+    clearSettledEvidence(bruno, tab)
+
+    expect(shared.items.get(`${key}:unreadable`)).toBe("[1]")
+    expect(heldList(shared.tab()).unreadable()).toBe(true)
+    // Releasing it on purpose is what clears it.
+    heldList(shared.tab()).clearUnreadable()
+    expect(shared.items.has(`${key}:unreadable`)).toBe(false)
   })
 
   it("removes an attempt list that is left empty, and touches nobody else's", () => {
@@ -390,7 +403,10 @@ describe("clearSettledEvidence", () => {
     const tab = shared.tab()
     const withId = { ...bruno, companyId: "c-1" }
     const legacy = legacyViewerScopeIds(withId)[0]!
-    tab.setItem(`cadence:submissions:withdraw:${legacy}:unreadable`, "[1]")
+    tab.setItem(
+      `cadence:submissions:payroll-attempt:${legacy}`,
+      JSON.stringify([{ fingerprint: "c", run_id: "done", created_at: 5 }]),
+    )
     clearSettledEvidence(withId, tab)
     expect(shared.items.size).toBe(0)
   })
@@ -429,8 +445,8 @@ describe("leaving", () => {
     const shared = browserProfile()
     const tab = shared.tab()
     tab.setItem(
-      `cadence:submissions:withdraw:${viewerScopeId(bruno)}:unreadable`,
-      "[1]",
+      `cadence:submissions:payroll-attempt:${viewerScopeId(bruno)}`,
+      JSON.stringify([{ fingerprint: "c", run_id: "done", created_at: 5 }]),
     )
     const note = marker()
 
@@ -755,10 +771,10 @@ describe("the browser's localStorage", () => {
     fire(null)
     expect(heard).toHaveBeenCalledTimes(2)
 
-    // It lists the browser's keys: a settled leftover goes, a record held stays.
+    // It lists the browser's keys: a settled attempt goes, a record held stays.
     items.set(
-      `cadence:submissions:withdraw:${viewerScopeId(bruno)}:unreadable`,
-      "[1]",
+      `cadence:submissions:payroll-attempt:${viewerScopeId(bruno)}`,
+      JSON.stringify([{ fingerprint: "c", run_id: "done", created_at: 5 }]),
     )
     clearSettledEvidence(bruno)
     expect([...items.keys()]).toEqual([

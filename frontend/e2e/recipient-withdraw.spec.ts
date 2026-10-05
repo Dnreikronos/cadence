@@ -364,10 +364,14 @@ test("signing out keeps what a person left held, for them and for no one else", 
   expect(key).toMatch(/^cadence:submissions:withdraw:[0-9a-f]{16}$/)
   expect(sent).toEqual(["1234560000"])
 
-  // What is settled goes with the sign-out: a leftover the app could not read is removed,
-  // what may have been sent is not.
+  // What is settled goes with the sign-out (a payroll attempt whose run has nothing in
+  // doubt); what may have been sent does not.
   await page.evaluate(
-    (name) => window.localStorage.setItem(`${name}:unreadable`, "[1]"),
+    (name) =>
+      window.localStorage.setItem(
+        name.replace(":withdraw:", ":payroll-attempt:"),
+        JSON.stringify([{ fingerprint: "f", run_id: "done", created_at: 1 }]),
+      ),
     key,
   )
 
@@ -407,6 +411,57 @@ test("signing out keeps what a person left held, for them and for no one else", 
       "A withdrawal for this amount may already have gone through. Check your balance and history, or change the amount.",
     ),
   ).toBeVisible()
+  expect(sent).toEqual(["1234560000"])
+})
+
+test("signing out keeps what could not be read held: only the release clears it", async ({
+  page,
+  watch,
+}) => {
+  test.setTimeout(60_000)
+  watch.allowStatus(404, /\/unwrap\/confirm$/)
+  watch.allowStatus(409, /\/unwrap\/confirm$/)
+  page.on("dialog", (dialog) => void dialog.accept())
+  const sent = withdrawalsSent(page)
+
+  await signInAs(page, "recipient")
+  await page.goto("/me/withdraw?mock=slow")
+  const card = page.getByRole("region", { name: "Withdraw to your wallet" })
+  await expect(card).toContainText("$8,000.00")
+  await amountField(card).fill("1234.56")
+  await card.getByRole("button", { name: "Withdraw", exact: true }).click()
+  await expect.poll(() => savedKeys(page)).toHaveLength(1)
+  // What is saved can no longer be read: it is set aside, and the list is held.
+  await page.evaluate(() => {
+    for (const key of Object.keys(window.localStorage)) {
+      if (key.startsWith("cadence:submissions:withdraw:")) {
+        window.localStorage.setItem(key, "not json")
+      }
+    }
+  })
+  await page.reload()
+  await expect(card.getByRole("alert")).toContainText("Unreadable saved state")
+  const aside = () =>
+    page.evaluate(() =>
+      Object.keys(window.localStorage).filter((key) =>
+        key.endsWith(":unreadable"),
+      ),
+    )
+  expect(await aside()).toHaveLength(1)
+
+  await signOut(page, "bruno@solaris.test")
+  await signInAs(page, "recipient")
+  await page.waitForLoadState("networkidle")
+  await page.goto("/me/withdraw")
+
+  // Still held: the notice is there, the set-aside entry is there, and a withdrawal is
+  // refused (the sign-out did not skip the two-minute gate and the warning).
+  await expect(card.getByRole("alert")).toContainText("Unreadable saved state")
+  expect(await aside()).toHaveLength(1)
+  await amountField(card).fill("500.25")
+  await expect(
+    card.getByRole("button", { name: "Withdraw", exact: true }),
+  ).toBeDisabled()
   expect(sent).toEqual(["1234560000"])
 })
 
@@ -469,7 +524,11 @@ test("a sign-out that fails leaves the page signed in, with nothing cleared", as
   const [key] = await savedKeys(page)
   // A settled leftover, which a sign-out that went through would remove.
   await page.evaluate(
-    (name) => window.localStorage.setItem(`${name}:unreadable`, "[1]"),
+    (name) =>
+      window.localStorage.setItem(
+        name.replace(":withdraw:", ":payroll-attempt:"),
+        JSON.stringify([{ fingerprint: "f", run_id: "done", created_at: 1 }]),
+      ),
     key,
   )
 
@@ -486,7 +545,7 @@ test("a sign-out that fails leaves the page signed in, with nothing cleared", as
   ).toBeVisible()
   expect(
     await page.evaluate(() => Object.keys(window.localStorage).sort()),
-  ).toEqual([key, `${key}:unreadable`])
+  ).toEqual([key, key.replace(":withdraw:", ":payroll-attempt:")].sort())
 
   await context.setOffline(false)
 })

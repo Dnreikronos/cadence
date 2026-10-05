@@ -458,8 +458,10 @@ buttons follow the first's. Where the records live, and when they go:
 - **Removed when settled.** A record goes as soon as its outcome is final (it landed, or
   the network refused it); an unresolved one is kept until the person releases it.
 - **Kept across a sign-out while unresolved.** Signing out of this device or of every
-  device removes only what is settled: the set-aside unreadable leftovers and a payroll
-  attempt whose run has no payment in doubt. A record of something that may have been
+  device removes only what is settled: a payroll attempt whose run has no payment in
+  doubt. The set-aside unreadable entries stay too: nothing says what they were, so they
+  keep the list held until the person releases them, behind the two-minute gate and the
+  warning. A record of something that may have been
   sent stays, so the same person signing back in still finds it held (removing it would
   let the same money go out again, which is what the sent-failure rule exists to stop).
   **The trade-off:** a withdrawal's amount stays in `localStorage` on that computer for as
