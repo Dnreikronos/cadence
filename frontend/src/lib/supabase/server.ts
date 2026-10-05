@@ -1,13 +1,17 @@
 import { createServerClient } from "@supabase/ssr"
 import { cookies, headers } from "next/headers"
-import { cookieOptions, isHttps, withSessionLifetime } from "./cookie-options"
+import {
+  cookieOptions,
+  isHttpsRequest,
+  withSessionLifetime,
+} from "./cookie-options"
 import { supabaseEnv } from "./env"
 
 // For server components, server actions and route handlers; the session lives in cookies.
 export async function createClient() {
   const { url, publishableKey } = supabaseEnv()
   const cookieStore = await cookies()
-  const secure = isHttps(null, (await headers()).get("x-forwarded-proto"))
+  const secure = isHttpsRequest(await headers())
   return createServerClient(url, publishableKey, {
     cookieOptions: cookieOptions(secure),
     cookies: {

@@ -54,3 +54,26 @@ export function isHttps(
   if (forwarded) return forwarded === "https"
   return protocol?.replace(/:$/, "").toLowerCase() === "https"
 }
+
+// The same decision for a whole request, so every place that writes the session cookie
+// agrees: X-Forwarded-Proto first (what a proxy such as Vercel's sets), then the URL's
+// own protocol when the caller has one (middleware), then the Origin or Referer a
+// browser sends with a server action or a navigation. Nothing to go on is not https.
+export function isHttpsRequest(
+  headers: { get(name: string): string | null },
+  urlProtocol?: string | null,
+): boolean {
+  const forwarded = headers.get("x-forwarded-proto")
+  if (forwarded?.trim()) return isHttps(null, forwarded)
+  if (urlProtocol) return isHttps(urlProtocol)
+  for (const name of ["origin", "referer"]) {
+    const value = headers.get(name)
+    if (!value) continue
+    try {
+      return isHttps(new URL(value).protocol)
+    } catch {
+      // Not a URL ("null" from a sandboxed frame): try the next.
+    }
+  }
+  return false
+}

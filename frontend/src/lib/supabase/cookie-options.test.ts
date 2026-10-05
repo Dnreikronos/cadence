@@ -3,6 +3,7 @@ import {
   capMaxAge,
   cookieOptions,
   isHttps,
+  isHttpsRequest,
   SESSION_MAX_AGE,
   withSessionLifetime,
 } from "./cookie-options"
@@ -92,5 +93,55 @@ describe("isHttps", () => {
   it("falls back to the protocol when the header is empty", () => {
     expect(isHttps("https:", "")).toBe(true)
     expect(isHttps("http:", null)).toBe(false)
+  })
+})
+
+describe("isHttpsRequest", () => {
+  const headers = (init: Record<string, string>) => new Headers(init)
+
+  it("follows X-Forwarded-Proto over everything else", () => {
+    expect(
+      isHttpsRequest(headers({ "x-forwarded-proto": "https" }), "http:"),
+    ).toBe(true)
+    expect(
+      isHttpsRequest(
+        headers({ "x-forwarded-proto": "http", origin: "https://a.test" }),
+        "https:",
+      ),
+    ).toBe(false)
+  })
+
+  it("falls back to the URL's protocol, as middleware has one", () => {
+    expect(isHttpsRequest(headers({}), "https:")).toBe(true)
+    expect(isHttpsRequest(headers({ origin: "https://a.test" }), "http:")).toBe(
+      false,
+    )
+  })
+
+  it("falls back to Origin, then Referer, for a server action that has no URL", () => {
+    expect(isHttpsRequest(headers({ origin: "https://app.test" }))).toBe(true)
+    expect(isHttpsRequest(headers({ origin: "http://localhost:3000" }))).toBe(
+      false,
+    )
+    expect(
+      isHttpsRequest(headers({ referer: "https://app.test/sign-in" })),
+    ).toBe(true)
+    // A sandboxed frame sends Origin: null.
+    expect(
+      isHttpsRequest(
+        headers({ origin: "null", referer: "https://app.test/x" }),
+      ),
+    ).toBe(true)
+  })
+
+  it("agrees between the server and the middleware for the same request", () => {
+    const request = headers({ origin: "https://app.test" })
+    // Server: no URL. Middleware: the request URL, here https as well.
+    expect(isHttpsRequest(request)).toBe(isHttpsRequest(request, "https:"))
+  })
+
+  it("is not https with nothing to go on", () => {
+    expect(isHttpsRequest(headers({}))).toBe(false)
+    expect(isHttpsRequest(headers({ origin: "null" }))).toBe(false)
   })
 })
