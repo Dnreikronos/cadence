@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { SignInState } from "./actions"
 import type { SignInIntent } from "./complete-sign-in"
 
@@ -65,6 +65,8 @@ beforeEach(() => {
   redirect.mockClear()
   vi.spyOn(console, "error").mockImplementation(() => {})
 })
+
+afterEach(() => vi.unstubAllEnvs())
 
 describe("signIn: asking for a code", () => {
   it("emails a code and moves to the code step", async () => {
@@ -141,6 +143,49 @@ describe("signIn: asking for a code", () => {
       error: expect.stringMatching(/could not send/i),
     })
     expect(auth.signInWithOtp).not.toHaveBeenCalled()
+  })
+
+  describe("the origin of the emailed link", () => {
+    const linkOf = () =>
+      new URL(auth.signInWithOtp.mock.calls[0][0].options.emailRedirectTo)
+
+    it("is the configured site when there is one", async () => {
+      vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://app.cadence.example")
+      await signIn(email, form({ email: "ana@solaris.test" }))
+      expect(linkOf().origin).toBe("https://app.cadence.example")
+      expect(linkOf().pathname).toBe("/auth/confirm")
+    })
+
+    it("ignores a spoofed Origin when the site is configured", async () => {
+      vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://app.cadence.example")
+      requestHeaders.current = new Headers({
+        origin: "https://evil.example",
+        "x-forwarded-host": "evil.example",
+      })
+      await signIn(email, form({ email: "ana@solaris.test", invite: "tok" }))
+      expect(linkOf().origin).toBe("https://app.cadence.example")
+      expect(linkOf().searchParams.get("invite")).toBe("tok")
+    })
+
+    it("falls back to the request's Origin in development and tests", async () => {
+      vi.stubEnv("NEXT_PUBLIC_SITE_URL", "")
+      await signIn(email, form({ email: "ana@solaris.test" }))
+      expect(linkOf().origin).toBe("http://localhost:3000")
+    })
+
+    it("does not fall back to the request in production, and sends nothing", async () => {
+      vi.stubEnv("NODE_ENV", "production")
+      vi.stubEnv("NEXT_PUBLIC_SITE_URL", "https://app.cadence.example")
+      await signIn(email, form({ email: "ana@solaris.test" }))
+      expect(linkOf().origin).toBe("https://app.cadence.example")
+
+      auth.signInWithOtp.mockClear()
+      vi.stubEnv("NEXT_PUBLIC_SITE_URL", "")
+      await expect(
+        signIn(email, form({ email: "ana@solaris.test" })),
+      ).rejects.toThrow(/NEXT_PUBLIC_SITE_URL is required/)
+      expect(auth.signInWithOtp).not.toHaveBeenCalled()
+    })
   })
 
   it("keeps the company name when sending a new code from the code step", async () => {
