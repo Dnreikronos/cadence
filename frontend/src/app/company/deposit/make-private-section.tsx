@@ -21,6 +21,7 @@ import {
   type MakePrivateState,
 } from "@/lib/queries/deposit"
 import { cn } from "@/lib/utils"
+import { StorageNotice } from "@/components/app/storage-notice"
 import { StepHeading } from "./receive-section"
 
 export function MakePrivateSection({ wallet }: { wallet: string }) {
@@ -159,6 +160,8 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
           and your auditors can read it.
         </span>
       </p>
+
+      <StorageNotice className="mt-4" />
 
       <form onSubmit={submit} noValidate className="mt-5 space-y-3">
         <label htmlFor={`${id}-amount`} className="text-ui font-medium">

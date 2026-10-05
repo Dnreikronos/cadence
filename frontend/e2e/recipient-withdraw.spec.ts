@@ -358,3 +358,81 @@ test("signing out keeps what a person left held, for them and for no one else", 
     card.getByText("The withdrawal may have gone through"),
   ).toBeVisible()
 })
+
+test("a second tab cannot send while the first has a withdrawal in flight", async ({
+  page,
+  context,
+  watch,
+}) => {
+  test.setTimeout(60_000)
+  watch.allowStatus(409, /\/unwrap\/confirm$/)
+  page.on("dialog", (dialog) => void dialog.accept())
+
+  await signInAs(page, "recipient")
+  // `slow` holds every answer for 1.5 s, so the withdrawal stays in flight for a while.
+  await page.goto("/me/withdraw?mock=slow")
+  const card = page.getByRole("region", { name: "Withdraw to your wallet" })
+  await expect(card).toContainText("$8,000.00")
+  await amountField(card).fill("1234.56")
+  await card.getByRole("button", { name: "Withdraw", exact: true }).click()
+  // The record is written as it is handed to the network: the lock is held by then.
+  await expect.poll(() => savedKeys(page)).toHaveLength(1)
+
+  // A second tab in the same browser shares the session and the Web Lock, not the
+  // storage, so it cannot see the first one's record and has to be told to wait.
+  const other = await context.newPage()
+  other.on("dialog", (dialog) => void dialog.accept())
+  await other.goto("/me/withdraw")
+  const otherCard = other.getByRole("region", {
+    name: "Withdraw to your wallet",
+  })
+  await expect(otherCard).toContainText("$8,000.00")
+  await amountField(otherCard).fill("500.25")
+  await otherCard.getByRole("button", { name: "Withdraw", exact: true }).click()
+  await expect(
+    otherCard.getByText(
+      "Another tab is sending or checking a withdrawal for this account: wait for it to finish.",
+    ),
+  ).toBeVisible()
+  await expect(
+    other.getByRole("region", { name: "Withdrawal complete" }),
+  ).toHaveCount(0)
+
+  // Once the first has run its course the lock is free, and the second can go.
+  await expect(
+    page.getByRole("region", { name: "Withdrawal complete" }),
+  ).toBeVisible({ timeout: 40_000 })
+  await setMock(other, "instant")
+  await otherCard.getByRole("button", { name: "Withdraw", exact: true }).click()
+  await expect(
+    other.getByRole("region", { name: "Withdrawal complete" }),
+  ).toContainText("$500.25")
+})
+
+test("when the browser blocks storage the demo warns and still works", async ({
+  page,
+}) => {
+  // Site storage refused for this tab: what private browsing or blocked site data does.
+  await page.addInitScript(() => {
+    const original = Storage.prototype.setItem
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (this === window.sessionStorage) {
+        throw new DOMException("blocked", "QuotaExceededError")
+      }
+      return original.call(this, key, value)
+    }
+  })
+  const card = await openWithdraw(page, "instant")
+
+  await expect(
+    card.getByText(
+      "Your browser is blocking storage, so Cadence cannot safely send this",
+    ),
+  ).toBeVisible()
+  // In the demo nothing real is sent, so it is a warning, not a refusal.
+  await amountField(card).fill("1234.56")
+  await card.getByRole("button", { name: "Withdraw", exact: true }).click()
+  await expect(
+    page.getByRole("region", { name: "Withdrawal complete" }),
+  ).toContainText("$1,234.56")
+})

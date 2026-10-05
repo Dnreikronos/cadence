@@ -437,12 +437,15 @@ A submission record is `{ kind, request_id, signature | null, last_valid_block_h
 wallet, at }`, one per kind, under `cadence:submission:<kind>` in `sessionStorage`
 (`frontend/src/lib/submissions.ts`). It holds no secret and no amount, is written just
 before `submit` runs (signature `null`) and updated when the network returns the
-signature, and is cleared once the outcome is final. The four flows that move money
-(deposit, apply pending, withdraw and payroll) now keep that evidence, so a reload
-finds out what became of a transaction before anything is sent. Withdraw and payroll
-keep a list, under `cadence:submissions:<kind>:<viewer>` (the viewer is a hash of the
-company and email, the same identity the balance keys use, so two people on one tab
-never read each other's records and signing out clears none of them):
+signature, and is cleared once the outcome is final. Four rows of the table keep
+evidence across a reload: the deposit's wrap step, apply pending, withdraw and payroll,
+so a reload finds out what became of a transaction before anything is sent. The
+deposit's apply step and the activation account step keep theirs in memory only, as the
+table says. Withdraw and payroll keep a list, under
+`cadence:submissions:<kind>:<viewer>` (the viewer is a hash of the company id and the
+email, so two people on one tab never read each other's records, a rename of the
+company orphans nothing, and signing out clears none of them; records saved under the
+company name by an earlier version are read once, merged in and deleted):
 
 - A withdrawal record is `{ amount_units, request_id?, signature?,
   last_valid_block_height?, at }`, one per amount. It **does** hold the amount, which is
@@ -464,8 +467,32 @@ never read each other's records and signing out clears none of them):
   run, so it cannot be signed after a reload, and the screen says to start a new run
   for them only. The attempt is cleared once no payment of its run is in doubt.
 
-All of it is per tab: `sessionStorage` is gone when the tab closes, and where storage is
-unavailable the screens behave as they did before, in memory only.
+**No record, no send.** Before a deposit's wrap, an apply, a withdrawal or a payroll
+payment starts, the web app probes storage (it writes a sentinel, reads it back, removes
+it, and probes again after any later write fails). In real mode it refuses to start when
+that fails, and stops before `submit` if the record of the send cannot be written, with
+"Your browser is blocking storage, so Cadence cannot safely send this: enable site
+storage or leave private browsing". In mock mode it shows the same text as a warning and
+goes on, in memory only. A saved entry that cannot be read is never dropped or erased by
+a later write: it is set aside, and the whole withdraw or payroll list for that viewer
+counts as held ("Unreadable saved state") until the person releases it.
+
+**One tab at a time.** The records are per tab. A second tab cannot see the first tab's
+records, so a Web Lock (`navigator.locks`, one per flow kind and viewer) is held for the
+whole window of a withdrawal or a payroll run, from the prepare through the
+confirmation, and while saved records are looked up: a second tab that cannot get it
+says "Another tab is sending or checking a withdrawal for this account: wait for it to
+finish" and refuses to start. Web Locks cover the in-flight window only. Where
+`navigator.locks` is missing, a BroadcastChannel ping only warns. A tab that is closed
+and opened again loses its records (`sessionStorage` is gone with the tab), so a
+withdrawal or run sent from a tab that was then closed is not held in the new one.
+
+**Deliberate release.** A hold that does not resolve (no signature to ask with, or a
+lookup that stays unknown) is offered for release after two minutes: "I checked my
+history, release this amount" for a withdrawal, "Release this person" for a payroll
+payment, each behind a confirmation that says the earlier attempt may still have been
+sent and that releasing it lets the same money go out again. Nothing about a release is
+logged.
 
 ## Routes
 

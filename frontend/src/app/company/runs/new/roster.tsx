@@ -7,7 +7,8 @@ import { AmountDisplay } from "@/components/ui/amount-display"
 import { AvatarPerson } from "@/components/ui/avatar-person"
 import { buttonVariants } from "@/components/ui/button"
 import { unitsToUsd } from "@/lib/money"
-import type { SentPayment } from "@/lib/runs/evidence"
+import { ReleaseAction } from "@/components/app/release-action"
+import { releaseWarning, type SentPayment } from "@/lib/runs/evidence"
 import { initialsOf } from "@/lib/runs/people"
 import {
   excludedNote,
@@ -155,11 +156,17 @@ export function CheckingList({
   checking,
   payments,
   lookingUp,
+  canRelease,
+  onRelease,
 }: {
   checking: readonly PayrollPerson[]
   payments: readonly SentPayment[]
   // Ids of the payments being asked about right now.
   lookingUp: ReadonlySet<string>
+  // Offered after two minutes unsettled, once a lookup (if one can be made) came back
+  // unknown: lets the person be paid again, on purpose.
+  canRelease: (payment: SentPayment) => boolean
+  onRelease: (personId: string) => void
 }) {
   return (
     <section
@@ -213,6 +220,14 @@ export function CheckingList({
                 >
                   Open the run
                 </Link>
+              )}
+              {sent && canRelease(sent) && (
+                <ReleaseAction
+                  label={`Release ${person.name}`}
+                  prompt="Release this person"
+                  warning={releaseWarning}
+                  onRelease={() => onRelease(person.id)}
+                />
               )}
             </li>
           )

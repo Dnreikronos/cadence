@@ -2,6 +2,10 @@ import type { ApiClient } from "@/lib/api/client"
 import { ApiError, messageFor } from "@/lib/api/errors"
 import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
 import { SentApplyError } from "@/lib/me/apply-pending"
+import {
+  StorageUnavailableError,
+  storageBlockedMessage,
+} from "@/lib/storage-guard"
 import type { bindSignAndConfirm } from "@/lib/wallet/sign-and-confirm"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import type { MakePrivateStep } from "./types"
@@ -97,8 +101,9 @@ export async function runMakePrivate({
           // Set before `submit` runs, not after it returns: a submit that throws
           // (a timeout, a dropped connection) may still have reached the network.
           if (signStep === "submitting") {
-            submitted = true
+            // The record first: one that cannot be kept stops the send, unsent.
             onSubmitting?.(prepared)
+            submitted = true
           }
           // Submitting and confirming read the same to the person: "waiting".
           const next = signStep === "signing" ? "signing" : "confirming"
@@ -187,6 +192,7 @@ export function failureMessage(error: unknown): string {
   if (cause instanceof ConfirmTimeoutError) {
     return "The network hasn't confirmed this yet. Check your balances before trying again."
   }
+  if (cause instanceof StorageUnavailableError) return storageBlockedMessage
   if (cause instanceof WalletUnavailableError) {
     return "Your wallet isn't available yet, so nothing can be signed."
   }

@@ -4,6 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { apiConfig } from "@/lib/api/mode"
+import { requireDurable } from "@/lib/storage-guard"
 import {
   MakePrivateController,
   SUBMISSION_KIND,
@@ -68,6 +70,8 @@ export function useMakePrivate(wallet: string) {
       return fresh && !state?.isInvalidated ? state?.data?.pending : undefined
     },
     toast: (message) => toast.success(message),
+    // No send without a record of it, in real mode.
+    requireStorage: () => requireDurable(apiConfig.mode),
     store: {
       read: () => readSubmission(SUBMISSION_KIND),
       record: (record) => recordSubmission(record),

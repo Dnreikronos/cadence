@@ -73,8 +73,10 @@ export async function payOne(
       prepared,
       (sig) => api.confirmPayment(runId, id, sig),
       (step) => {
-        phase = step
+        // The record of the send comes first, and the phase moves on only once it is
+        // kept: if keeping it fails (it throws), nothing was sent.
         if (step === "submitting") events.sending?.(prepared)
+        phase = step
         events[stepEvent(step)](id)
       },
       {

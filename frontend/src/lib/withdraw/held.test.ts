@@ -414,10 +414,16 @@ describe("checking what became of a held withdrawal", () => {
     const records = heldRecords(ana, fakeStorage())
     records.upsert(record({ at: 1_000 }))
     const confirm = confirmer(notFinalized())
-    const { done } = check(records, confirm)
+    // Asked every 3 s from the send at t=1000 until t=91000, 90 s later, whose answer is
+    // the last: 31 asks, and not a second more or less of waiting.
+    let time = 1_000
+    const { done } = check(records, confirm, {
+      now: () => time,
+      sleep: async (ms) => void (time += ms),
+    })
     expect(await done).toEqual([{ amount: "1000000000", outcome: "failed" }])
-    // About thirty tries at three seconds, not one.
-    expect(confirm.mock.calls.length).toBeGreaterThan(20)
+    expect(confirm).toHaveBeenCalledTimes(31)
+    expect(time).toBe(1_000 + 90_000)
     expect(records.read()).toEqual([])
 
     // The service never answered: after 90 s it is still unknown, not lost.

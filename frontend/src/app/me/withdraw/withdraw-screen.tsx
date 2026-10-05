@@ -4,6 +4,8 @@ import { useEffect, useId, useReducer, useRef, useState } from "react"
 import Link from "next/link"
 import { Check, Eye, Loader2, TriangleAlert } from "lucide-react"
 import { AmountDisplay } from "@/components/ui/amount-display"
+import { ReleaseAction } from "@/components/app/release-action"
+import { StorageNotice } from "@/components/app/storage-notice"
 import { ButtonCopy } from "@/components/ui/button-copy"
 import { buttonVariants } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty-state"
@@ -19,10 +21,13 @@ import {
   useWithdraw,
   useWithdrawCheck,
   useWithdrawInFlight,
+  useWithdrawRelease,
   useWithdrawingAmounts,
+  withdrawLockName,
   type WithdrawCheck,
 } from "@/lib/queries/withdraw"
 import { formatBaseUnits, formatUnits, unitsToUsd } from "@/lib/money"
+import { useStorageGate } from "@/lib/use-storage-gate"
 import { useUnloadGuard } from "@/lib/use-unload-guard"
 import { useWallet } from "@/lib/wallet/context"
 import {
@@ -37,7 +42,13 @@ import {
   type Phase,
   type WithdrawState,
 } from "@/lib/withdraw/flow"
-import { heldCheckMessage } from "@/lib/withdraw/held"
+import { acquireFlowLock, otherTabMessage } from "@/lib/flow-lock"
+import { storageBlockedMessage } from "@/lib/storage-guard"
+import {
+  heldCheckMessage,
+  releaseWarning,
+  unreadableMessage,
+} from "@/lib/withdraw/held"
 import { acknowledgePrompt, riskView } from "@/lib/withdraw/risk"
 import { maxWithdrawUnits, toWithdrawUnits } from "@/lib/withdraw/schema"
 import { cn } from "@/lib/utils"
@@ -137,6 +148,10 @@ function WithdrawCard({
   const withdraw = useWithdraw(viewer)
   const sent = useHeldWithdrawals(viewer)
   const running = useWithdrawingAmounts()
+  const gate = useStorageGate()
+  const release = useWithdrawRelease(viewer, check)
+  // Taken before the lock is asked for: a double click is two handlers in a row.
+  const starting = useRef(false)
   const [state, dispatch] = useReducer(
     withdrawReducer,
     sent,
@@ -187,8 +202,17 @@ function WithdrawCard({
     dispatch({ type: "amount-changed" })
   }
 
-  function start() {
-    if (isBusy || inFlight || checking) return
+  async function start() {
+    if (isBusy || inFlight || checking || starting.current) return
+    // Nothing is sent that cannot be remembered, and nothing while saved state is unread.
+    if (gate.blocks) {
+      setError(storageBlockedMessage)
+      return
+    }
+    if (release.unreadable) {
+      setError(unreadableMessage)
+      return
+    }
     const parsed = toWithdrawUnits(amount, available)
     if (!parsed.ok) {
       setError(parsed.message)
@@ -212,6 +236,15 @@ function WithdrawCard({
       }
       return
     }
+    // One tab at a time: the lock is held until the withdrawal has run its course.
+    starting.current = true
+    const got = await acquireFlowLock(withdrawLockName(viewer)).finally(() => {
+      starting.current = false
+    })
+    if (got.status === "busy") {
+      setError(otherTabMessage("withdrawal"))
+      return
+    }
     setError(undefined)
     setAckError(undefined)
     check.dismiss()
@@ -219,6 +252,7 @@ function WithdrawCard({
     dispatch({ type: "submit", amount: units })
     withdraw.mutate(
       {
+        lease: got.lease,
         amount: units,
         acknowledged: next.acknowledged,
         onPrepared: (level) => dispatch({ type: "prepared", level }),
@@ -243,7 +277,7 @@ function WithdrawCard({
 
   function submit(event: React.FormEvent) {
     event.preventDefault()
-    start()
+    void start()
   }
 
   // The reducer refuses this amount while it may already have gone out; the button says so too.
@@ -294,6 +328,15 @@ function WithdrawCard({
       </p>
 
       {checking && <CheckingNotice className="mt-4" />}
+      {check.otherTab && (
+        <p role="status" className="mt-4 text-ui/normal text-warning-fg">
+          {otherTabMessage("withdrawal")}
+        </p>
+      )}
+      <StorageNotice className="mt-4" />
+      {release.unreadable && (
+        <UnreadableNotice onRelease={release.releaseUnreadable} />
+      )}
       {check.settled.map((settled) => (
         <p
           key={settled.amount}
@@ -382,7 +425,9 @@ function WithdrawCard({
           {state.stage !== "needs-acknowledgement" && (
             <button
               type="submit"
-              disabled={!hasFunds || checking}
+              disabled={
+                !hasFunds || checking || gate.blocks || release.unreadable
+              }
               aria-disabled={isBusy || isHeld || undefined}
               aria-describedby={isHeld ? `${id}-held` : undefined}
               className={cn(
@@ -446,6 +491,8 @@ function WithdrawCard({
               held={held}
               summary={heldDetail(state, held) === "summary"}
               onCheckAgain={checking ? undefined : check.checkAgain}
+              canRelease={release.canRelease(held.amount)}
+              onRelease={() => release.release(held.amount)}
               isAlert={
                 state.stage === "failed" &&
                 state.failure.sent &&
@@ -461,7 +508,7 @@ function WithdrawCard({
           className="mt-4"
           title="The withdrawal didn't go through"
           description={state.failure.message}
-          onRetry={state.failure.retryable ? start : undefined}
+          onRetry={state.failure.retryable ? () => void start() : undefined}
         />
       )}
 
@@ -571,6 +618,8 @@ function HeldNotice({
   isAlert = false,
   summary = false,
   onCheckAgain,
+  canRelease = false,
+  onRelease,
 }: {
   held: Held
   isAlert?: boolean
@@ -578,6 +627,9 @@ function HeldNotice({
   summary?: boolean
   // Looks the withdrawal up again with its saved signature; nothing is sent.
   onCheckAgain?: () => void
+  // Offered once it has been unresolved for two minutes: lets the amount go on purpose.
+  canRelease?: boolean
+  onRelease?: () => void
 }) {
   if (summary) {
     return (
@@ -630,7 +682,34 @@ function HeldNotice({
             Check again
           </button>
         )}
+        {canRelease && onRelease && (
+          <ReleaseAction
+            label={`Release ${formatUnits(held.amount)}`}
+            prompt="I checked my history, release this amount"
+            warning={releaseWarning}
+            onRelease={onRelease}
+          />
+        )}
       </div>
+    </div>
+  )
+}
+
+// Saved withdrawals that could not be read were set aside, not dropped: nothing can be
+// withdrawn until the person has checked their history and let them go.
+function UnreadableNotice({ onRelease }: { onRelease: () => void }) {
+  return (
+    <div
+      role="alert"
+      className="mt-4 space-y-2 rounded-xl border border-warning-border bg-warning-bg p-4 text-ui/normal text-warning-fg"
+    >
+      <p className="font-medium">{unreadableMessage}</p>
+      <ReleaseAction
+        label="Release unreadable state"
+        prompt="I checked my history, release this saved state"
+        warning={releaseWarning}
+        onRelease={onRelease}
+      />
     </div>
   )
 }

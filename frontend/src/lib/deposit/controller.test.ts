@@ -15,6 +15,10 @@ import {
 } from "./controller"
 import { ConfirmTimeoutError } from "@/lib/api/sign"
 import { EXPIRY_MS } from "./reconcile"
+import {
+  StorageUnavailableError,
+  storageBlockedMessage,
+} from "@/lib/storage-guard"
 
 const SIG = "5SigMockSignature1111111111111111111111111111"
 const receipt = (id: string): Receipt => ({
@@ -54,6 +58,7 @@ function setup(
     storage?: "available" | "unavailable"
     pendingUnits?: string | null
     signAndConfirm?: Deps["signAndConfirm"]
+    requireStorage?: Deps["requireStorage"]
   } = {},
 ) {
   let saved = options.saved ?? null
@@ -111,6 +116,7 @@ function setup(
     refresh,
     toast,
     store,
+    requireStorage: options.requireStorage,
     // Not given: the balance was read and nothing was pending. `null`: not known.
     pendingUnits: () =>
       options.pendingUnits === null ? undefined : (options.pendingUnits ?? "0"),
@@ -150,6 +156,49 @@ describe("describeUsdc", () => {
   it("is exact, so one base unit is not $0.00", () => {
     expect(describeUsdc("2500000000")).toBe("2500 USDC")
     expect(describeUsdc("1")).toBe("0.000001 USDC")
+  })
+})
+
+describe("MakePrivateController without a way to keep a record", () => {
+  const blocked = () => {
+    throw new StorageUnavailableError()
+  }
+
+  it("refuses to start in real mode: nothing is prepared, signed or sent", async () => {
+    const { controller, api, wallet } = setup({ requireStorage: blocked })
+    await controller.deposit("1000000")
+    const state = failed(controller.getState())
+    expect(state.message).toBe(storageBlockedMessage)
+    expect(state.retryable).toBe(true)
+    expect(api.wrap.prepare).not.toHaveBeenCalled()
+    expect(wallet.submit).not.toHaveBeenCalled()
+  })
+
+  it("stops the wrap before the send when the record cannot be kept once it is made", async () => {
+    let calls = 0
+    const { controller, wallet, saved } = setup({
+      requireStorage: () => {
+        // The start passes; the check right after the record is written does not.
+        if (++calls > 1) blocked()
+      },
+    })
+    await controller.deposit("1000000")
+    const state = failed(controller.getState())
+    expect(state.message).toBe(storageBlockedMessage)
+    expect(wallet.submit).not.toHaveBeenCalled()
+    // Not "may have been sent": a retry is the way on, once storage works.
+    expect(state.resume).toBe("wrap")
+    expect(state.recheck).toBe(false)
+    void saved
+  })
+
+  it("goes on when the check passes", async () => {
+    const requireStorage = vi.fn()
+    const { controller, wallet } = setup({ requireStorage })
+    await controller.deposit("1000000")
+    expect(controller.getState().status).toBe("done")
+    expect(requireStorage).toHaveBeenCalled()
+    expect(wallet.submit).toHaveBeenCalled()
   })
 })
 

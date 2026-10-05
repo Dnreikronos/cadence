@@ -16,6 +16,10 @@ import {
   UnexpectedSignerError,
   type SignStep,
 } from "@/lib/api/sign"
+import {
+  StorageUnavailableError,
+  storageBlockedMessage,
+} from "@/lib/storage-guard"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import type { SentEvidence } from "./held"
 
@@ -106,9 +110,10 @@ export async function runWithdraw(
       (sig) =>
         deps.confirm({ request_id: prepared.request_id, signature: sig }),
       (step) => {
-        phase = step
         // Before `submit` runs, not after it returns: a submit that throws (a timeout,
-        // a dropped connection) may still have reached the network.
+        // a dropped connection) may still have reached the network. The phase moves on
+        // only once the record is kept: if keeping it fails (it throws), nothing was
+        // sent and the failure is not "may have been sent".
         if (step === "submitting") {
           input.onSent?.({
             request_id: prepared.request_id,
@@ -116,6 +121,7 @@ export async function runWithdraw(
             signature: null,
           })
         }
+        phase = step
         input.onStep?.(step)
       },
       (sig) => {
@@ -215,6 +221,9 @@ export function failureOf(error: unknown): Failure {
       message: "The withdrawal asked for a signature from a different wallet.",
       retryable: false,
     }
+  }
+  if (error instanceof StorageUnavailableError) {
+    return { ...base, message: storageBlockedMessage, retryable: true }
   }
   if (isSignatureRejection(error)) {
     return {

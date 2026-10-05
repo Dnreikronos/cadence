@@ -2,11 +2,14 @@ import { z } from "zod"
 import type { RunPaymentPrepared } from "@/lib/api/schemas"
 import {
   createRecordList,
+  legacyViewerScopeIds,
   viewerScopeId,
   type RecordList,
   type SubmissionStorage,
+  type Viewer,
 } from "@/lib/submissions"
 import type { RunEvents } from "./executor"
+import { requireDurable, type ApiMode } from "@/lib/storage-guard"
 import { describeFailure } from "./messages"
 import { attemptKey, type AttemptKey } from "./plan"
 
@@ -40,7 +43,7 @@ export const sentPaymentSchema = z.object({
 })
 export type SentPayment = z.infer<typeof sentPaymentSchema>
 
-export type Viewer = { company: string; email: string }
+export type { Viewer }
 
 export type RunEvidence = {
   attempts: RecordList<SavedAttempt>
@@ -59,11 +62,13 @@ export function runEvidence(
   storage?: SubmissionStorage | null,
 ): RunEvidence {
   const scope = viewerScopeId(viewer)
+  const legacyScopes = legacyViewerScopeIds(viewer)
   const options = storage === undefined ? {} : { storage }
   return {
     attempts: createRecordList({
       kind: ATTEMPT_KIND,
       scope,
+      legacyScopes,
       schema: attemptSchema,
       same: (a, b) => a.fingerprint === b.fingerprint,
       ...options,
@@ -71,6 +76,7 @@ export function runEvidence(
     payments: createRecordList({
       kind: PAYMENT_KIND,
       scope,
+      legacyScopes,
       schema: sentPaymentSchema,
       same: (a, b) => a.payment_id === b.payment_id,
       ...options,
@@ -190,8 +196,9 @@ export function paymentSending(
     "payment_id" | "person_id" | "request_id" | "last_valid_block_height"
   >,
   now: number,
+  mode: ApiMode = "mock",
 ) {
-  payments.upsert({
+  const stored = payments.upsert({
     payment_id: prepared.payment_id,
     run_id: runId,
     person_id: prepared.person_id,
@@ -200,6 +207,12 @@ export function paymentSending(
     last_valid_block_height: prepared.last_valid_block_height,
     at: now,
   })
+  // In real mode a record that did not reach storage stops the payment before the send:
+  // nothing was sent, so the in-memory copy goes too.
+  if (!stored && mode === "real") {
+    payments.remove((payment) => payment.payment_id === prepared.payment_id)
+    requireDurable(mode, false)
+  }
 }
 
 // The network returned the signature.
@@ -229,11 +242,12 @@ export function recordEvidence(
   evidence: RunEvidence,
   runId: string,
   now: () => number = Date.now,
+  mode: ApiMode = "mock",
 ): RunEvents {
   return {
     ...events,
     sending: (prepared) => {
-      paymentSending(evidence, runId, prepared, now())
+      paymentSending(evidence, runId, prepared, now(), mode)
       events.sending?.(prepared)
     },
     submitted: (id, signature) => {
@@ -250,6 +264,43 @@ export function recordEvidence(
     },
   }
 }
+
+// Whether a run came back that this browser had already been given, or one with payments
+// that may have been sent: it is shown, never signed again. Payments of it that were never
+// sent are not paid, and a new run is for them.
+export const runSeenBefore = (
+  { payments }: RunEvidence,
+  saved: SavedAttempt | null,
+  runId: string,
+) =>
+  saved?.run_id !== undefined ||
+  payments.read().some((payment) => payment.run_id === runId)
+
+// ---- Releasing a hold on purpose ---------------------------------------------
+
+// How long a payment must have been unsettled before the person can be offered to let its
+// person go: the same two minutes as a withdrawal.
+export const releaseAfterMs = 2 * 60_000
+
+export const releaseWarning =
+  "The earlier payment may still have been sent. Releasing this person lets them be paid again in a new run, and if the first payment did go through they would be paid twice. Release them only after checking the company's payments and balance."
+
+// Offered when the person's payment has been unsettled for two minutes and either cannot
+// be asked about (no signature) or a lookup came back unknown (`lookedUp`).
+export const canReleasePayment = (
+  payment: SentPayment,
+  { now, lookedUp }: { now: number; lookedUp: boolean },
+) => now - payment.at >= releaseAfterMs && (!payment.signature || lookedUp)
+
+// The person's decision: the payments kept for them go, and an attempt left with nothing
+// open goes with them. Nothing about it is written anywhere.
+export function releasePerson(evidence: RunEvidence, personId: string) {
+  evidence.payments.remove((payment) => payment.person_id === personId)
+  settleAttempts(evidence)
+}
+
+export const unreadableMessage =
+  "Unreadable saved state: some saved payments could not be read, so no run can be started until you have checked the company's payments and released them."
 
 // Whose payment may have been sent and is not settled: they are not payable until it is.
 export const unsettledPeople = (

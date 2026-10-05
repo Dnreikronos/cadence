@@ -24,7 +24,11 @@ export default async function RunPage({
       />
       <RunScreen
         runId={id}
-        viewer={{ email, company: membership.company.name }}
+        viewer={{
+          email,
+          company: membership.company.name,
+          companyId: membership.company.id,
+        }}
       />
     </div>
   )

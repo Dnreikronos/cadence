@@ -16,6 +16,10 @@ import { server } from "@/lib/api/mocks/server"
 import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
 import type { Submission } from "@/lib/submissions"
 import { memoryStore } from "./memory-store"
+import {
+  StorageUnavailableError,
+  storageBlockedMessage,
+} from "@/lib/storage-guard"
 import { mockWalletFor } from "@/lib/wallet/mock"
 import { bindSignAndConfirm } from "@/lib/wallet/sign-and-confirm"
 import {
@@ -61,6 +65,51 @@ const failing = (error: unknown): Wallet => ({
   submit: async () => {
     throw error
   },
+})
+
+describe("applyPending without a way to keep a record", () => {
+  const blocked = () => {
+    throw new StorageUnavailableError()
+  }
+
+  it("prepares nothing when it cannot start, and says why", async () => {
+    const d = deps()
+    const prepare = vi.spyOn(d.accounts, "applyPending")
+    const failure = await applyPending({ ...d, requireStorage: blocked }).catch(
+      (e) => e,
+    )
+    expect(failure).toBeInstanceOf(StorageUnavailableError)
+    expect(prepare).not.toHaveBeenCalled()
+    expect(applyPendingMessage(failure)).toBe(storageBlockedMessage)
+    expect(d.store.read()).toBeNull()
+  })
+
+  it("stops before the send when the record cannot be kept, and is not a sent failure", async () => {
+    const d = deps()
+    const submit = vi.fn(async () => "never")
+    const wallet = { ...mockWalletFor("recipient"), submit } as Wallet
+    let calls = 0
+    const failure = await applyPending({
+      ...d,
+      wallet,
+      run: bindSignAndConfirm(wallet),
+      requireStorage: () => {
+        if (++calls > 1) blocked()
+      },
+    }).catch((e) => e)
+    expect(submit).not.toHaveBeenCalled()
+    expect(failure).toBeInstanceOf(StorageUnavailableError)
+    expect(failure).not.toBeInstanceOf(SentApplyError)
+    // Nothing was sent, so nothing is left to look up.
+    expect(d.store.read()).toBeNull()
+  })
+
+  it("goes on when the check passes", async () => {
+    scenarios.set("instant")
+    const requireStorage = vi.fn()
+    await applyPending({ ...deps(), requireStorage })
+    expect(requireStorage).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe("applyPending", () => {

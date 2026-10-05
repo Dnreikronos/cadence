@@ -209,8 +209,10 @@ mock signer and a fake submit, and in real mode `useWallet()` is unavailable.
   still lost.** Sent run payments and held withdrawals are kept per viewer in this tab's
   `sessionStorage` and checked on return; a run payment that was not sent cannot be
   signed after a reload, and a new run is for it.
-- **Unknown payment and run statuses fail the response.** Those schemas are strict, unlike
-  the reveal-risk level, the auditor status and the access-log enums.
+- **Unknown payment and run statuses are tolerated, not understood.** Since #130 they
+  parse like the other tolerant enums (the reveal-risk level, the auditor status, the
+  access-log enums): a run row shows "Unknown" with no action, and the repay guard treats
+  the payment as possibly paid. What a new status means is still for the backend to say.
 - **No service-status banner.** `api.health()` exists and no screen calls it.
 - **`/transfer` has no screen.** Payroll goes through `/runs`, so the client's `/transfer`
   and the `aes_key` it needs are never used.

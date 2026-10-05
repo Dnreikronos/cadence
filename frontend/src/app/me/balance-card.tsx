@@ -12,6 +12,7 @@ import { balanceReaders } from "@/lib/me/copy"
 import { applyPendingMessage } from "@/lib/me/apply-pending"
 import { lastApplyMessage } from "@/lib/me/last-apply"
 import { useMyBalance } from "@/lib/queries/balance"
+import { StorageNotice } from "@/components/app/storage-notice"
 import { useApplyPending } from "@/lib/queries/me"
 import { Units } from "./units"
 
@@ -128,6 +129,8 @@ export function BalanceCard() {
           <p role="status" className="text-caption text-ink-muted">
             {note}
           </p>
+
+          {hasPending && <StorageNotice />}
 
           {(ui.sentFailure ||
             ui.retryable ||

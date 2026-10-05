@@ -14,6 +14,13 @@ import { api } from "@/lib/api"
 import type { RunCreated } from "@/lib/api/schemas"
 import { invalidateBalances } from "@/lib/queries/invalidate"
 import { queryKeys } from "@/lib/queries/keys"
+import { apiConfig } from "@/lib/api/mode"
+import {
+  acquireFlowLock,
+  flowLockName,
+  type Lease,
+  type OtherTab,
+} from "@/lib/flow-lock"
 import { useSignAndConfirm, useWallet } from "@/lib/wallet/context"
 import {
   recordEvidence,
@@ -42,11 +49,24 @@ const runApi: RunApi = {
 
 const none: readonly SentPayment[] = []
 
+export const runLockName = (viewer: Viewer) => flowLockName("payroll", viewer)
+
 // The viewer's payments that may have been sent and are not settled, kept in this tab's
 // storage so they survive a reload and signing out (see `evidence.ts`).
 export function useSentPayments(viewer: Viewer): readonly SentPayment[] {
   const { payments } = runEvidenceFor(viewer)
   return useSyncExternalStore(payments.subscribe, payments.read, () => none)
+}
+
+// Whether saved payments could not be read and are set aside: until the person has
+// released them, no run can be started.
+export function useUnreadablePayments(viewer: Viewer) {
+  const { payments } = runEvidenceFor(viewer)
+  return useSyncExternalStore(
+    payments.subscribe,
+    payments.unreadable,
+    () => false,
+  )
 }
 
 // Who has a payment that may have been sent and is not settled: not payable until it is.
@@ -84,6 +104,8 @@ export function useRunSigner(viewer: Viewer) {
       ),
   )
   const [busy, setBusy] = useState(false)
+  // Another tab is sending or checking a run for this account.
+  const [otherTab, setOtherTab] = useState<OtherTab>(null)
   // Cancelled signatures: the prepared transactions, kept in memory so the same one is
   // signed again (see `held.ts`). Not state: a change to it always comes with a dispatch.
   const [held] = useState(createHeldStore)
@@ -124,25 +146,48 @@ export function useRunSigner(viewer: Viewer) {
           }),
           evidence,
           runId,
+          Date.now,
+          apiConfig.mode,
         ),
       }
     },
     [sign, queryClient, held, evidence],
   )
 
+  // One tab at a time, and one thing at a time within it. `lease` is the run lock when
+  // the caller already holds it (a run is created under it, then signed); otherwise it is
+  // taken here, and refused while another tab has it. It is released when the task ends.
   const exclusive = useCallback(
-    async (runId: string, task: (context: RunContext) => Promise<void>) => {
-      if (working.current) return
+    async (
+      runId: string,
+      task: (context: RunContext) => Promise<void>,
+      lease?: Lease,
+    ) => {
+      if (working.current) {
+        lease?.release()
+        return
+      }
       working.current = true
       setBusy(true)
+      let own = lease
       try {
+        if (!own) {
+          const got = await acquireFlowLock(runLockName(viewer))
+          if (got.status === "busy") {
+            setOtherTab("busy")
+            return
+          }
+          setOtherTab(got.status === "maybe-busy" ? "maybe" : null)
+          own = got.lease
+        }
         await task(contextFor(runId, controller.current?.signal))
       } finally {
+        own?.release()
         working.current = false
         setBusy(false)
       }
     },
-    [contextFor],
+    [contextFor, viewer],
   )
 
   // After a reload: ask about each payment the earlier page left with a signature, one
@@ -151,35 +196,74 @@ export function useRunSigner(viewer: Viewer) {
   useEffect(() => {
     latest.current = contextFor
   })
+  // Once per mount: a pass that ran to its end is not repeated, one cut short by
+  // leaving (or a development double mount) starts again from the saved list.
+  const recovered = useRef(false)
   useEffect(() => {
+    if (recovered.current) return
     const own = new AbortController()
     const saved = evidence.payments
       .read()
       .filter((payment) => payment.signature)
+    let lease: Lease | undefined
     void (async () => {
-      for (const record of saved) {
+      if (saved.length === 0) {
+        recovered.current = true
+        return
+      }
+      // The lock is held while the saved payments are asked about, and waited for while
+      // another tab has it.
+      for (let tries = 0; ; tries++) {
+        const got = await acquireFlowLock(runLockName(viewer))
+        if (own.signal.aborted) {
+          if (got.status !== "busy") got.lease.release()
+          return
+        }
+        if (got.status !== "busy") {
+          lease = got.lease
+          setOtherTab(got.status === "maybe-busy" ? "maybe" : null)
+          break
+        }
+        setOtherTab("busy")
+        await new Promise((resolve) =>
+          setTimeout(resolve, tries < 3 ? 500 : 3_000),
+        )
         if (own.signal.aborted) return
-        await recoverOne(latest.current(record.run_id, own.signal), record)
-        if (own.signal.aborted) return
-        setChecking((current) => {
-          const next = new Set(current)
-          next.delete(record.payment_id)
-          return next
-        })
+      }
+      try {
+        for (const record of saved) {
+          if (own.signal.aborted) return
+          await recoverOne(latest.current(record.run_id, own.signal), record)
+          if (own.signal.aborted) return
+          setChecking((current) => {
+            const next = new Set(current)
+            next.delete(record.payment_id)
+            return next
+          })
+        }
+        recovered.current = true
+      } finally {
+        lease?.release()
       }
     })()
-    return () => own.abort()
-  }, [evidence])
+    return () => {
+      own.abort()
+      lease?.release()
+    }
+  }, [evidence, viewer])
 
   return {
     wallet,
     local,
     busy,
     checking,
-    start: (created: RunCreated) => {
+    otherTab,
+    start: (created: RunCreated, lease?: Lease) => {
       held.holdAll(created.payments)
-      return exclusive(created.run_id, (context) =>
-        paySequence(context, created.payments),
+      return exclusive(
+        created.run_id,
+        (context) => paySequence(context, created.payments),
+        lease,
       )
     },
     // Whether this page still holds the transaction of a cancelled signature.

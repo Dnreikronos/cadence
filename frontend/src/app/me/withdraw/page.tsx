@@ -11,7 +11,13 @@ export default async function WithdrawPage() {
         title="Withdraw"
         description="Move your private USDC to your wallet, then cash it out."
       />
-      <WithdrawScreen viewer={{ email, company: membership.company.name }} />
+      <WithdrawScreen
+        viewer={{
+          email,
+          company: membership.company.name,
+          companyId: membership.company.id,
+        }}
+      />
     </div>
   )
 }

@@ -62,6 +62,10 @@ export type Deps = {
     record: (record: Omit<Submission, "at"> & { at?: number }) => Submission
     clear: () => void
   }
+  // Throws when a record of the send cannot be kept and the mode forbids sending without
+  // one (`requireDurable`): asked before a flow starts, and again right after the record
+  // of the wrap is written, before the send.
+  requireStorage?: () => void
   now?: () => number
   sleep?: Parameters<typeof reconcileWrap>[0]["sleep"]
 }
@@ -181,11 +185,8 @@ export class MakePrivateController {
     try {
       const outcome = await reconcileWrap({
         record: {
-          kind: "apply-pending",
           request_id: sent.request_id,
           signature: sent.signature,
-          last_valid_block_height: 0,
-          wallet: deps.wallet,
           at: sent.at,
         },
         // Only the confirm call is read, and it is the apply's own.
@@ -258,6 +259,20 @@ export class MakePrivateController {
     // An apply that went out is looked into first, whatever the screen shows.
     if (from === "apply" && this.sentApply) return
     this.sentApply = null
+    try {
+      this.getDeps().requireStorage?.()
+    } catch (error) {
+      this.set({
+        status: "failed",
+        step: from === "wrap" ? "preparing" : "applying",
+        resume: from,
+        message: failureMessage(error),
+        setupRequired: false,
+        retryable: true,
+        recheck: false,
+      })
+      return
+    }
     const generation = ++this.generation
     const abort = new AbortController()
     this.abort = abort
@@ -301,6 +316,8 @@ export class MakePrivateController {
             earlier_pending: earlierToRecord(this.earlierPending),
             at: (deps.now ?? Date.now)(),
           })
+          // A record that could not be kept stops the wrap before it is sent.
+          deps.requireStorage?.()
         },
         onSubmitted: (signature) => {
           if (this.record) {

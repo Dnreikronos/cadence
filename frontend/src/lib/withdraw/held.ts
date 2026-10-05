@@ -1,13 +1,16 @@
 import { z } from "zod"
 import type { ApiClient } from "@/lib/api/client"
-import { reconcileWrap, type Reconciled } from "@/lib/deposit/reconcile"
+import { reconcileWrap, wait, type Reconciled } from "@/lib/deposit/reconcile"
 import { formatUnits } from "@/lib/money"
 import {
   createRecordList,
+  legacyViewerScopeIds,
   viewerScopeId,
   type RecordList,
   type SubmissionStorage,
+  type Viewer,
 } from "@/lib/submissions"
+import { requireDurable, type ApiMode } from "@/lib/storage-guard"
 import type { Held } from "./flow"
 
 // A withdrawal that may have gone through, kept so a reload (or signing out and back
@@ -33,12 +36,13 @@ export type HeldRecords = RecordList<HeldRecord>
 
 // One record per amount: the same amount is never sent twice while one is unresolved.
 export function heldRecords(
-  viewer: { company: string; email: string },
+  viewer: Viewer,
   storage?: SubmissionStorage | null,
 ): HeldRecords {
   return createRecordList({
     kind: WITHDRAW_KIND,
     scope: viewerScopeId(viewer),
+    legacyScopes: legacyViewerScopeIds(viewer),
     schema: heldRecordSchema,
     same: (a, b) => a.amount_units === b.amount_units,
     ...(storage === undefined ? {} : { storage }),
@@ -50,7 +54,7 @@ const lists = new Map<string, HeldRecords>()
 // The viewer's list for this tab, the same object each time so every screen and hook
 // sees one another's writes. It also outlives the query cache, which sign-out clears:
 // the next person signing in reads their own scope and none of this one's.
-export function heldRecordsFor(viewer: { company: string; email: string }) {
+export function heldRecordsFor(viewer: Viewer) {
   const scope = viewerScopeId(viewer)
   let list = lists.get(scope)
   if (!list) {
@@ -95,10 +99,16 @@ export function recordFor(
 // What `runWithdraw` calls as the transaction is sent and when its outcome is final,
 // writing to the viewer's records. The time it was sent is kept when the signature is
 // added, since the 90-second rule counts from the send.
+//
+// In real mode a record that did not reach storage stops the withdrawal before the send
+// (the first call, which comes before `submit`): nothing was sent, so the in-memory copy
+// is dropped and the failure says why. Once the signature comes back it is too late to
+// stop anything, and the record is kept as well as it can be.
 export function withdrawEvidence(
   records: HeldRecords,
   amount: string,
   now: () => number = Date.now,
+  mode: ApiMode = "mock",
 ) {
   return {
     onSent: (evidence: SentEvidence) => {
@@ -107,7 +117,11 @@ export function withdrawEvidence(
         .find((record) => record.amount_units === amount)
       const at =
         earlier?.request_id === evidence.request_id ? earlier.at : now()
-      records.upsert(recordFor(amount, evidence, at))
+      const stored = records.upsert(recordFor(amount, evidence, at))
+      if (evidence.signature === null && !stored && mode === "real") {
+        records.remove((record) => record.amount_units === amount)
+        requireDurable(mode, false)
+      }
     },
     onResolved: () =>
       records.remove((record) => record.amount_units === amount),
@@ -123,6 +137,9 @@ export function withdrawEvidence(
 // - unknown: it may or may not have landed, so the amount stays held. No signature to
 //   ask about, a service that could not be reached, or one that no longer has it.
 export type HeldCheck = { amount: string; outcome: Reconciled }
+
+// The wait between two asks about the same withdrawal.
+export const checkPollMs = 4_000
 
 type CheckInput = {
   records: HeldRecords
@@ -149,40 +166,43 @@ export async function checkHeldWithdrawals({
   signal,
   now,
   sleep,
-  pollMs,
+  pollMs = checkPollMs,
 }: CheckInput): Promise<HeldCheck[]> {
-  const checks = await Promise.all(
-    records
-      .read()
-      .filter(include)
-      .map(async (record): Promise<HeldCheck> => {
-        const amount = record.amount_units
-        if (!record.request_id || !record.signature) {
-          return { amount, outcome: "unknown" }
-        }
-        let outcome: Reconciled
-        try {
-          outcome = await reconcileWrap({
-            record: {
-              request_id: record.request_id,
-              signature: record.signature,
-              at: record.at,
-            },
-            api: { wrap: { confirm: api.unwrap.confirm } },
-            signal,
-            now,
-            sleep,
-            pollMs,
-          })
-        } catch {
-          // Leaving the screen is not an answer; not being able to ask says nothing
-          // about the transaction.
-          signal?.throwIfAborted()
-          outcome = "unknown"
-        }
-        return { amount, outcome }
-      }),
-  )
+  // One record at a time, one confirm every few seconds overall: asking about two at once
+  // would spend the service's confirm quota twice as fast.
+  const checks: HeldCheck[] = []
+  let asked = false
+  for (const record of records.read().filter(include)) {
+    const amount = record.amount_units
+    if (!record.request_id || !record.signature) {
+      checks.push({ amount, outcome: "unknown" })
+      continue
+    }
+    // The next record waits as long as one record waits between its own asks.
+    if (asked) await (sleep ?? wait)(pollMs, signal)
+    asked = true
+    let outcome: Reconciled
+    try {
+      outcome = await reconcileWrap({
+        record: {
+          request_id: record.request_id,
+          signature: record.signature,
+          at: record.at,
+        },
+        api: { wrap: { confirm: api.unwrap.confirm } },
+        signal,
+        now,
+        sleep,
+        pollMs,
+      })
+    } catch {
+      // Leaving the screen is not an answer; not being able to ask says nothing about
+      // the transaction.
+      signal?.throwIfAborted()
+      outcome = "unknown"
+    }
+    checks.push({ amount, outcome })
+  }
   const settled = new Set(
     checks.filter((c) => c.outcome !== "unknown").map((c) => c.amount),
   )
@@ -226,3 +246,28 @@ export function heldCheckMessage({
       return null
   }
 }
+
+// ---- Releasing a hold on purpose -----------------------------------------------
+
+// How long a withdrawal must have been unresolved before the person can be offered to let
+// it go: long enough for its blockhash to have run out and for the service to have been
+// asked more than once.
+export const releaseAfterMs = 2 * 60_000
+
+// What the confirmation says plainly before an amount is released.
+export const releaseWarning =
+  "The earlier withdrawal may still have been sent. Releasing this amount lets it be withdrawn again, and if the first one did go through you would withdraw it twice. Release it only after checking your balance and history."
+
+// Whether to offer the release: the withdrawal has been unresolved for two minutes, and
+// either nothing can be asked about it (no signature) or a lookup came back unknown.
+export const canRelease = (
+  record: HeldRecord,
+  { now, lookedUp }: { now: number; lookedUp: boolean },
+) => now - record.at >= releaseAfterMs && (!record.signature || lookedUp)
+
+// The person's decision: the amount is free again. Nothing about it is written anywhere.
+export const releaseHeld = (records: HeldRecords, amount: string) =>
+  records.remove((record) => record.amount_units === amount)
+
+export const unreadableMessage =
+  "Unreadable saved state: some saved withdrawals could not be read, so nothing can be withdrawn until you have checked your history and released them."

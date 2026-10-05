@@ -114,10 +114,16 @@ describe("reconcilePayment", () => {
 
   it("rules it lost only after 90 seconds from the send, and only if the service saw it missing", async () => {
     const confirm = vi.fn().mockRejectedValue(notFinalized())
+    // Sent at t=1000, asked every 3 s, the last ask at t=91000: 31 asks, 90 s in all.
+    const ticking = clock()
     expect(
-      await reconcilePayment(saved(1), confirm, undefined, options()),
+      await reconcilePayment(saved(1), confirm, undefined, {
+        ...ticking,
+        pollMs: 3_000,
+      }),
     ).toBe("failed")
-    expect(confirm.mock.calls.length).toBeGreaterThan(20)
+    expect(confirm).toHaveBeenCalledTimes(31)
+    expect(ticking.now()).toBe(1_000 + 90_000)
 
     // A service that never answers leaves it unknown.
     const down = vi
