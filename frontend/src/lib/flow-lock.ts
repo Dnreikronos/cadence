@@ -52,7 +52,7 @@ export const flowLockName = (kind: string, viewer: Viewer) =>
 export const otherTabMessage = (
   what: "withdrawal" | "run" | "deposit" | "update",
 ) =>
-  `Another tab is sending or checking a ${what} for this account: wait for it to finish.`
+  `Another tab is sending or checking ${what === "update" ? "an" : "a"} ${what} for this account: wait for it to finish.`
 
 export function browserLockEnv(): LockEnv {
   if (typeof navigator === "undefined") return {}

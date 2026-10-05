@@ -8,7 +8,7 @@ import { expect, test } from "./support/test"
 // its own mock service, which lives in the page, so a test sets each tab's up on its own.
 
 const otherTab = (what: string) =>
-  `Another tab is sending or checking a ${what} for this account: wait for it to finish.`
+  `Another tab is sending or checking ${what === "update" ? "an" : "a"} ${what} for this account: wait for it to finish.`
 
 // Whether the browser holds a lock of this flow (its names begin `cadence:flow:<kind>:`).
 const lockHeld = (page: Page, kind: string) =>

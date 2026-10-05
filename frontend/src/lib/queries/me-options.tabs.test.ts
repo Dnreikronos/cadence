@@ -82,7 +82,7 @@ describe("applyPendingMutation across tabs", () => {
 
     expect(failure).toBeInstanceOf(ApplyOtherTabError)
     expect(applyPendingMessage(failure)).toBe(
-      "Another tab is sending or checking a update for this account: wait for it to finish.",
+      "Another tab is sending or checking an update for this account: wait for it to finish.",
     )
     expect(prepare).not.toHaveBeenCalled()
     expect(store.read()).toBeNull()

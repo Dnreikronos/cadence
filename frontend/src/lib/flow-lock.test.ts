@@ -46,7 +46,7 @@ describe("flowLockName", () => {
     )
     expect(otherTabMessage("run")).toContain("a run")
     expect(otherTabMessage("deposit")).toContain("a deposit")
-    expect(otherTabMessage("update")).toContain("a update")
+    expect(otherTabMessage("update")).toContain("an update")
   })
 })
 
