@@ -16,7 +16,6 @@ import {
   type Lease,
   type OtherTab,
 } from "@/lib/flow-lock"
-import { formatUnits } from "@/lib/money"
 import {
   failureOf,
   runWithdraw,
@@ -40,6 +39,9 @@ import type { ViewerScope } from "./keys"
 
 const withdrawKey = ["withdraw"] as const
 
+export const withdrawalDoneToast =
+  "Withdrawal complete. Withdrawals are public."
+
 // True while a withdrawal is running anywhere in the app. The mutation outlives the
 // screen that started it, so a screen opened mid-run must not start a second one.
 export function useWithdrawInFlight() {
@@ -60,10 +62,11 @@ export function useWithdrawingAmounts(): readonly string[] {
 
 const none: readonly HeldRecord[] = []
 
-// The viewer's withdrawals that may have gone through: kept in this tab's storage per
-// viewer, so they survive leaving the screen, a reload and signing out (which clears
-// the query cache but not these), and are never another person's. The reducer holds
-// back these amounts; without them, coming back would show a fresh form for the same one.
+// The viewer's withdrawals that may have gone through: kept in the browser's storage per
+// viewer, so they survive leaving the screen, a reload and another tab (signing out
+// clears the query cache and removes these from the browser), and are never another
+// person's. The reducer holds back these amounts; without them, coming back would show a
+// fresh form for the same one.
 export function useHeldRecords(viewer: ViewerScope): readonly HeldRecord[] {
   const list = heldRecordsFor(viewer)
   return useSyncExternalStore(list.subscribe, list.read, () => none)
@@ -135,7 +138,11 @@ export function useWithdrawCheck(viewer: ViewerScope): WithdrawCheck {
   })
 
   useEffect(() => {
-    if (!checking) return
+    if (!checking) {
+      // Nothing left to look up (another tab settled it): nothing to wait for either.
+      setOtherTab(null)
+      return
+    }
     const controller = new AbortController()
     const { signal } = controller
     let lease: Lease | undefined
@@ -282,11 +289,10 @@ export function useWithdraw(viewer: ViewerScope) {
     onSettled: (_data, _error, variables) => variables.lease?.release(),
     // `void`: the library waits for what these return before it reports the result,
     // and the money has already moved, so the screen must not wait on a refetch.
-    onSuccess: (outcome, variables) => {
+    onSuccess: (outcome) => {
       if (outcome.kind !== "done") return
-      toast.success(
-        `Withdrew ${formatUnits(variables.amount)}. Withdrawals are public.`,
-      )
+      // No amount in a toast: it stays on the page, where a screen reader reads it too.
+      toast.success(withdrawalDoneToast)
       void invalidateBalances(queryClient)
     },
     onError: (error) => {
