@@ -4,6 +4,7 @@ mod chain;
 #[allow(dead_code)]
 #[path = "../../confidential-transfer/src/rpc.rs"]
 mod rpc;
+mod setup;
 #[allow(dead_code)]
 #[path = "../../../services/proof/src/solana/token_wrap.rs"]
 mod token_wrap;
@@ -102,7 +103,11 @@ async fn main() -> Result<()> {
             .context("command needs a run directory")?;
         return match command.as_str() {
             "verify" => verification::verify_run(std::path::Path::new(&run)).await,
-            _ => anyhow::bail!("usage: cargo run [-- verify <run-directory>]"),
+            "probe-setup" => setup::probe(std::path::Path::new(&run)).await,
+            "verify-setup" => setup::verify(std::path::Path::new(&run)).await,
+            _ => anyhow::bail!(
+                "usage: cargo run [-- verify|probe-setup|verify-setup <run-directory>]"
+            ),
         };
     }
     let rpc_url =

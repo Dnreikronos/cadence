@@ -50,6 +50,17 @@ export async function build(request) {
 	/** @type {TransactionInstruction[]} */
 	let instructions;
 	switch (request.op) {
+		case "inspect": {
+			const account = await squads.accounts.Multisig.fromAccountAddress(
+				connection,
+				multisigPda,
+			);
+			return {
+				multisig: multisigPda.toBase58(),
+				vault: vaultPda.toBase58(),
+				transaction_index: Number(account.transactionIndex),
+			};
+		}
 		case "create": {
 			const config = await squads.accounts.ProgramConfig.fromAccountAddress(
 				connection,
