@@ -1,22 +1,19 @@
 import { describe, expect, it, vi } from "vitest"
-import type { RunPaymentPrepared } from "@/lib/api/schemas"
 import { browserProfile } from "@/lib/browser-profile"
 import { clearSettledEvidence, viewerScopeId } from "@/lib/submissions"
 import {
-  attemptCreated,
-  beginAttempt,
+  PAYMENT_KIND,
   paymentResolved,
   paymentSending,
   paymentSubmitted,
   releasePerson,
   runBlocker,
   runEvidence,
-  runSeenBefore,
-  savedAttempt,
   unreadableMessage,
   unsettledMessage,
   unsettledPeople,
 } from "./evidence"
+import { paymentKey } from "./executor"
 
 // What a second tab of the same browser sees of a payroll run the first has sent: the saved
 // payments are shared, so whoever the first tab may have paid is not payable in the second.
@@ -26,13 +23,15 @@ const bruno = { company: "Solaris", email: "bruno@example.com" }
 const RUN = "c0000000-0000-4000-8000-000000000001"
 const guid = (n: number) =>
   `b0000000-0000-4000-8000-${String(n).padStart(12, "0")}`
-const prepared = (n: number): RunPaymentPrepared =>
-  ({
-    payment_id: guid(n),
-    person_id: guid(100 + n),
-    request_id: String(n).repeat(64).slice(0, 64),
-    last_valid_block_height: 500 + n,
-  }) as RunPaymentPrepared
+const prepared = (n: number) => ({
+  position: n,
+  attempt: 0,
+  request_id: String(n).repeat(64).slice(0, 64),
+  last_valid_block_height: 500 + n,
+})
+// Position n pays person guid(100 + n).
+const send = (evidence: ReturnType<typeof runEvidence>, n: number) =>
+  paymentSending(evidence, RUN, prepared(n), guid(100 + n), 1_000)
 const SIG = "5SigMockSignature1111111111111111111111111111"
 
 describe("a payment sent in one tab, seen from another", () => {
@@ -42,7 +41,7 @@ describe("a payment sent in one tab, seen from another", () => {
     const b = runEvidence(ana, shared.tab())
     expect(runBlocker(b, [{ id: guid(101) }, { id: guid(102) }])).toBeNull()
 
-    paymentSending(a, RUN, prepared(1), 1_000)
+    send(a, 1)
 
     expect(unsettledPeople(b.payments.read())).toEqual(new Set([guid(101)]))
     expect(runBlocker(b, [{ id: guid(101) }, { id: guid(102) }])).toBe(
@@ -56,14 +55,14 @@ describe("a payment sent in one tab, seen from another", () => {
     const shared = browserProfile()
     const a = runEvidence(ana, shared.tab())
     const b = runEvidence(ana, shared.tab())
-    paymentSending(a, RUN, prepared(1), 1_000)
-    paymentSubmitted(a, guid(1), SIG)
+    send(a, 1)
+    paymentSubmitted(a, paymentKey(RUN, 1), SIG)
     expect(b.payments.read()).toEqual([
-      expect.objectContaining({ payment_id: guid(1), signature: SIG }),
+      expect.objectContaining({ run_id: RUN, position: 1, signature: SIG }),
     ])
     expect(runBlocker(b, [{ id: guid(101) }])).toBe(unsettledMessage)
 
-    paymentResolved(a, guid(1))
+    paymentResolved(a, paymentKey(RUN, 1))
 
     expect(b.payments.read()).toEqual([])
     expect(runBlocker(b, [{ id: guid(101) }])).toBeNull()
@@ -76,28 +75,15 @@ describe("a payment sent in one tab, seen from another", () => {
     const heard = vi.fn()
     b.payments.subscribe(heard)
 
-    paymentSending(a, RUN, prepared(1), 1_000)
+    send(a, 1)
 
     expect(heard).toHaveBeenCalledTimes(1)
     expect(unsettledPeople(b.payments.read()).has(guid(101))).toBe(true)
   })
 
-  it("makes the second tab replay the first one's run, never sign it", () => {
-    const shared = browserProfile()
-    const a = runEvidence(ana, shared.tab())
-    const b = runEvidence(ana, shared.tab())
-    beginAttempt(a, { idempotency_key: "k1", fingerprint: "f1" }, 1_000)
-    paymentSending(a, RUN, prepared(1), 1_000)
-
-    const saved = savedAttempt(b, "f1", 2_000)
-
-    expect(saved?.idempotency_key).toBe("k1")
-    expect(runSeenBefore(b, saved, RUN)).toBe(true)
-  })
-
   it("refuses a run while saved payments the second tab cannot read are set aside", () => {
     const shared = browserProfile()
-    const key = `cadence:submissions:payroll-payment:${viewerScopeId(ana)}`
+    const key = `cadence:submissions:${PAYMENT_KIND}:${viewerScopeId(ana)}`
     shared.items.set(key, JSON.stringify([{ payment_id: 1 }]))
     const b = runEvidence(ana, shared.tab())
 
@@ -111,7 +97,7 @@ describe("a payment sent in one tab, seen from another", () => {
     const shared = browserProfile()
     const a = runEvidence(ana, shared.tab())
     const b = runEvidence(ana, shared.tab())
-    paymentSending(a, RUN, prepared(1), 1_000)
+    send(a, 1)
 
     releasePerson(b, guid(101))
 
@@ -123,28 +109,37 @@ describe("a payment sent in one tab, seen from another", () => {
     const shared = browserProfile()
     const anas = runEvidence(ana, shared.tab())
     const brunos = runEvidence(bruno, shared.tab())
-    paymentSending(anas, RUN, prepared(1), 1_000)
+    send(anas, 1)
 
     expect(brunos.payments.read()).toEqual([])
     expect(runBlocker(brunos, [{ id: guid(101) }])).toBeNull()
   })
 
-  it("stays held in every tab when the viewer signs out, and a settled attempt goes", () => {
+  it("stays held in every tab when the viewer signs out, and an attempt list of the old shape goes", () => {
     const shared = browserProfile()
     const a = runEvidence(ana, shared.tab())
     const b = runEvidence(ana, shared.tab())
-    beginAttempt(a, { idempotency_key: "k1", fingerprint: "f1" }, 1_000)
-    attemptCreated(a, "f1", RUN)
-    paymentSending(a, RUN, prepared(1), 1_000)
-    beginAttempt(a, { idempotency_key: "k2", fingerprint: "f2" }, 1_000)
-    attemptCreated(a, "f2", "settled-run")
+    send(a, 1)
+    const attempts = `cadence:submissions:payroll-attempt:${viewerScopeId(ana)}`
+    shared.items.set(
+      attempts,
+      JSON.stringify([{ idempotency_key: "k1", fingerprint: "f1" }]),
+    )
 
     clearSettledEvidence(ana, shared.tab())
 
     expect(b.payments.read()).toHaveLength(1)
     expect(runBlocker(b, [{ id: guid(101) }])).toBe(unsettledMessage)
-    expect(b.attempts.read().map((attempt) => attempt.fingerprint)).toEqual([
-      "f1",
-    ])
+    expect(shared.items.has(attempts)).toBe(false)
+  })
+
+  it("does not read a record of the shape before #107's runs as an unreadable one", () => {
+    const shared = browserProfile()
+    shared.items.set(
+      `cadence:submissions:payroll-payment:${viewerScopeId(ana)}`,
+      JSON.stringify([{ payment_id: guid(1), run_id: RUN }]),
+    )
+    const b = runEvidence(ana, shared.tab())
+    expect(runBlocker(b, [{ id: guid(101) }])).toBeNull()
   })
 })

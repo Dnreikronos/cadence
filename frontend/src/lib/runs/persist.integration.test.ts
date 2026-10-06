@@ -1,31 +1,31 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
 import { createApiClient } from "@/lib/api/client"
 import { MOCK_ORIGIN } from "@/lib/api/config"
-import type { RunCreated } from "@/lib/api/schemas"
+import type { Run } from "@/lib/api/schemas"
 import { signAndConfirm } from "@/lib/api/sign"
+import { mockTokenAccount } from "@/lib/api/mocks/chain"
 import { COMPANY_WALLET, db, resetDb, seedPeople } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
 import { mockSigner, mockSubmit } from "@/lib/api/mocks/signer"
 import type { SubmissionStorage } from "@/lib/submissions"
 import {
-  attemptCreated,
-  attemptFor,
-  beginAttempt,
   recordEvidence,
+  runBlocker,
   runEvidence,
-  savedAttempt,
   unsettledPeople,
 } from "./evidence"
 import {
+  paymentKey,
   paySequence,
+  signablesOf,
   type RunApi,
   type RunContext,
   type RunEvents,
 } from "./executor"
 import { describeFailure } from "./messages"
 import { localReducer, mergeRow, type LocalRows } from "./progress"
-import { buildRunRequest, fingerprintOf, type PayrollPerson } from "./plan"
+import { buildRunRequest, type PayrollPerson } from "./plan"
 import { hydrateLocal, recoverOne } from "./recover"
 
 // A reload in the middle of a run, against the mock service's handlers: what is kept, what
@@ -44,9 +44,8 @@ const api = createApiClient({
   getToken: async () => "test-token",
 })
 const runApi: RunApi = {
-  confirmPayment: (runId, paymentId, signature) =>
-    api.runs.confirmPayment(runId, paymentId, signature),
-  retryPayment: (runId, paymentId) => api.runs.retryPayment(runId, paymentId),
+  confirm: (runId, item) => api.runs.confirm(runId, { payments: [item] }),
+  retry: (runId, request) => api.runs.retry(runId, request),
 }
 
 const viewer = { company: "Solaris", email: "admin@solaris.example" }
@@ -64,9 +63,11 @@ const roster = [
       kind: "employee",
       activation: "active",
       amount: amount as string,
+      tokenAccount: mockTokenAccount((person as typeof bruno).id),
     }) satisfies PayrollPerson,
 )
-const fingerprint = fingerprintOf(COMPANY_WALLET, roster)
+// Position i pays roster[i].
+const personOf = (position: number) => roster[position].id
 
 function fakeStorage(): SubmissionStorage {
   const items = new Map<string, string>()
@@ -122,88 +123,49 @@ function screenEvents() {
   }
 }
 
-async function startRun(
-  storage: SubmissionStorage,
-  key: string,
-): Promise<RunCreated> {
-  const evidence = runEvidence(viewer, storage)
-  const { key: attempt } = attemptFor(
-    evidence,
-    null,
-    fingerprint,
-    () => key,
-    1_000,
+async function startRun(): Promise<Run> {
+  const request = buildRunRequest(
+    COMPANY_WALLET,
+    mockTokenAccount(COMPANY_WALLET),
+    "AAAAAAAAAAAAAAAAAAAAAA==",
+    roster,
   )
-  beginAttempt(evidence, { idempotency_key: attempt.key, fingerprint }, 1_000)
-  const created = await api.runs.create(
-    buildRunRequest(COMPANY_WALLET, roster, attempt.key),
-  )
-  attemptCreated(evidence, fingerprint, created.run_id)
-  return created
+  return api.runs.create({
+    ...request,
+    wallet_signature: "5SigMockSignature1111111111111111111111111111",
+  })
 }
 
-describe("replaying the create after a reload", () => {
-  it("sends the saved key for the same list, and the service answers with the run it already made", async () => {
+describe("a run whose create answer was lost", () => {
+  it("keeps nothing and blocks nobody: its transactions were never signed, so they cannot land", async () => {
     const storage = fakeStorage()
-    const first = await startRun(
-      storage,
-      "d0000000-0000-4000-8000-000000000001",
-    )
-
-    // A reload: nothing in memory, a new random key on offer, the saved one wins.
+    const lost = await startRun()
     const evidence = runEvidence(viewer, storage)
-    const { key, saved } = attemptFor(
-      evidence,
-      null,
-      fingerprint,
-      () => "d0000000-0000-4000-8000-0000000000ff",
-      2_000,
-    )
-    expect(key.key).toBe("d0000000-0000-4000-8000-000000000001")
-    expect(saved?.run_id).toBe(first.run_id)
+    expect(evidence.payments.read()).toEqual([])
+    expect(runBlocker(evidence, roster)).toBeNull()
 
-    const again = await api.runs.create(
-      buildRunRequest(COMPANY_WALLET, [...roster].reverse(), key.key),
+    // A new run for the same people is a second run, and only that one pays anyone.
+    scenarios.set("instant")
+    const again = await startRun()
+    expect(again.run_id).not.toBe(lost.run_id)
+    await paySequence(
+      {
+        runId: again.run_id,
+        sign: realSign(),
+        api: runApi,
+        events: screenEvents().events,
+      },
+      signablesOf(again),
     )
-    expect(again.run_id).toBe(first.run_id)
-    expect(again.payments.map((p) => p.payment_id)).toEqual(
-      first.payments.map((p) => p.payment_id),
-    )
-    expect(db.runs.size).toBe(1)
-  })
-
-  it("makes a new key for a changed list, which is a different run", async () => {
-    const storage = fakeStorage()
-    await startRun(storage, "d0000000-0000-4000-8000-000000000001")
-    const evidence = runEvidence(viewer, storage)
-    const { key } = attemptFor(
-      evidence,
-      null,
-      fingerprintOf(COMPANY_WALLET, roster.slice(1)),
-      () => "d0000000-0000-4000-8000-0000000000ff",
-      2_000,
-    )
-    expect(key.key).toBe("d0000000-0000-4000-8000-0000000000ff")
-  })
-
-  it("does not find another viewer's attempt", async () => {
-    const storage = fakeStorage()
-    await startRun(storage, "d0000000-0000-4000-8000-000000000001")
-    const other = runEvidence(
-      { company: "Solaris", email: "someone.else@solaris.example" },
-      storage,
-    )
-    expect(savedAttempt(other, fingerprint, 2_000)).toBeNull()
+    expect(db.payments.filter((p) => p.runId === lost.run_id)).toEqual([])
+    expect(db.payments.filter((p) => p.runId === again.run_id)).toHaveLength(3)
   })
 })
 
 describe("a run left while its first payment was being confirmed", () => {
   // Page one: pays the first payment, and is closed once the network has it.
   async function pageOne(storage: SubmissionStorage) {
-    const created = await startRun(
-      storage,
-      "d0000000-0000-4000-8000-000000000001",
-    )
+    const created = await startRun()
     const stop = new AbortController()
     const evidence = runEvidence(viewer, storage)
     const { events } = screenEvents()
@@ -212,10 +174,16 @@ describe("a run left while its first payment was being confirmed", () => {
         runId: created.run_id,
         sign: realSign({ stopAfterSubmit: stop }),
         api: runApi,
-        events: recordEvidence(events, evidence, created.run_id, () => 2_000),
+        events: recordEvidence(
+          events,
+          evidence,
+          created.run_id,
+          personOf,
+          () => 2_000,
+        ),
         signal: stop.signal,
       },
-      created.payments,
+      signablesOf(created),
     )
     return created
   }
@@ -228,7 +196,8 @@ describe("a run left while its first payment was being confirmed", () => {
     const kept = runEvidence(viewer, storage).payments.read()
     expect(kept).toEqual([
       expect.objectContaining({
-        payment_id: created.payments[0].payment_id,
+        position: 0,
+        attempt: 0,
         person_id: bruno.id,
         run_id: created.run_id,
         request_id: created.payments[0].request_id,
@@ -243,7 +212,7 @@ describe("a run left while its first payment was being confirmed", () => {
     expect(db.company.available).toBe(84_000_000_000n)
   })
 
-  it("confirms it with the saved signature on the next page, pays nobody twice, and clears the attempt", async () => {
+  it("confirms it with the saved signature on the next page, pays nobody twice, and clears the record", async () => {
     scenarios.set("instant")
     const storage = fakeStorage()
     const created = await pageOne(storage)
@@ -252,7 +221,8 @@ describe("a run left while its first payment was being confirmed", () => {
     const evidence = runEvidence(viewer, storage)
     const { events, local, set } = screenEvents()
     set(hydrateLocal(evidence.payments.read()))
-    expect(local()[created.payments[0].payment_id].status).toBe("waiting")
+    const first = paymentKey(created.run_id, 0)
+    expect(local()[first].status).toBe("waiting")
 
     let signed = 0
     const sign: RunContext["sign"] = async (...args) => {
@@ -265,30 +235,26 @@ describe("a run left while its first payment was being confirmed", () => {
           runId: record.run_id,
           sign,
           api: runApi,
-          events: recordEvidence(events, evidence, record.run_id),
+          events: recordEvidence(events, evidence, record.run_id, personOf),
         },
         record,
       )
     }
     expect(signed).toBe(0)
-    expect(local()[created.payments[0].payment_id].status).toBe("confirmed")
+    expect(local()[first].status).toBe("confirmed")
     // One payment landed, once.
     expect(db.company.available).toBe(84_000_000_000n - 4_200_000_000n)
     expect(evidence.payments.read()).toEqual([])
-    expect(savedAttempt(evidence, fingerprint, 3_000)).toBeNull()
 
-    // The service agrees, and the two never sent are plainly pending, not paid.
+    // The service agrees, and the two never sent read as not sent: not paid.
     const run = await api.runs.get(created.run_id)
-    const rows = created.payments.map((payment) =>
-      mergeRow(
-        local()[payment.payment_id],
-        run.payments.find((p) => p.payment_id === payment.payment_id),
-      ),
+    const rows = run.payments.map((payment) =>
+      mergeRow(local()[paymentKey(created.run_id, payment.position)], payment),
     )
     expect(rows.map((row) => row.status)).toEqual([
       "confirmed",
-      "pending",
-      "pending",
+      "not-sent",
+      "not-sent",
     ])
   })
 
@@ -308,7 +274,7 @@ describe("a run left while its first payment was being confirmed", () => {
         runId: record.run_id,
         sign: realSign(),
         api: runApi,
-        events: recordEvidence(events, evidence, record.run_id),
+        events: recordEvidence(events, evidence, record.run_id, personOf),
       },
       record,
       // A clock that moves only when the check waits: its 90 seconds run instantly.
@@ -318,7 +284,7 @@ describe("a run left while its first payment was being confirmed", () => {
         now: () => time,
       },
     )
-    expect(local()[record.payment_id]).toMatchObject({
+    expect(local()[paymentKey(record.run_id, record.position)]).toMatchObject({
       status: "waiting",
       stalled: true,
       signature: record.signature,
@@ -333,11 +299,13 @@ describe("a run left while its first payment was being confirmed", () => {
         runId: record.run_id,
         sign: realSign(),
         api: runApi,
-        events: recordEvidence(events, evidence, record.run_id),
+        events: recordEvidence(events, evidence, record.run_id, personOf),
       },
       record,
     )
-    expect(local()[record.payment_id].status).toBe("confirmed")
+    expect(local()[paymentKey(record.run_id, record.position)].status).toBe(
+      "confirmed",
+    )
     expect(evidence.payments.read()).toEqual([])
   })
 
@@ -356,13 +324,15 @@ describe("a run left while its first payment was being confirmed", () => {
         runId: record.run_id,
         sign: realSign(),
         api: runApi,
-        events: recordEvidence(events, evidence, record.run_id),
+        events: recordEvidence(events, evidence, record.run_id, personOf),
       },
       record,
     )
-    expect(local()[record.payment_id].status).toBe("failed")
+    expect(local()[paymentKey(record.run_id, record.position)].status).toBe(
+      "failed",
+    )
     expect(evidence.payments.read()).toEqual([])
     expect(unsettledPeople(evidence.payments.read()).size).toBe(0)
-    expect(created.payments[0].payment_id).toBe(record.payment_id)
+    expect(record).toMatchObject({ run_id: created.run_id, position: 0 })
   })
 })

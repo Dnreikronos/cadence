@@ -288,14 +288,14 @@ describe("clearSettledEvidence", () => {
       )
       tab.setItem(`cadence:submissions:withdraw:${id}:unreadable`, "[1]")
       tab.setItem(
-        `cadence:submissions:payroll-payment:${id}`,
-        JSON.stringify([{ payment_id: "p1", run_id: "open", at: 5 }]),
+        `cadence:submissions:payroll-sent:${id}`,
+        JSON.stringify([{ run_id: "open", position: 0, at: 5 }]),
       )
+      // Attempts of the shape before #107's runs, whatever their run: a run that was
+      // never signed cannot land, so none of them is in doubt.
       tab.setItem(
         `cadence:submissions:payroll-attempt:${id}`,
         JSON.stringify([
-          // Its run has a payment in doubt, one has no run yet (the answer may be lost),
-          // and one is settled.
           { fingerprint: "a", run_id: "open", created_at: 5 },
           { fingerprint: "b", created_at: 5 },
           { fingerprint: "c", run_id: "done", created_at: 5 },
@@ -318,7 +318,7 @@ describe("clearSettledEvidence", () => {
       `cadence:submission:wrap:${id}`,
       `cadence:submission:apply-pending:${id}`,
       `cadence:submissions:withdraw:${id}`,
-      `cadence:submissions:payroll-payment:${id}`,
+      `cadence:submissions:payroll-sent:${id}`,
     ]) {
       expect(shared.items.has(key), key).toBe(true)
     }
@@ -328,21 +328,18 @@ describe("clearSettledEvidence", () => {
     ])
   })
 
-  it("removes only what is settled: attempts with nothing in doubt", () => {
+  it("removes only what is settled: the payroll attempts of the old shape", () => {
     const shared = browserProfile()
     const tab = seed(shared)
 
     clearSettledEvidence(bruno, tab)
 
-    const id = scope(bruno)
     expect(
-      JSON.parse(
-        shared.items.get(`cadence:submissions:payroll-attempt:${id}`)!,
-      ),
-    ).toEqual([
-      { fingerprint: "a", run_id: "open", created_at: 5 },
-      { fingerprint: "b", created_at: 5 },
-    ])
+      shared.items.has(`cadence:submissions:payroll-attempt:${scope(bruno)}`),
+    ).toBe(false)
+    expect(
+      shared.items.has(`cadence:submissions:payroll-attempt:${scope(ana)}`),
+    ).toBe(true)
   })
 
   it("leaves unreadable entries alone: only the release clears them, so the list stays held", () => {

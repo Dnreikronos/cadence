@@ -512,22 +512,14 @@ function rewrite(
   return false
 }
 
-const asList = (raw: string): unknown[] | null => {
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : null
-  } catch {
-    return null
-  }
-}
-
 // What signing out may remove of one viewer's records: only what is settled. A record of
 // something that may have been sent stays, so the same person signing back in still finds
 // it held (the keys carry the viewer, so no one else reads it). Settled is only a payroll
-// attempt whose run has no payment left in doubt. The set-aside unreadable entries are NOT
-// settled: nothing says what they were, so they keep the whole list held until the person
-// releases them (behind the two-minute gate and the warning), and only that release clears
-// them. Nobody else's are touched.
+// attempt list of the shape before #107's runs: runs no longer keep attempts (a run that
+// was never signed cannot land), so those lists hold nothing to look into. The set-aside
+// unreadable entries are NOT settled: nothing says what they were, so they keep the whole
+// list held until the person releases them (behind the two-minute gate and the warning),
+// and only that release clears them. Nobody else's are touched.
 export function clearSettledEvidence(
   viewer: Viewer,
   storage: SubmissionStorage | null = defaultStorage(),
@@ -538,35 +530,11 @@ export function clearSettledEvidence(
     ...legacyViewerScopeIds(viewer),
   ])
   try {
-    const mine = storage.keys().filter((key) => {
+    for (const key of storage.keys()) {
       const scope = evidenceKey.exec(key)?.[1]
-      return scope !== undefined && scopes.has(scope)
-    })
-    // The runs that still have a payment in doubt.
-    const open = new Set<unknown>()
-    for (const key of mine) {
-      if (!key.includes(":payroll-payment:") || key.endsWith(":unreadable")) {
-        continue
-      }
-      const list = asList(storage.getItem(key) ?? "")
-      for (const entry of list ?? []) {
-        if (typeof entry === "object" && entry !== null) {
-          open.add((entry as Record<string, unknown>).run_id)
-        }
-      }
-    }
-    for (const key of mine) {
+      if (scope === undefined || !scopes.has(scope)) continue
       if (key.includes(":payroll-attempt:") && !key.endsWith(":unreadable")) {
-        rewrite(storage, key, (raw) => {
-          const list = asList(raw)
-          if (!list) return undefined
-          const kept = list.filter((entry) => {
-            const run = (entry as Record<string, unknown> | null)?.run_id
-            return run === undefined || open.has(run)
-          })
-          if (kept.length === list.length) return undefined
-          return kept.length === 0 ? null : JSON.stringify(kept)
-        })
+        rewrite(storage, key, () => null)
       }
     }
   } catch {

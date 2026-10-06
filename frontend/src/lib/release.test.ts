@@ -258,17 +258,16 @@ describe("a release made on a stale view", () => {
     const shared = browserProfile()
     const frozen = runEvidence(ana, shared.tab())
     const active = runEvidence(ana, shared.tab())
-    const prepared = (n: number) =>
-      ({
-        payment_id: `p${n}`,
-        person_id: "person-1",
-        request_id: String(n).repeat(64),
-        last_valid_block_height: n,
-      }) as never
-    paymentSending(active, "run", prepared(1), 1_000)
+    const prepared = (n: number) => ({
+      position: n,
+      attempt: 0,
+      request_id: String(n).repeat(64),
+      last_valid_block_height: n,
+    })
+    paymentSending(active, "run", prepared(1), "person-1", 1_000)
     const seen = frozen.payments.read().slice()
     active.payments.remove(() => true)
-    paymentSending(active, "run", prepared(2), NOW - 473)
+    paymentSending(active, "run", prepared(2), "person-1", NOW - 473)
 
     const outcome = await releasePersonChecked({
       evidence: frozen,
@@ -280,21 +279,22 @@ describe("a release made on a stale view", () => {
 
     expect(outcome).toBe("changed")
     expect(active.payments.read()).toHaveLength(1)
-    expect(active.payments.read()[0]).toMatchObject({ payment_id: "p2" })
+    expect(active.payments.read()[0]).toMatchObject({ position: 2 })
   })
 
-  it("releases a person's payments when they are what was seen, and settles the attempt", async () => {
+  it("releases a person's payments when they are what was seen", async () => {
     const shared = browserProfile()
     const evidence = runEvidence(ana, shared.tab())
     paymentSending(
       evidence,
       "run",
       {
-        payment_id: "p1",
-        person_id: "person-1",
+        position: 0,
+        attempt: 0,
         request_id: "1".repeat(64),
         last_valid_block_height: 1,
-      } as never,
+      },
+      "person-1",
       1_000,
     )
     const seen = evidence.payments.read().slice()
