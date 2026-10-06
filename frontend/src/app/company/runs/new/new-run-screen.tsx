@@ -9,9 +9,6 @@ import { EmptyState } from "@/components/ui/empty-state"
 import { ApiErrorState } from "@/components/ui/api-error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { WhoCanSee } from "@/components/ui/who-can-see"
-import type { RunCreated } from "@/lib/api/schemas"
-import { isApiError } from "@/lib/api/errors"
-import { randomUuid } from "@/lib/api/uuid"
 import { unitsToUsd } from "@/lib/money"
 import { refetchFailed } from "@/lib/queries/refetch-failed"
 import { useRestoreFocus } from "@/lib/restore-focus"
@@ -27,12 +24,10 @@ import { useSendInvite } from "@/lib/queries/people"
 import { hasActiveAuditor } from "@/lib/people/view"
 import { runMessage } from "@/lib/runs/messages"
 import { tooManyRecent, tooManyRecentMessage } from "@/lib/runs/recent"
-import { nameLookup } from "@/lib/runs/people"
+import type { CreatedRun } from "@/lib/runs/create"
 import {
   allChoices,
-  buildRunRequest,
   createdMatches,
-  fingerprintOf,
   formatExact,
   holdChecking,
   isTicked,
@@ -44,7 +39,6 @@ import {
   selectRecipients,
   shortfall,
   splitRoster,
-  type AttemptKey,
   type Choices,
   type PayrollPerson,
 } from "@/lib/runs/plan"
@@ -55,19 +49,14 @@ import { releaseMessage, releaseUnreadableUnderLock } from "@/lib/release"
 import { storageBlockedMessage } from "@/lib/storage-guard"
 import { useStorageGate } from "@/lib/use-storage-gate"
 import {
-  attemptCreated,
-  attemptFor,
-  beginAttempt,
   canReleasePayment,
-  dropAttempt,
   releasePersonChecked,
   releaseWarning,
   runEvidenceFor,
-  runSeenBefore,
-  settleAttempts,
   runBlocker,
   unreadableMessage,
 } from "@/lib/runs/evidence"
+import { paymentKey } from "@/lib/runs/executor"
 import { useLeaveGuard } from "@/lib/runs/use-leave-guard"
 import {
   runLockName,
@@ -100,8 +89,8 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
   const invite = useSendInvite()
   const auditors = useAuditors()
   const signer = useRunSigner(viewer)
-  // What an earlier page left behind: the key of a run attempt, and the payments that may
-  // have been sent. Kept per viewer in the browser's storage, shared by its tabs.
+  // What an earlier page left behind: the payments that may have been sent. Kept per
+  // viewer in the browser's storage, shared by its tabs.
   const evidence = runEvidenceFor(viewer)
   const sentPayments = useSentPayments(viewer)
   const unsettled = useUnsettledPeople(viewer)
@@ -122,10 +111,8 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
   const [invited, setInvited] = useState<ReadonlySet<string>>(new Set())
   const [confirming, setConfirming] = useState(false)
   const [review, setReview] = useState<Review | null>(null)
-  const [created, setCreated] = useState<RunCreated | null>(null)
+  const [created, setCreated] = useState<CreatedRun | null>(null)
   const [createError, setCreateError] = useState<string | null>(null)
-  // One idempotency key per attempt, kept across clicks and retries of the same list.
-  const attempt = useRef<AttemptKey | null>(null)
   // Taken before the request starts: a double click is two handlers in a row, and neither
   // `create.isPending` nor state has changed yet when the second one runs.
   const [latch] = useState(createLatch)
@@ -139,8 +126,6 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
   }, [people.data, unsettled])
   const recentlyPaid = recent.data ?? nobody
 
-  // An attempt whose run has nothing left to look into has nothing to keep.
-  useEffect(() => settleAttempts(evidence), [evidence, sentPayments])
   const recipients = useMemo(
     () => selectRecipients(roster.payable, recentlyPaid, choices),
     [roster.payable, recentlyPaid, choices],
@@ -166,17 +151,17 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
           tabIndex={-1}
           className="text-lead font-medium text-ink outline-none"
         >
-          Payments to {peopleCount(created.payments.length)}
+          Payments to {peopleCount(created.run.payments.length)}
         </h2>
         <RunProgress
-          runId={created.run_id}
-          created={created}
+          runId={created.run.run_id}
+          created={created.run}
           signer={signer}
-          nameOf={nameLookup(people.data, !people.isPending)}
+          people={created.recipients}
         />
         <div className="flex flex-wrap gap-2">
           <Link
-            href={`/company/runs/${created.run_id}`}
+            href={`/company/runs/${created.run.run_id}`}
             className={buttonVariants({ variant: "secondary" })}
           >
             Open this run
@@ -191,7 +176,6 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
             type="button"
             disabled={signer.busy}
             onClick={() => {
-              attempt.current = null
               create.reset()
               setCreated(null)
               setChoices({})
@@ -273,25 +257,7 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
       latch.release()
       setStarting(false)
     }
-    const fingerprint = fingerprintOf(wallet.address, review.recipients)
-    // The same list as an attempt saved before a reload (or whose answer was lost) keeps
-    // its key: the service answers with the run it already made, not a second one.
-    const { key, saved } = attemptFor(
-      evidence,
-      attempt.current,
-      fingerprint,
-      randomUuid,
-      Date.now(),
-    )
-    attempt.current = key
-    let request
-    try {
-      request = buildRunRequest(wallet.address, review.recipients, key.key)
-    } catch {
-      setCreateError("This run isn't valid. Check who is ticked and try again.")
-      done()
-      return
-    }
+    const recipients = review.recipients
     // One tab at a time: the run lock is held from here until the run has been signed.
     void acquireFlowLock(runLockName(viewer)).then((got) => {
       if (got.status === "busy") {
@@ -303,51 +269,44 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
       // Another tab may have sent a payment to someone in this list, or left saved state
       // this tab cannot read, while the lock was being asked for: look at what is saved
       // now, with the lock held.
-      const blocker = runBlocker(evidence, review.recipients)
+      const blocker = runBlocker(evidence, recipients)
       if (blocker) {
         lease.release()
         setCreateError(blocker)
         done()
         return
       }
-      // Written before the request goes out, so a reload during it still knows the key.
-      beginAttempt(
-        evidence,
-        { idempotency_key: key.key, fingerprint },
-        Date.now(),
-      )
       setCreateError(null)
-      create.mutate(request, {
-        onSettled: done,
-        onSuccess: (run) => {
-          // Sign only what was asked for: the same people, once each.
-          if (!createdMatches(request, run)) {
-            lease.release()
-            setCreateError(
-              "Cadence prepared payments for different people than you chose, so nothing was signed. Check your payments before trying again.",
+      // Creating a run moves no money: until its payments are signed below, none of them
+      // can land, so a lost answer needs no record.
+      create.mutate(
+        { signer: wallet.signer, recipients },
+        {
+          onSettled: done,
+          onSuccess: (made) => {
+            // Sign only what was asked for: our wallet, the same accounts, once each.
+            if (!createdMatches(made.request, made.run)) {
+              lease.release()
+              setCreateError(
+                "Cadence prepared payments for different people than you chose, so nothing was signed. Check your payments before trying again.",
+              )
+              return
+            }
+            restore.originRemoved()
+            setCreated(made)
+            setConfirming(false)
+            void signer.start(
+              made.run,
+              (position) => made.recipients[position]?.id ?? "",
+              lease,
             )
-            return
-          }
-          // A run this browser had already been given, or one with payments that may have
-          // been sent, is shown and not signed again: its transactions are not for signing
-          // a second time. Payments never sent are not paid; a new run is for them.
-          const seen = runSeenBefore(evidence, saved, run.run_id)
-          attemptCreated(evidence, fingerprint, run.run_id)
-          restore.originRemoved()
-          setCreated(run)
-          setConfirming(false)
-          if (seen) lease.release()
-          else void signer.start(run, lease)
+          },
+          onError: (error) => {
+            lease.release()
+            setCreateError(runMessage(error))
+          },
         },
-        onError: (error) => {
-          lease.release()
-          // Refused outright: no run exists for the key. Anything else may have made one.
-          if (isApiError(error) && !error.isRetryable) {
-            dropAttempt(evidence, fingerprint)
-          }
-          setCreateError(runMessage(error))
-        },
-      })
+      )
     })
   }
 
@@ -449,7 +408,9 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
           canRelease={(payment) =>
             canReleasePayment(payment, {
               now,
-              lookedUp: !signer.checking.has(payment.payment_id),
+              lookedUp: !signer.checking.has(
+                paymentKey(payment.run_id, payment.position),
+              ),
             })
           }
           onRelease={async (personId) =>

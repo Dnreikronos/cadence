@@ -11,7 +11,9 @@ import {
 } from "@/lib/api"
 import { COMPANY_WALLET, ME_WALLET, seedPeople } from "@/lib/api/mocks/db"
 import { mockSigner, mockSubmit } from "@/lib/api/mocks/signer"
-import { randomUuid } from "@/lib/api/uuid"
+import { mockTokenAccount } from "@/lib/api/mocks/chain"
+import type { RunConfirmRequest } from "@/lib/api/schemas"
+import { confirmPosition, signablesOf } from "@/lib/runs/executor"
 import {
   scenarioNames,
   scenarios,
@@ -93,28 +95,33 @@ export function ApiPlayground() {
       const people = seedPeople.filter((p) => p.activated).slice(0, 3)
       const created = await api.runs.create({
         company_wallet: COMPANY_WALLET,
+        sender: mockTokenAccount(COMPANY_WALLET),
+        aes_key: "AAAAAAAAAAAAAAAAAAAAAA==",
+        wallet_signature: "5SigMockSignature1111111111111111111111111111",
         payments: people.map((p) => ({
-          person_id: p.id,
+          recipient: mockTokenAccount(p.id),
           amount: "1000000000",
         })),
-        idempotency_key: randomUuid(),
       })
-      for (const payment of created.payments) {
+      const runApi = {
+        confirm: (runId: string, item: RunConfirmRequest["payments"][number]) =>
+          api.runs.confirm(runId, { payments: [item] }),
+        retry: api.runs.retry,
+      }
+      // In position order, stopping at the first that does not finalize.
+      for (const payment of signablesOf(created)) {
         try {
           await signAndConfirm(payment, {
             signer: mockSigner(COMPANY_WALLET),
             submit: mockSubmit,
             confirm: (signature) =>
-              api.runs.confirmPayment(
-                created.run_id,
-                payment.payment_id,
-                signature,
-              ),
+              confirmPosition(runApi, created.run_id, payment, signature),
           })
         } catch (error) {
           write(
-            `  payment ${payment.payment_id.slice(0, 4)} failed: ${isApiError(error) ? error.code : "error"}`,
+            `  payment ${payment.position} failed: ${isApiError(error) ? error.code : "error"}`,
           )
+          break
         }
       }
       const status = await api.runs.get(created.run_id)

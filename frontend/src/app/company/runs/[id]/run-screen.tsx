@@ -8,10 +8,8 @@ import { ApiErrorState } from "@/components/ui/api-error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { isApiError } from "@/lib/api/errors"
 import type { ViewerScope } from "@/lib/queries/keys"
-import { usePeople } from "@/lib/queries/people"
-import { useRun } from "@/lib/queries/payroll"
+import { usePayrollPeople, useRun } from "@/lib/queries/payroll"
 import { runMessage } from "@/lib/runs/messages"
-import { nameLookup } from "@/lib/runs/people"
 import { holdsUnconfirmed } from "@/lib/runs/progress"
 import { useLeaveGuard } from "@/lib/runs/use-leave-guard"
 import { useRunSigner } from "@/lib/runs/use-run-signer"
@@ -41,7 +39,7 @@ export function RunScreen({
   viewer: ViewerScope
 }) {
   const run = useRun(runId)
-  const people = usePeople()
+  const people = usePayrollPeople()
   const signer = useRunSigner(viewer)
   useLeaveGuard(signer.busy || holdsUnconfirmed(signer.local))
 
@@ -71,19 +69,11 @@ export function RunScreen({
 
   return (
     <div className="max-w-3xl space-y-4">
-      <p className="text-ui text-ink-muted">
-        Started{" "}
-        <time dateTime={data.created_at}>
-          {new Date(data.created_at).toLocaleString("en-US", {
-            dateStyle: "medium",
-            timeStyle: "short",
-          })}
-        </time>
-      </p>
       <RunProgress
         runId={runId}
         signer={signer}
-        nameOf={nameLookup(people.data?.people, !people.isPending)}
+        // A list that failed names no one, rather than showing placeholders forever.
+        people={people.data ?? (people.isError ? [] : undefined)}
       />
       <div className="flex flex-wrap gap-2">
         <Link

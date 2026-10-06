@@ -13,6 +13,7 @@ import { payLabel, type PayrollPerson } from "@/lib/runs/plan"
 export function ConfirmRunDialog({
   open,
   onOpenChange,
+  title,
   recipients,
   repaid,
   total,
@@ -23,6 +24,8 @@ export function ConfirmRunDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  // A retry says so; a new run says who it pays and how much.
+  title?: string
   recipients: readonly PayrollPerson[]
   // Ticked although they were paid in the last 24 hours.
   repaid: readonly PayrollPerson[]
@@ -37,7 +40,7 @@ export function ConfirmRunDialog({
       open={open}
       onOpenChange={onOpenChange}
       finalFocus={finalFocus}
-      title={payLabel(recipients.length, total)}
+      title={title ?? payLabel(recipients.length, total)}
       description="Payments are sent encrypted on-chain, so the public can't read the amounts. You, each recipient, any auditor you invited and Cadence can. A payment that has to go as an ordinary transfer is marked Transparent, and its amount is public."
     >
       <ul className="max-h-56 divide-y divide-line overflow-y-auto rounded-lg border border-line">
