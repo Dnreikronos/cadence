@@ -41,21 +41,36 @@ export function connectSources({
   ]
 }
 
-// Stage 1: a static header. The inline allowances are what Next's own bootstrap scripts
-// and the styles of the component libraries need. A nonce-based stage 2 (nonce plus
-// `strict-dynamic`, no `unsafe-inline`) would drop them. It costs little here: the app
-// routes and `/` already render per request (the viewer comes from cookies, and the
-// responses are no-store), so a nonce does not take static pages away. It is recommended
-// before the wallet lands and not done here (docs/plans/2026-10-04-frontend-completion.md,
-// "Before going live"). No `unsafe-eval`: zod is told not to probe for it
-// (src/lib/zod-config.ts).
-export function contentSecurityPolicy(
-  connect: string[],
-  frameAncestors: "'none'" | "'self'",
-) {
+// The policy is minted per request by the middleware (src/middleware.ts): Next reads the
+// nonce from the request's own `content-security-policy` header and stamps it on its
+// bootstrap and flight scripts, and `strict-dynamic` passes the trust on to the chunks
+// they load. So no inline script runs without the nonce, and none from another origin
+// at all. Every page renders per request (the root layout awaits `connection()`): a
+// prerendered page would carry no nonce and never hydrate.
+//
+// Styles keep `unsafe-inline`: React's `style` attributes, sonner's toasts and the
+// landing's motion cannot take a nonce, and a style runs no script.
+//
+// Trusted Types: script sinks (`innerHTML`, `eval`, a script URL) take only typed values,
+// and the only policy allowed to make them is the one Next's chunk loader creates. A
+// mock-mode build also allows a `default` policy: MSW registers its service worker with
+// a plain string, and src/lib/api/mocks/trusted-types.ts lets that one URL through.
+//
+// No `unsafe-eval`: zod is told not to probe for it (src/lib/zod-config.ts).
+export function contentSecurityPolicy({
+  connect,
+  frameAncestors,
+  mockWorker = false,
+  nonce,
+}: {
+  connect: string[]
+  frameAncestors: "'none'" | "'self'"
+  mockWorker?: boolean
+  nonce: string
+}) {
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
@@ -65,16 +80,45 @@ export function contentSecurityPolicy(
     "base-uri 'self'",
     "form-action 'self'",
     `frame-ancestors ${frameAncestors}`,
+    "require-trusted-types-for 'script'",
+    `trusted-types nextjs#bundler${mockWorker ? " default" : ""}`,
   ].join("; ")
 }
 
+// 16 random bytes, base64: a fresh nonce for one response.
+export function mintNonce() {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return btoa(String.fromCharCode(...bytes))
+}
+
+// The policy for one response. Nothing in the app frames itself or is meant to be framed
+// (a sign-in page in an iframe is a clickjacking target), except that the /dev pages may
+// frame each other: /dev/components previews the shell in iframes of its own origin.
+// `next dev` needs `eval` for its refresh runtime and a websocket for it, which a policy
+// cannot allow without weakening it: in development only framing is restricted.
+export function policyFor({
+  connect,
+  dev,
+  development,
+  mockWorker,
+  nonce,
+}: {
+  // `connect-src`, from connectSources.
+  connect: string[]
+  // Whether the path is a /dev page (isDevPath).
+  dev: boolean
+  development: boolean
+  // Whether the build runs the API mock (MSW) in the browser.
+  mockWorker?: boolean
+  nonce: string
+}) {
+  const frameAncestors = dev ? "'self'" : "'none'"
+  return development
+    ? `frame-ancestors ${frameAncestors}`
+    : contentSecurityPolicy({ connect, frameAncestors, mockWorker, nonce })
+}
+
 export type HeaderOptions = {
-  // `connect-src` entries beyond 'self' (see connectSources). Without them the policy
-  // only allows the app's own origin.
-  connect?: string[]
-  // `next dev` needs `eval` for its refresh runtime and a websocket for it, which a policy
-  // cannot allow without weakening it: in development only framing is restricted.
-  development?: boolean
   // HSTS is sent by production builds only: a dev or preview host on plain http must not
   // pin a browser to https. A year, without includeSubDomains, for the first deploy: a
   // mistake costs a year of https-only on this host rather than two on every subdomain
@@ -83,25 +127,16 @@ export type HeaderOptions = {
   production?: boolean
 }
 
-// Nothing in the app frames itself or is meant to be framed (a sign-in page in an iframe
-// is a clickjacking target), so framing is refused everywhere, except that the /dev
-// pages may frame each other: /dev/components previews the shell in iframes of its own
-// origin. The rule for them comes after the global one, so it wins for the same header.
-export function headerRules({
-  connect = ["'self'"],
-  development = false,
-  production = false,
-}: HeaderOptions = {}) {
-  const policy = (frameAncestors: "'none'" | "'self'") =>
-    development
-      ? `frame-ancestors ${frameAncestors}`
-      : contentSecurityPolicy(connect, frameAncestors)
+// The static headers. The policy is not among them: it carries a per-request nonce, so
+// the middleware sends it (policyFor), and two policies would both be enforced.
+// X-Frame-Options is for older browsers, which ignore frame-ancestors; it follows the
+// same rule as policyFor. The /dev rule comes after the global one, so it wins for the
+// same header.
+export function headerRules({ production = false }: HeaderOptions = {}) {
   return [
     {
       source: "/:path*",
       headers: [
-        { key: "Content-Security-Policy", value: policy("'none'") },
-        // Older browsers ignore frame-ancestors.
         { key: "X-Frame-Options", value: "DENY" },
         // Not "no-referrer": Chrome then sends `Origin: null` with a form POST, which the
         // confirm page's verify route refuses.
@@ -123,10 +158,7 @@ export function headerRules({
     },
     {
       source: "/dev/:path*",
-      headers: [
-        { key: "Content-Security-Policy", value: policy("'self'") },
-        { key: "X-Frame-Options", value: "SAMEORIGIN" },
-      ],
+      headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }],
     },
     {
       // The page behind the emailed link carries a one-time token in its URL and form.
