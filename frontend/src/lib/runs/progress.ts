@@ -1,10 +1,8 @@
-import {
-  isKnownRunPaymentStatus,
-  knownRunPaymentStatus,
-} from "@/lib/api/schemas"
+import { isKnownRunPaymentStatus } from "@/lib/api/schemas"
 import {
   expiredMessage,
   failureCodeMessage,
+  notSentMessage,
   unrecognizedMessage,
   type Failure,
 } from "./messages"
@@ -13,10 +11,14 @@ import {
 // browser is doing to it laid over the top. `signing`, `waiting` and `unknown` exist
 // only here; `unknown` is a payment that may have been sent with no signature to ask about.
 // `cancelled` is a signature the person turned down: nothing was sent, and the prepared
-// transaction is still held, so it is signed again, never retried (a retry prepares a
-// new one, which the service allows only for a payment that failed or expired).
+// transaction is still held, so it is signed again, never retried (the service refuses a
+// retry while a prepared transaction can still land).
+// `pending` is a prepared payment this page holds and has not signed yet; `not-sent` one
+// it does not hold and never sent: its transaction cannot land from here, so it was not
+// paid in this run.
 export type RowStatus =
   | "pending"
+  | "not-sent"
   | "signing"
   | "waiting"
   | "unknown"
@@ -40,6 +42,8 @@ export type LocalRow = {
 export type LocalRows = Record<string, LocalRow>
 
 export type LocalAction =
+  // A retry prepared the payment again: what this page saw of the old attempt is over.
+  | { type: "reset"; id: string }
   | { type: "signing"; id: string }
   | { type: "waiting"; id: string }
   | { type: "submitted"; id: string; signature: string }
@@ -49,6 +53,11 @@ export type LocalAction =
 export function localReducer(state: LocalRows, action: LocalAction): LocalRows {
   const current = state[action.id]
   switch (action.type) {
+    case "reset": {
+      const rest = { ...state }
+      delete rest[action.id]
+      return rest
+    }
     case "signing":
       return { ...state, [action.id]: { status: "signing" } }
     case "waiting":
@@ -110,8 +119,8 @@ export function localReducer(state: LocalRows, action: LocalAction): LocalRows {
   }
 }
 
-// The status is whatever the service sent: `mergeRow` reads an unknown one as pending.
-export type ServerRow = { status: string; failure: string | null }
+// The status is whatever the service sent, and its stable error code.
+export type ServerRow = { status: string; error: string | null }
 
 export type Row = {
   status: RowStatus
@@ -121,78 +130,61 @@ export type Row = {
   signature: string | null
 }
 
-// One status per payment. The server saying `confirmed` ends it, whatever this browser
+// One status per payment. The server saying `finalized` ends it, whatever this browser
 // last saw. Otherwise work in flight here, and a payment that may have been sent, are
 // the freshest truth and stay put until it is confirmed or the network rejects it. A
 // confirmation never un-confirms. Last, a final answer from the server beats what this
-// browser saw (a payment that fails on the network is later reported `expired`).
-// `signed` is undefined in the contract, so it displays as pending.
-export function mergeRow(local?: LocalRow, serverRow?: ServerRow): Row {
-  const server = serverRow && {
-    ...serverRow,
-    status: knownRunPaymentStatus(serverRow.status),
-  }
-  const unrecognized = !!serverRow && !isKnownRunPaymentStatus(serverRow.status)
+// browser saw. `held` is whether this page still holds the payment's transaction.
+export function mergeRow(
+  local?: LocalRow,
+  server?: ServerRow,
+  held = false,
+): Row {
+  const known = server && isKnownRunPaymentStatus(server.status)
+  const unrecognized = !!server && !known
+  const status = known ? server.status : undefined
   const signature = local?.signature ?? null
-  const done: Row = {
-    status: "confirmed",
-    message: null,
-    stalled: false,
-    signature,
+  const row = (
+    rowStatus: RowStatus,
+    message: string | null = null,
+    stalled = false,
+  ): Row => ({ status: rowStatus, message, stalled, signature })
+  if (status === "finalized" || local?.status === "confirmed") {
+    return row("confirmed")
   }
-  if (server?.status === "confirmed" || local?.status === "confirmed") {
-    return done
-  }
-  // A final answer from the server beats a cancelled signature too: the payment is
-  // then settled, and the normal retry path applies.
-  const settledByServer =
-    server?.status === "failed" || server?.status === "expired"
+  const failed =
+    status === "failed" ||
+    status === "expired" ||
+    status === "preparation_failed"
+  // A cancelled signature counts only while its transaction is held, and a final answer
+  // from the server beats it, as does a status that may mean it is in flight.
   if (
     local &&
     local.status !== "failed" &&
-    // An unrecognized status may mean it is in flight: it beats a cancelled signature.
-    !(local.status === "cancelled" && (settledByServer || unrecognized))
+    !(local.status === "cancelled" && (failed || unrecognized || !held))
   ) {
-    return {
-      status: local.status,
-      message: local.message ?? null,
-      stalled: local.stalled ?? false,
-      signature,
-    }
+    return row(local.status, local.message ?? null, local.stalled ?? false)
   }
-  if (unrecognized) {
-    return {
-      status: "unrecognized",
-      message: unrecognizedMessage,
-      stalled: false,
-      signature,
-    }
+  if (unrecognized) return row("unrecognized", unrecognizedMessage)
+  if (status === "expired") return row("expired", expiredMessage)
+  if (failed || local?.status === "failed") {
+    return row(
+      "failed",
+      (local?.status === "failed" ? local.message : undefined) ??
+        failureCodeMessage(server?.error ?? null),
+    )
   }
-  if (server?.status === "expired") {
-    return {
-      status: "expired",
-      message: expiredMessage,
-      stalled: false,
-      signature,
-    }
-  }
-  if (server?.status === "failed" || local?.status === "failed") {
-    return {
-      status: "failed",
-      message:
-        (local?.status === "failed" ? local.message : undefined) ??
-        failureCodeMessage(server?.failure ?? null),
-      stalled: false,
-      signature,
-    }
-  }
-  return { status: "pending", message: null, stalled: false, signature }
+  return held ? row("pending") : row("not-sent", notSentMessage)
 }
 
 export const isSettled = (status: RowStatus) =>
-  status === "confirmed" || status === "failed" || status === "expired"
+  status === "confirmed" ||
+  status === "failed" ||
+  status === "expired" ||
+  status === "not-sent"
 
-// A new transaction is only ever prepared for a payment that did not land.
+// A new transaction is only ever prepared for a payment that did not land: the run's
+// retry covers every such row at once.
 export const canRetry = (row: Row) =>
   row.status === "failed" || row.status === "expired"
 
@@ -211,6 +203,9 @@ export function tally(rows: readonly Row[]) {
   const unrecognized = count((row) => row.status === "unrecognized")
   // Sent and not confirmed, with or without a signature to ask about.
   const sent = count((row) => row.stalled || row.status === "unknown")
+  // Never sent and no longer held: not paid in this run.
+  const notSent = count((row) => row.status === "not-sent")
+  const attention = retryable + cancelled + unrecognized + sent + notSent
   return {
     total: rows.length,
     confirmed,
@@ -218,8 +213,9 @@ export function tally(rows: readonly Row[]) {
     cancelled,
     unrecognized,
     sent,
-    attention: retryable + cancelled + unrecognized + sent,
-    open: rows.length - confirmed - retryable - cancelled - unrecognized - sent,
+    notSent,
+    attention,
+    open: rows.length - confirmed - attention,
   }
 }
 

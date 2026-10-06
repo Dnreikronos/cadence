@@ -1,13 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
-import type { RunPaymentPrepared } from "@/lib/api/schemas"
 import {
   StorageUnavailableError,
   storageBlockedMessage,
 } from "@/lib/storage-guard"
 import { stableHash, type SubmissionStorage } from "@/lib/submissions"
 import {
-  attemptCreated,
-  beginAttempt,
+  PAYMENT_KIND,
   canReleasePayment,
   paymentSending,
   recordEvidence,
@@ -15,11 +13,9 @@ import {
   releasePerson,
   releaseWarning,
   runEvidence,
-  runSeenBefore,
-  savedAttempt,
   unsettledPeople,
 } from "./evidence"
-import { payOne, type RunContext } from "./executor"
+import { payOne, type RunContext, type Signable } from "./executor"
 import { describeFailure } from "./messages"
 
 function fakeStorage(): SubmissionStorage & { items: Map<string, string> } {
@@ -48,16 +44,26 @@ const viewer = {
 const RUN = "c0000000-0000-4000-8000-0000000000aa"
 const guid = (n: number) =>
   `b0000000-0000-4000-8000-${String(n).padStart(12, "0")}`
-const prepared = (n: number): RunPaymentPrepared => ({
-  payment_id: guid(n),
-  person_id: guid(100 + n),
+const prepared = (n: number): Signable => ({
+  position: n,
+  destination: `account${n}`,
+  attempt: 0,
   request_id: String(n).padStart(64, "0"),
+  status: "prepared",
+  signature: null,
+  slot: null,
+  error: null,
   transaction: "AQID",
-  transaction_version: 1,
-  required_signers: ["wallet"],
-  recent_blockhash: "hash",
   last_valid_block_height: 500,
+  required_signers: ["wallet"],
 })
+// Position n pays person guid(100 + n).
+const personOf = (n: number) => guid(100 + n)
+const send = (
+  evidence: ReturnType<typeof runEvidence>,
+  n: number,
+  at = 1_000,
+) => paymentSending(evidence, RUN, prepared(n), personOf(n), at)
 
 // A payment that reaches the send step, where `send` is what must not run when it should not.
 function context(
@@ -76,6 +82,7 @@ function context(
     },
     evidence,
     RUN,
+    personOf,
     () => 5_000,
     mode,
   )
@@ -88,7 +95,7 @@ function context(
       extra?.onSubmitted?.("sig-1")
       throw new Error("not confirmed")
     },
-    api: { confirmPayment: vi.fn(), retryPayment: vi.fn() },
+    api: { confirm: vi.fn(), retry: vi.fn() },
     events,
   }
   return { ctx, failed }
@@ -119,7 +126,7 @@ describe("a payroll payment when storage cannot keep its record", () => {
       getItem: (key) => items.get(key) ?? null,
       setItem: (key, value) => {
         // A sentinel write passes; the record's does not.
-        if (key.includes("payroll-payment")) {
+        if (key.includes(PAYMENT_KIND)) {
           writes += 1
           throw new Error("full")
         }
@@ -160,8 +167,9 @@ describe("a payroll payment when storage cannot keep its record", () => {
 describe("releasing a person on purpose", () => {
   it("is offered after two minutes, for a payment nothing can be asked about or one a lookup could not settle", () => {
     const payment = {
-      payment_id: guid(1),
       run_id: RUN,
+      position: 1,
+      attempt: 0,
       person_id: guid(101),
       request_id: "a".repeat(64),
       signature: "sig",
@@ -182,22 +190,18 @@ describe("releasing a person on purpose", () => {
     ).toBe(true)
   })
 
-  it("makes the person payable again, drops an attempt left with nothing open, and touches no one else", () => {
+  it("makes the person payable again, and touches no one else", () => {
     const storage = fakeStorage()
     const evidence = runEvidence(viewer, storage)
-    beginAttempt(evidence, { idempotency_key: "k", fingerprint: "f" }, 1_000)
-    attemptCreated(evidence, "f", RUN)
-    paymentSending(evidence, RUN, prepared(1), 1_000)
-    paymentSending(evidence, RUN, prepared(2), 1_000)
+    send(evidence, 1)
+    send(evidence, 2)
     const others = runEvidence({ ...viewer, email: "b@example.com" }, storage)
-    paymentSending(others, RUN, prepared(1), 1_000)
+    send(others, 1)
 
     releasePerson(evidence, guid(101))
     expect([...unsettledPeople(evidence.payments.read())]).toEqual([guid(102)])
-    expect(savedAttempt(evidence, "f", 2_000)).not.toBeNull()
     releasePerson(evidence, guid(102))
     expect(unsettledPeople(evidence.payments.read()).size).toBe(0)
-    expect(savedAttempt(evidence, "f", 2_000)).toBeNull()
     // Another viewer's payment is still held, and it is still released after a reload.
     expect(others.payments.read()).toHaveLength(1)
     expect(runEvidence(viewer, storage).payments.read()).toEqual([])
@@ -214,10 +218,8 @@ describe("saved payments that cannot be read", () => {
   it("hold every run for the viewer until released on purpose", () => {
     const storage = fakeStorage()
     const first = runEvidence(viewer, storage)
-    paymentSending(first, RUN, prepared(1), 1_000)
-    const key = [...storage.items.keys()].find((k) =>
-      k.includes("payroll-payment"),
-    )!
+    send(first, 1)
+    const key = [...storage.items.keys()].find((k) => k.includes(PAYMENT_KIND))!
     storage.items.set(
       key,
       JSON.stringify([...JSON.parse(storage.items.get(key)!), { junk: 1 }]),
@@ -244,8 +246,7 @@ describe("records saved under the company name", () => {
       { company: viewer.company, email: viewer.email },
       storage,
     )
-    paymentSending(old, RUN, prepared(1), 1_000)
-    beginAttempt(old, { idempotency_key: "k", fingerprint: "f" }, 1_000)
+    send(old, 1)
     expect(
       [...storage.items.keys()].every(
         (k) => k.endsWith(oldScope) || k.includes(oldScope),
@@ -254,7 +255,6 @@ describe("records saved under the company name", () => {
 
     const migrated = runEvidence(viewer, storage)
     expect(migrated.payments.read()).toHaveLength(1)
-    expect(savedAttempt(migrated, "f", 2_000)).not.toBeNull()
     expect([...storage.items.keys()].some((k) => k.includes(oldScope))).toBe(
       false,
     )
@@ -264,32 +264,5 @@ describe("records saved under the company name", () => {
       storage,
     )
     expect(renamed.payments.read()).toHaveLength(1)
-  })
-})
-
-describe("runSeenBefore", () => {
-  it("is true for a run the browser was already given", () => {
-    const evidence = runEvidence(viewer, fakeStorage())
-    const saved = {
-      idempotency_key: "k",
-      fingerprint: "f",
-      run_id: RUN,
-      created_at: 1,
-    }
-    expect(runSeenBefore(evidence, saved, "another-run")).toBe(true)
-  })
-
-  it("is true for a run with a payment that may have been sent", () => {
-    const evidence = runEvidence(viewer, fakeStorage())
-    paymentSending(evidence, RUN, prepared(1), 1_000)
-    expect(runSeenBefore(evidence, null, RUN)).toBe(true)
-    expect(runSeenBefore(evidence, null, "another-run")).toBe(false)
-  })
-
-  it("is false for a run whose create answer was lost: its transactions are for signing", () => {
-    const evidence = runEvidence(viewer, fakeStorage())
-    const saved = { idempotency_key: "k", fingerprint: "f", created_at: 1 }
-    expect(runSeenBefore(evidence, saved, RUN)).toBe(false)
-    expect(runSeenBefore(evidence, null, RUN)).toBe(false)
   })
 })

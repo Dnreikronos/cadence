@@ -1,22 +1,34 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest"
 import { createApiClient } from "@/lib/api/client"
+import { ApiError } from "@/lib/api/errors"
 import { MOCK_ORIGIN } from "@/lib/api/config"
-import type { RunCreated } from "@/lib/api/schemas"
+import type { Run } from "@/lib/api/schemas"
 import { signatureSchema } from "@/lib/api/schemas"
 import { signAndConfirm } from "@/lib/api/sign"
+import { mockTokenAccount } from "@/lib/api/mocks/chain"
 import { COMPANY_WALLET, db, resetDb, seedPeople } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
 import { mockSigner, mockSubmit } from "@/lib/api/mocks/signer"
 import {
+  paymentKey,
   paySequence,
   recheckOne,
-  retryOne,
+  retryRun,
+  signablesOf,
   type RunApi,
   type RunContext,
   type RunEvents,
 } from "./executor"
-import { describeFailure } from "./messages"
+import { describeFailure, runMessage } from "./messages"
 import {
   canRecheck,
   canRetry,
@@ -32,6 +44,7 @@ import {
 
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }))
 afterEach(() => {
+  vi.restoreAllMocks()
   server.resetHandlers()
   scenarios.clear()
   resetDb()
@@ -43,23 +56,28 @@ const api = createApiClient({
   getToken: async () => "test-token",
 })
 const runApi: RunApi = {
-  confirmPayment: (runId, paymentId, signature) =>
-    api.runs.confirmPayment(runId, paymentId, signature),
-  retryPayment: (runId, paymentId) => api.runs.retryPayment(runId, paymentId),
+  confirm: (runId, item) => api.runs.confirm(runId, { payments: [item] }),
+  retry: (runId, request) => api.runs.retry(runId, request),
 }
 
 const [bruno, , diego, northwind] = seedPeople
 const payees = [
-  { person_id: bruno.id, amount: "4200000000" },
-  { person_id: diego.id, amount: "6300000000" },
-  { person_id: northwind.id, amount: "9500000000" },
+  { id: bruno.id, amount: "4200000000" },
+  { id: diego.id, amount: "6300000000" },
+  { id: northwind.id, amount: "9500000000" },
 ]
+const AES_KEY = "AAAAAAAAAAAAAAAAAAAAAA=="
 
-async function createRun(): Promise<RunCreated> {
+async function createRun(): Promise<Run> {
   return api.runs.create({
     company_wallet: COMPANY_WALLET,
-    payments: payees,
-    idempotency_key: "d0000000-0000-4000-8000-000000000001",
+    sender: mockTokenAccount(COMPANY_WALLET),
+    aes_key: AES_KEY,
+    wallet_signature: "5SigMockSignature1111111111111111111111111111",
+    payments: payees.map((p) => ({
+      recipient: mockTokenAccount(p.id),
+      amount: p.amount,
+    })),
   })
 }
 
@@ -102,12 +120,12 @@ function recorder() {
   return { events, local: () => local }
 }
 
-async function rowsOf(created: RunCreated, local: LocalRows) {
+// Rows as a page that holds no transaction any more reads them.
+async function rowsOf(created: Run, local: LocalRows) {
   const run = await api.runs.get(created.run_id)
-  return created.payments.map((payment) => {
-    const server = run.payments.find((p) => p.payment_id === payment.payment_id)
-    return mergeRow(local[payment.payment_id], server)
-  })
+  return run.payments.map((payment) =>
+    mergeRow(local[paymentKey(created.run_id, payment.position)], payment),
+  )
 }
 
 describe("a run through the real signing flow and the mock service", () => {
@@ -124,7 +142,7 @@ describe("a run through the real signing flow and the mock service", () => {
         api: runApi,
         events,
       },
-      created.payments,
+      signablesOf(created),
     )
 
     const rows = await rowsOf(created, local())
@@ -134,9 +152,10 @@ describe("a run through the real signing flow and the mock service", () => {
       "confirmed",
     ])
     expect(before - db.company.available).toBe(20_000_000_000n)
+    expect((await api.runs.get(created.run_id)).status).toBe("completed")
   })
 
-  it("keeps a payment whose submit threw after the broadcast as sent, never retryable", async () => {
+  it("keeps a payment whose submit threw after the broadcast as sent, never retryable, and sends nothing after it", async () => {
     scenarios.set("instant")
     const created = await createRun()
     const { events, local } = recorder()
@@ -150,15 +169,16 @@ describe("a run through the real signing flow and the mock service", () => {
 
     await paySequence(
       { runId: created.run_id, sign: realSign(submit), api: runApi, events },
-      created.payments,
+      signablesOf(created),
     )
 
     const rows = await rowsOf(created, local())
     expect(rows.map((row) => row.status)).toEqual([
       "unknown",
-      "confirmed",
-      "confirmed",
+      "not-sent",
+      "not-sent",
     ])
+    expect(submits).toBe(1)
     // Nothing to ask about and nothing to retry: only the admin's own check is left.
     expect(canRetry(rows[0])).toBe(false)
     expect(canRecheck(rows[0])).toBe(false)
@@ -178,11 +198,11 @@ describe("a run through the real signing flow and the mock service", () => {
         api: runApi,
         events,
       },
-      created.payments.slice(0, 1),
+      signablesOf(created).slice(0, 1),
     )
 
     // The service is down, so only what this browser saw can be read.
-    let row = mergeRow(local()[created.payments[0].payment_id])
+    let row = mergeRow(local()[paymentKey(created.run_id, 0)])
     expect(row.status).toBe("waiting")
     expect(canRecheck(row)).toBe(true)
     expect(canRetry(row)).toBe(false)
@@ -197,14 +217,14 @@ describe("a run through the real signing flow and the mock service", () => {
         api: runApi,
         events,
       },
-      created.payments[0].payment_id,
+      signablesOf(created)[0],
       signature,
     )
     ;[row] = await rowsOf(created, local())
     expect(row.status).toBe("confirmed")
   })
 
-  it("lets one payment fail on the network, retries it with a fresh transaction, and pays the person once", async () => {
+  it("stops at a payment the network rejects, and a retry once the rest expired pays that person once", async () => {
     scenarios.set("partial-failure", "instant")
     const created = await createRun()
     const { events, local } = recorder()
@@ -215,32 +235,49 @@ describe("a run through the real signing flow and the mock service", () => {
       events,
     }
 
-    await paySequence(context, created.payments)
+    await paySequence(context, signablesOf(created))
     let rows = await rowsOf(created, local())
-    // Payment 2 was rejected by the network; payment 3 never landed and is `expired`.
+    // The second was rejected by the network; the third was never signed.
     expect(rows.map((row) => row.status)).toEqual([
       "confirmed",
       "failed",
-      "expired",
+      "not-sent",
     ])
-    expect(rows.slice(1).every(canRetry)).toBe(true)
+    expect(canRetry(rows[1])).toBe(true)
+    expect(canRetry(rows[2])).toBe(false)
 
-    await retryOne(context, created.payments[1].payment_id)
-    await retryOne(context, created.payments[2].payment_id)
+    const request = {
+      aes_key: AES_KEY,
+      payments: [{ position: 1, amount: payees[1].amount }],
+    }
+    // While the third can still land, the service refuses: the row says to wait.
+    const run = await api.runs.get(created.run_id)
+    expect(await retryRun(context, run, request)).toBeNull()
+    rows = await rowsOf(created, local())
+    expect(rows[1]).toMatchObject({
+      status: "failed",
+      message: runMessage(new ApiError(409, "outstanding_payments")),
+    })
+
+    // A minute later it has expired; the retry rebuilds only the rejected one.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 120_000)
+    const rebuilt = await retryRun(context, run, request)
+    expect(rebuilt?.map((p) => [p.position, p.attempt])).toEqual([[1, 1]])
+    await paySequence(context, rebuilt ?? [])
     rows = await rowsOf(created, local())
     expect(rows.map((row) => row.status)).toEqual([
       "confirmed",
       "confirmed",
-      "confirmed",
+      "not-sent",
     ])
-    // Each person was paid exactly once.
+    // Each person paid was paid exactly once, and the third not at all.
     const paid = db.payments.filter((p) => p.runId === created.run_id)
     expect(paid.map((p) => p.personId).sort()).toEqual(
-      payees.map((p) => p.person_id).sort(),
+      [bruno.id, diego.id].sort(),
     )
   })
 
-  it("refuses to retry a payment that already confirmed", async () => {
+  it("never rebuilds a payment that already confirmed", async () => {
     scenarios.set("instant")
     const created = await createRun()
     const { events, local } = recorder()
@@ -250,20 +287,16 @@ describe("a run through the real signing flow and the mock service", () => {
       api: runApi,
       events,
     }
-    await paySequence(context, created.payments.slice(0, 1))
-    let sent = 0
-    await retryOne(
-      {
-        ...context,
-        sign: realSign(async () => {
-          sent += 1
-          return mockSubmit()
-        }),
-      },
-      created.payments[0].payment_id,
+    await paySequence(context, signablesOf(created))
+    const rebuilt = await retryRun(
+      context,
+      await api.runs.get(created.run_id),
+      { aes_key: AES_KEY, payments: [{ position: 0, amount: "4200000000" }] },
     )
-    // The service said no, so nothing was signed or sent and nobody is paid twice.
-    expect(sent).toBe(0)
+    // The service skipped it: nothing to sign, nothing reported, and nobody is paid
+    // twice.
+    expect(rebuilt).toEqual([])
+    expect(local()[paymentKey(created.run_id, 0)].status).toBe("confirmed")
     expect(
       db.payments.filter((p) => p.personId === bruno.id && p.runId !== null),
     ).toHaveLength(1)

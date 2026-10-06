@@ -5,10 +5,12 @@ import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
   PaymentNotOnChainError,
   ResponseMismatchError,
+  RunInputUnavailableError,
   SentPaymentError,
   isSignatureRejection,
 } from "./errors"
 import {
+  cancelledMessage,
   describeFailure,
   failureCodeMessage,
   runMessage,
@@ -18,25 +20,40 @@ import {
 
 describe("runMessage", () => {
   it("words the run-specific codes", () => {
-    expect(runMessage(new ApiError(409, "recipient_not_activated"))).toMatch(
-      /hasn't set up their account/,
-    )
     expect(runMessage(new ApiError(404, "run_not_found"))).toMatch(
       /payroll run/,
     )
-    expect(runMessage(new ApiError(409, "payment_not_retryable"))).toMatch(
-      /can't be retried/,
+    expect(runMessage(new ApiError(400, "invalid_payments"))).toMatch(
+      /listed twice/,
+    )
+    expect(
+      runMessage(new ApiError(409, "transaction_history_unavailable")),
+    ).toMatch(/can't tell whether this payment went through/)
+    expect(runMessage(new ApiError(503, "run_storage_unavailable"))).toMatch(
+      /Try again shortly/,
     )
   })
 
-  it("says a changed balance is fixed by retrying, not by depositing", () => {
-    // Payments 2..N are built before payment 1 lands, so they can find the balance
-    // changed while there is plenty of money.
-    const message = runMessage(new ApiError(409, "invalid_confidential_state"))
-    expect(message).toBe(
-      "The balance changed while signing. Retry this payment.",
-    )
-    expect(message).not.toMatch(/deposit/i)
+  it("says a retry refused while payments can still land is for later, the same for each code", () => {
+    const later = runMessage(new ApiError(409, "outstanding_payments"))
+    expect(later).toMatch(/once they have expired/)
+    for (const code of [
+      "original_signature_required",
+      "transaction_not_finalized",
+    ]) {
+      expect(runMessage(new ApiError(409, code))).toBe(later)
+    }
+  })
+
+  it("says a payment that could not be prepared is fixed by retrying, not by depositing", () => {
+    for (const code of [
+      "invalid_confidential_state",
+      "proof_generation_failed",
+    ]) {
+      const message = runMessage(new ApiError(409, code))
+      expect(message).toMatch(/Retry it/)
+      expect(message).not.toMatch(/deposit/i)
+    }
   })
 
   it("falls back to the shared catalog, then to a plain sentence", () => {
@@ -133,7 +150,14 @@ describe("describeFailure", () => {
       name: "UserRejectedRequestError",
     })
     expect(describeFailure(cancelled)).toEqual({
-      message: "You cancelled the signature. Nothing was sent.",
+      message: cancelledMessage,
+      sent: false,
+    })
+  })
+
+  it("says a run cannot be made here when an input is not available, nothing sent", () => {
+    expect(describeFailure(new RunInputUnavailableError("sender"))).toEqual({
+      message: "Payroll runs aren't available in this environment yet.",
       sent: false,
     })
   })

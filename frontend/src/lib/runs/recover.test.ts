@@ -1,17 +1,17 @@
 import { describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/errors"
-import type { Receipt, RunPaymentPrepared } from "@/lib/api/schemas"
+import type { Receipt, Run, RunPayment } from "@/lib/api/schemas"
 import type { SubmissionStorage } from "@/lib/submissions"
 import { PaymentNotOnChainError, SentPaymentError } from "./errors"
+import { recordEvidence, runEvidence, type SentPayment } from "./evidence"
 import {
-  attemptCreated,
-  beginAttempt,
-  recordEvidence,
-  runEvidence,
-  savedAttempt,
-  type SentPayment,
-} from "./evidence"
-import { payOne, paySequence, type RunApi, type RunContext } from "./executor"
+  paymentKey,
+  payOne,
+  paySequence,
+  type RunApi,
+  type RunContext,
+  type Signable,
+} from "./executor"
 import { sentWithoutSignatureMessage } from "./messages"
 import {
   holdsUnconfirmed,
@@ -45,15 +45,54 @@ const receipt: Receipt = {
   status: "finalized",
 }
 const saved = (n: number, patch: Partial<SentPayment> = {}): SentPayment => ({
-  payment_id: guid(n),
   run_id: RUN,
-  person_id: guid(100 + n),
+  position: n,
+  attempt: 0,
   request_id: String(n).padStart(64, "0"),
+  person_id: guid(100 + n),
   signature: `sig-${n}`,
   last_valid_block_height: 500,
   at: 1_000,
   ...patch,
 })
+const key = (n: number) => paymentKey(RUN, n)
+// Who position n pays.
+const personOf = (n: number) => guid(100 + n)
+
+// What the service answers about position n of a run.
+function answer(n: number, patch: Partial<RunPayment> = {}): Run {
+  return {
+    run_id: RUN,
+    company_wallet: "wallet",
+    sender: "sender",
+    mint: "mint",
+    transaction_version: 1,
+    required_signers: ["wallet"],
+    status: "prepared",
+    payments: [
+      {
+        position: n,
+        destination: `account${n}`,
+        attempt: 0,
+        request_id: String(n).padStart(64, "0"),
+        status: "prepared",
+        signature: null,
+        slot: null,
+        error: null,
+        ...patch,
+      },
+    ],
+  }
+}
+const landed = (n: number) =>
+  answer(n, { status: "finalized", signature: `sig-${n}`, slot: 1 })
+const confirmsAs =
+  (make: (n: number) => Run): RunApi["confirm"] =>
+  async (_run, item) =>
+    make(item.position)
+const noRetry: RunApi["retry"] = async () => {
+  throw new Error("no retry expected")
+}
 const notFinalized = () => new ApiError(409, "transaction_not_finalized")
 
 function clock(start = 1_000) {
@@ -65,8 +104,8 @@ describe("hydrateLocal", () => {
   it("shows a saved payment with a signature as waiting, and one without as needing a check", () => {
     const rows = hydrateLocal([saved(1), saved(2, { signature: null })])
     expect(rows).toEqual({
-      [guid(1)]: { status: "waiting", signature: "sig-1" },
-      [guid(2)]: {
+      [key(1)]: { status: "waiting", signature: "sig-1" },
+      [key(2)]: {
         status: "unknown",
         message: sentWithoutSignatureMessage,
       },
@@ -167,15 +206,15 @@ describe("reconcilePayment", () => {
 })
 
 // The events a screen would get, recorded, with the answers the test chooses.
-function recovery(confirm: RunApi["confirmPayment"]) {
+function recovery(confirm: RunApi["confirm"]) {
   const log: string[] = []
   const failures: unknown[] = []
   const sign = vi.fn()
-  const retry = vi.fn()
+  const retry = vi.fn(noRetry)
   const context: RunContext = {
     runId: RUN,
     sign,
-    api: { confirmPayment: confirm, retryPayment: retry },
+    api: { confirm, retry },
     events: {
       signing: (id) => log.push(`signing ${id}`),
       waiting: (id) => log.push(`waiting ${id}`),
@@ -193,31 +232,38 @@ const quick = { ...clock(), pollMs: 3_000 }
 
 describe("recoverOne", () => {
   it("shows the payment as waiting, then confirmed, and prepares and signs nothing", async () => {
-    const { context, log, sign, retry } = recovery(async () => receipt)
+    const { context, log, sign, retry } = recovery(confirmsAs(landed))
     await recoverOne(context, saved(1), quick)
-    expect(log).toEqual([`waiting ${guid(1)}`, `confirmed ${guid(1)}`])
+    expect(log).toEqual([`waiting ${key(1)}`, `confirmed ${key(1)}`])
     expect(sign).not.toHaveBeenCalled()
     expect(retry).not.toHaveBeenCalled()
   })
 
-  it("asks with the run and payment it was saved with", async () => {
-    const confirm = vi.fn(async () => receipt)
-    const { context } = recovery(confirm)
+  it("asks with the run, position and attempt it was saved with", async () => {
+    const confirm = vi.fn(confirmsAs(landed))
+    const { context, log } = recovery(confirm)
     await recoverOne(context, saved(3, { run_id: "other-run" }), quick)
-    expect(confirm).toHaveBeenCalledWith("other-run", guid(3), "sig-3")
+    expect(confirm).toHaveBeenCalledWith("other-run", {
+      position: 3,
+      request_id: "3".padStart(64, "0"),
+      signature: "sig-3",
+    })
+    expect(log.at(-1)).toBe(`confirmed ${paymentKey("other-run", 3)}`)
   })
 
   it("reports a refused payment as one that did not go through, so a retry is offered", async () => {
-    const { context, failures } = recovery(async () => {
-      throw new ApiError(409, "transaction_failed")
-    })
+    const { context, failures } = recovery(
+      confirmsAs((n) =>
+        answer(n, { status: "failed", error: "transaction_failed" }),
+      ),
+    )
     await recoverOne(context, saved(1), quick)
     expect(failures).toEqual([expect.any(PaymentNotOnChainError)])
   })
 
   it("reports a payment it could not settle as sent, keeping its signature to check again", async () => {
     const { context, failures } = recovery(async () => {
-      throw new ApiError(404, "payment_not_found")
+      throw new ApiError(404, "run_not_found")
     })
     await recoverOne(context, saved(1), quick)
     expect(failures).toHaveLength(1)
@@ -225,47 +271,50 @@ describe("recoverOne", () => {
     expect((failures[0] as SentPaymentError).signature).toBe("sig-1")
   })
 
+  it("reports a later attempt at the position as sent, not settled", async () => {
+    const { context, failures } = recovery(
+      confirmsAs((n) =>
+        answer(n, { status: "finalized", request_id: "f".repeat(64) }),
+      ),
+    )
+    await recoverOne(context, saved(1), quick)
+    expect(failures[0]).toBeInstanceOf(SentPaymentError)
+  })
+
   it("reports one with no signature as sent without one, and asks nothing", async () => {
-    const confirm = vi.fn(async () => receipt)
+    const confirm = vi.fn(confirmsAs(landed))
     const { context, log, failures } = recovery(confirm)
     await recoverOne(context, saved(1, { signature: null }), quick)
-    expect(log).toEqual([`failed ${guid(1)}`])
+    expect(log).toEqual([`failed ${key(1)}`])
     expect((failures[0] as SentPaymentError).signature).toBeNull()
     expect(confirm).not.toHaveBeenCalled()
   })
 
   it("says nothing when the page is left", async () => {
     const stop = new AbortController()
-    const { context, log } = recovery(async () => {
-      throw notFinalized()
-    })
+    const { context, log } = recovery(confirmsAs((n) => answer(n)))
     await recoverOne({ ...context, signal: stop.signal }, saved(1), {
       now: () => 1_000,
       sleep: async () => stop.abort(),
     })
-    expect(log).toEqual([`waiting ${guid(1)}`])
+    expect(log).toEqual([`waiting ${key(1)}`])
   })
 })
 
 // A run that is signed in one page, left, and picked up in the next, with the records in
 // between kept the way the screens keep them.
 describe("a run reloaded mid-way", () => {
-  const prepared = (n: number): RunPaymentPrepared => ({
-    payment_id: guid(n),
-    person_id: guid(100 + n),
+  const prepared = (n: number): Signable => ({
+    ...answer(n).payments[0],
     request_id: String(n).padStart(64, "0"),
     transaction: "AQID",
-    transaction_version: 1,
-    required_signers: ["wallet"],
-    recent_blockhash: "hash",
     last_valid_block_height: 500,
+    required_signers: ["wallet"],
   })
 
   // Two payments: the first is sent and its confirm is where the page is left.
   async function firstPage(storage: SubmissionStorage) {
     const evidence = runEvidence(viewer, storage)
-    beginAttempt(evidence, { idempotency_key: "k1", fingerprint: "f1" }, 1_000)
-    attemptCreated(evidence, "f1", RUN)
     const stop = new AbortController()
     let local: LocalRows = {}
     const events = recordEvidence(
@@ -280,6 +329,7 @@ describe("a run reloaded mid-way", () => {
       },
       evidence,
       RUN,
+      personOf,
       () => 2_000,
     )
     const sign: RunContext["sign"] = async (_p, confirm, onStep, extra) => {
@@ -291,11 +341,10 @@ describe("a run reloaded mid-way", () => {
       stop.abort()
       return confirm("sig-1")
     }
+    // Not finalized yet.
     const api: RunApi = {
-      confirmPayment: async () => {
-        throw notFinalized()
-      },
-      retryPayment: vi.fn(),
+      confirm: confirmsAs((n) => answer(n)),
+      retry: noRetry,
     }
     await paySequence({ runId: RUN, sign, api, events, signal: stop.signal }, [
       prepared(1),
@@ -310,26 +359,25 @@ describe("a run reloaded mid-way", () => {
     const next = runEvidence(viewer, storage)
     expect(next.payments.read()).toEqual([
       expect.objectContaining({
-        payment_id: guid(1),
+        position: 1,
         signature: "sig-1",
         person_id: guid(101),
         at: 2_000,
       }),
     ])
-    expect(savedAttempt(next, "f1", 3_000)).toMatchObject({ run_id: RUN })
   })
 
-  it("asks about the sent payment with its signature, never signs, and clears the attempt once it is confirmed", async () => {
+  it("asks about the sent payment with its signature, never signs, and clears the record once it is confirmed", async () => {
     const storage = fakeStorage()
     await firstPage(storage)
 
     // The next page: what it shows first, then what the lookup finds.
     const evidence = runEvidence(viewer, storage)
     let local = hydrateLocal(evidence.payments.read())
-    expect(local[guid(1)]).toEqual({ status: "waiting", signature: "sig-1" })
-    expect(local[guid(2)]).toBeUndefined()
+    expect(local[key(1)]).toEqual({ status: "waiting", signature: "sig-1" })
+    expect(local[key(2)]).toBeUndefined()
 
-    const confirm = vi.fn(async () => receipt)
+    const confirm = vi.fn(confirmsAs(landed))
     const sign = vi.fn()
     const events = recordEvidence(
       {
@@ -342,25 +390,24 @@ describe("a run reloaded mid-way", () => {
       },
       evidence,
       RUN,
+      personOf,
     )
     for (const record of evidence.payments.read()) {
       await recoverOne(
-        {
-          runId: RUN,
-          sign,
-          api: { confirmPayment: confirm, retryPayment: vi.fn() },
-          events,
-        },
+        { runId: RUN, sign, api: { confirm, retry: noRetry }, events },
         record,
         quick,
       )
     }
-    expect(confirm).toHaveBeenCalledWith(RUN, guid(1), "sig-1")
+    expect(confirm).toHaveBeenCalledWith(RUN, {
+      position: 1,
+      request_id: "1".padStart(64, "0"),
+      signature: "sig-1",
+    })
     expect(sign).not.toHaveBeenCalled()
-    expect(local[guid(1)].status).toBe("confirmed")
-    // Nothing is in doubt any more: the records and the attempt are gone.
+    expect(local[key(1)].status).toBe("confirmed")
+    // Nothing is in doubt any more: the record is gone.
     expect(evidence.payments.read()).toEqual([])
-    expect(savedAttempt(evidence, "f1", 3_000)).toBeNull()
     expect(runEvidence(viewer, storage).payments.read()).toEqual([])
   })
 
@@ -379,24 +426,25 @@ describe("a run reloaded mid-way", () => {
       },
       evidence,
       RUN,
+      personOf,
     )
     await recoverOne(
       {
         runId: RUN,
         sign: vi.fn(),
         api: {
-          confirmPayment: async () => {
+          confirm: async () => {
             throw new ApiError(0, "network_error")
           },
-          retryPayment: vi.fn(),
+          retry: noRetry,
         },
         events,
       },
       evidence.payments.read()[0],
       quick,
     )
-    expect(failed).toHaveBeenCalledWith(guid(1), expect.any(SentPaymentError))
-    // Still kept: the person stays out of the roster and the attempt stays.
+    expect(failed).toHaveBeenCalledWith(key(1), expect.any(SentPaymentError))
+    // Still kept: the person stays out of the roster.
     expect(evidence.payments.read()).toHaveLength(1)
   })
 
@@ -414,6 +462,7 @@ describe("a run reloaded mid-way", () => {
       },
       evidence,
       RUN,
+      personOf,
     )
     await payOne(
       {
@@ -422,17 +471,17 @@ describe("a run reloaded mid-way", () => {
           onStep?.("submitting")
           throw new Error("connection dropped")
         },
-        api: { confirmPayment: vi.fn(), retryPayment: vi.fn() },
+        api: { confirm: vi.fn(), retry: noRetry },
         events,
         signal: stop.signal,
       },
       prepared(1),
     )
     expect(runEvidence(viewer, storage).payments.read()).toEqual([
-      expect.objectContaining({ payment_id: guid(1), signature: null }),
+      expect.objectContaining({ position: 1, signature: null }),
     ])
     expect(hydrateLocal(runEvidence(viewer, storage).payments.read())).toEqual({
-      [guid(1)]: { status: "unknown", message: sentWithoutSignatureMessage },
+      [key(1)]: { status: "unknown", message: sentWithoutSignatureMessage },
     })
   })
 })
@@ -440,15 +489,12 @@ describe("a run reloaded mid-way", () => {
 // Persisted evidence together with the held transactions of a cancelled signature, the way
 // the signer hook wires them.
 describe("evidence beside held transactions", () => {
-  const prepared = (n: number): RunPaymentPrepared => ({
-    payment_id: guid(n),
-    person_id: guid(100 + n),
+  const prepared = (n: number): Signable => ({
+    ...answer(n).payments[0],
     request_id: String(n).padStart(64, "0"),
     transaction: "AQID",
-    transaction_version: 1,
-    required_signers: ["wallet"],
-    recent_blockhash: "hash",
     last_valid_block_height: 500,
+    required_signers: ["wallet"],
   })
   function wired() {
     const evidence = runEvidence(viewer, fakeStorage())
@@ -458,11 +504,12 @@ describe("evidence beside held transactions", () => {
       runEvents(held, (action) => (local = localReducer(local, action))),
       evidence,
       RUN,
+      personOf,
     )
     const context = (sign: RunContext["sign"]): RunContext => ({
       runId: RUN,
       sign,
-      api: { confirmPayment: vi.fn(), retryPayment: vi.fn() },
+      api: { confirm: vi.fn(), retry: noRetry },
       events,
     })
     return { evidence, held, local: () => local, context }
@@ -470,7 +517,7 @@ describe("evidence beside held transactions", () => {
 
   it("a cancelled signature keeps the transaction held and leaves no record: nothing was sent", async () => {
     const { evidence, held, local, context } = wired()
-    held.hold(prepared(1))
+    held.hold(key(1), prepared(1))
     await payOne(
       context(async (_p, _c, onStep) => {
         onStep?.("signing")
@@ -480,14 +527,14 @@ describe("evidence beside held transactions", () => {
       }),
       prepared(1),
     )
-    expect(local()[guid(1)].status).toBe("cancelled")
-    expect(held.has(guid(1))).toBe(true)
+    expect(local()[key(1)].status).toBe("cancelled")
+    expect(held.has(key(1))).toBe(true)
     expect(evidence.payments.read()).toEqual([])
   })
 
   it("a send keeps the record and drops the held transaction, so it is never signed again", async () => {
     const { evidence, held, local, context } = wired()
-    held.hold(prepared(1))
+    held.hold(key(1), prepared(1))
     await payOne(
       context(async (_p, _c, onStep, extra) => {
         onStep?.("submitting")
@@ -496,24 +543,26 @@ describe("evidence beside held transactions", () => {
       }),
       prepared(1),
     )
-    expect(held.has(guid(1))).toBe(false)
-    expect(local()[guid(1)]).toMatchObject({ status: "waiting", stalled: true })
+    expect(held.has(key(1))).toBe(false)
+    expect(local()[key(1)]).toMatchObject({ status: "waiting", stalled: true })
     expect(evidence.payments.read()).toEqual([
-      expect.objectContaining({ payment_id: guid(1), signature: "sig-1" }),
+      expect.objectContaining({ position: 1, signature: "sig-1" }),
     ])
   })
 
   it("a saved payment stays checking, and its person unpayable, whatever status the service reports", () => {
     const rows = hydrateLocal([saved(1)])
-    for (const status of ["pending", "signed", "failed", "settled-somehow"]) {
-      expect(
-        mergeRow(rows[guid(1)], { status, failure: null }).status,
-      ).not.toBe("confirmed")
+    for (const status of [
+      "prepared",
+      "failed",
+      "expired",
+      "preparation_failed",
+      "settled-somehow",
+    ]) {
+      expect(mergeRow(rows[key(1)], { status, error: null }).status).toBe(
+        "waiting",
+      )
     }
-    expect(
-      mergeRow(rows[guid(1)], { status: "settled-somehow", failure: null })
-        .status,
-    ).toBe("waiting")
     const people = [1, 2].map(
       (n) =>
         ({
@@ -523,6 +572,7 @@ describe("evidence beside held transactions", () => {
           kind: "employee",
           activation: "active",
           amount: "1",
+          tokenAccount: `account${n}`,
         }) satisfies PayrollPerson,
     )
     expect(

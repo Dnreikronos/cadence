@@ -10,14 +10,16 @@ export function initialsOf(name: string) {
 
 export const unknownPerson = "Someone no longer on your list"
 
-// A run keeps the ids of the people it paid. Names come from the people list, which may
-// have lost one since (removal is final). Until the list has answered there is no name
-// to show, and `undefined` lets the screen show a placeholder instead of a wrong one.
-export function nameLookup(
-  people: readonly { id: string; name: string }[] | undefined,
-  answered: boolean,
+// A run pays token accounts and carries no person, so who a payment pays is found by the
+// account, among the people as they are now: someone removed since, or whose account
+// changed, is not found.
+export function peopleByAccount<T extends { tokenAccount: string | null }>(
+  people: readonly T[] | undefined,
 ) {
-  const names = new Map(people?.map((person) => [person.id, person.name]))
-  return (personId: string) =>
-    answered ? (names.get(personId) ?? unknownPerson) : undefined
+  const byAccount = new Map(
+    people?.flatMap((person) =>
+      person.tokenAccount ? [[person.tokenAccount, person] as const] : [],
+    ),
+  )
+  return (destination: string) => byAccount.get(destination)
 }

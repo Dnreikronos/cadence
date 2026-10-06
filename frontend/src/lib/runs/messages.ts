@@ -8,6 +8,7 @@ import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
   PaymentNotOnChainError,
   ResponseMismatchError,
+  RunInputUnavailableError,
   SentPaymentError,
   isSignatureRejection,
 } from "./errors"
@@ -16,18 +17,31 @@ import {
 // does not cover are added here; anything else falls through to `messageFor`. A message
 // never carries an amount, an address or a signature.
 const overrides: Record<string, string> = {
-  person_not_found: "That person is no longer on your list.",
   run_not_found: "We couldn't find that payroll run.",
-  payment_not_found: "That payment is no longer part of this run.",
-  payment_not_retryable:
-    "That payment can't be retried right now. Check its status first.",
-  recipient_not_activated:
-    "Someone on this run hasn't set up their account yet. Refresh the list and try again.",
-  // Each payment's proof is built before the one ahead of it lands, so later payments
-  // can find the balance changed. A retry builds a fresh one.
+  // A recipient account that cannot receive private payments, or a balance that changed.
   invalid_confidential_state:
-    "The balance changed while signing. Retry this payment.",
+    "This payment couldn't be prepared: the recipient's account or your balance isn't ready. Retry it.",
+  proof_generation_failed: "This payment couldn't be prepared. Retry it.",
   transaction_failed: "The network rejected this payment. You can retry it.",
+  invalid_payments:
+    "Cadence refused this run: someone is listed twice, or a payment is to your own account.",
+  wallet_access_denied: "This wallet can't pay from the company's account.",
+  // The service refuses a retry while a payment of the run can still land.
+  outstanding_payments:
+    "Some payments in this run can still go through. Retry once they have expired, in about a minute.",
+  original_signature_required:
+    "Some payments in this run can still go through. Retry once they have expired, in about a minute.",
+  transaction_not_finalized:
+    "Some payments in this run can still go through. Retry once they have expired, in about a minute.",
+  payment_attempt_changed:
+    "This payment was prepared again since it was signed. Refresh the run.",
+  payment_already_resolved:
+    "This payment already has a final result. Refresh the run.",
+  transaction_history_unavailable:
+    "Cadence can't tell whether this payment went through. Check the company payments before paying this person another way.",
+  runs_requires_devnet: "Payroll runs only work on devnet for now.",
+  run_storage_unavailable:
+    "Cadence can't record payroll runs right now. Try again shortly.",
 }
 
 export function runMessage(error: unknown) {
@@ -37,16 +51,20 @@ export function runMessage(error: unknown) {
   return messageFor(error)
 }
 
-// A stable failure code from `GET /runs/:id`, or null.
+// A stable error code from a run's payment, or null.
 export function failureCodeMessage(code: string | null) {
   if (!code) return "This payment didn't go through. You can retry it."
   return runMessage(new ApiError(409, code))
 }
 
-// `expired` is not defined by the draft contract: it is shown, but a retry is only
-// allowed once the service has confirmed that the payment did not land.
+// The service says it expired without landing: a retry prepares it again.
 export const expiredMessage =
-  "This payment expired before it was confirmed. You can retry it only if the service confirms it didn't land; if it won't, check your payments and balance first."
+  "This payment expired before it went through. You can retry it."
+
+// Prepared and never sent from this browser: its transaction is no longer held here, so
+// it cannot land from here. Another browser that signed it would still hold its record.
+export const notSentMessage =
+  "Not sent: this payment was never signed here, so this person wasn't paid in this run. Check the company payments, then pay them in a new run."
 
 export const sentWithSignatureMessage =
   "This payment was sent but isn't confirmed yet. Check again; don't pay this person another way until it is, or they could be paid twice."
@@ -59,13 +77,9 @@ export const sentWithoutSignatureMessage =
 export const unrecognizedMessage =
   "Status unknown: check the company payments before doing anything."
 
-// A cancelled signature sent nothing. These say what to do next without ever suggesting
-// the person was paid.
-export const cancelledGoneMessage =
-  "You cancelled the signature, and this page no longer holds this payment, so this person was not paid. Start a new run for them only. The recently-paid check won't skip them, because nothing was confirmed."
-
-export const cancelledStaleMessage =
-  "Too much time has passed to sign this payment again, and nothing was sent, so this person was not paid. Retry it to prepare a new one; if that isn't allowed, start a new run for them only."
+// A cancelled signature sent nothing, and stopped the run there.
+export const cancelledMessage =
+  "You cancelled the signature. Nothing was sent: sign again to continue the run from this payment."
 
 export type Failure = {
   message: string
@@ -107,6 +121,12 @@ export function describeFailure(error: unknown): Failure {
   if (error instanceof StorageUnavailableError) {
     return { message: storageBlockedMessage, sent: false }
   }
+  if (error instanceof RunInputUnavailableError) {
+    return {
+      message: "Payroll runs aren't available in this environment yet.",
+      sent: false,
+    }
+  }
   if (error instanceof PaymentNotOnChainError) {
     return { message: failureCodeMessage(null), sent: false }
   }
@@ -118,10 +138,7 @@ export function describeFailure(error: unknown): Failure {
     }
   }
   if (isSignatureRejection(error)) {
-    return {
-      message: "You cancelled the signature. Nothing was sent.",
-      sent: false,
-    }
+    return { message: cancelledMessage, sent: false }
   }
   return { message: runMessage(error), sent: false }
 }

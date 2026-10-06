@@ -2,17 +2,13 @@ import { base58FromBytes } from "@/lib/api/base58"
 import { base64FromBytes } from "@/lib/api/base64"
 import { apiConfig } from "@/lib/api/mode"
 import type { Signer } from "@/lib/api/sign"
+import { RunInputUnavailableError } from "./errors"
 
 // What `POST /runs` needs besides the people and their amounts, each from one place
 // (docs/dev/RUNS_API.md). Real mode refuses each of them until the service says where
 // it comes from (the questions on #63), rather than send something it would not accept.
 
-export class RunInputUnavailableError extends Error {
-  constructor(readonly input: "sender" | "balance key" | "user") {
-    super(`The ${input} for a payroll run is not available yet`)
-    this.name = "RunInputUnavailableError"
-  }
-}
+export { RunInputUnavailableError }
 
 const isMock = () =>
   process.env.NEXT_PUBLIC_API_MODE !== "real" && apiConfig.mode === "mock"

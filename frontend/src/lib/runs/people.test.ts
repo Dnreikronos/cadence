@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { initialsOf, nameLookup, unknownPerson } from "./people"
+import { initialsOf, peopleByAccount } from "./people"
 
 describe("initialsOf", () => {
   it("takes the first letters of the first two words", () => {
@@ -9,21 +9,18 @@ describe("initialsOf", () => {
   })
 })
 
-describe("nameLookup", () => {
-  const people = [{ id: "a", name: "Bruno Costa" }]
+describe("peopleByAccount", () => {
+  const people = [
+    { id: "a", tokenAccount: "AccountA" },
+    { id: "b", tokenAccount: null },
+  ]
 
-  it("finds a person by id", () => {
-    expect(nameLookup(people, true)("a")).toBe("Bruno Costa")
+  it("finds a person by the account a payment went to", () => {
+    expect(peopleByAccount(people)("AccountA")?.id).toBe("a")
   })
 
-  it("does not name someone the answered list does not have", () => {
-    expect(nameLookup(people, true)("gone")).toBe(unknownPerson)
-    // The list failed to load: still an answer, with no name for anyone.
-    expect(nameLookup(undefined, true)("a")).toBe(unknownPerson)
-  })
-
-  it("has no name at all until the list has answered", () => {
-    expect(nameLookup(undefined, false)("a")).toBeUndefined()
-    expect(nameLookup(people, false)("a")).toBeUndefined()
+  it("finds no one for an unknown account, or before the list has answered", () => {
+    expect(peopleByAccount(people)("Other")).toBeUndefined()
+    expect(peopleByAccount(undefined)("AccountA")).toBeUndefined()
   })
 })

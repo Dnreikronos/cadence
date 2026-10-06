@@ -1,18 +1,22 @@
 import { describe, expect, it } from "vitest"
-import { EXPIRY_MS } from "@/lib/deposit/reconcile"
-import type { RunPaymentPrepared } from "@/lib/api/schemas"
+import { paymentKey, type Signable } from "./executor"
 import { createHeldStore, heldMaxAgeMs, lookupHeld } from "./held"
 
-const prepared = (n: number): RunPaymentPrepared => ({
+const RUN = "c0000000-0000-4000-8000-000000000001"
+const prepared = (n: number): Signable => ({
+  position: n,
+  destination: `account${n}`,
+  attempt: 0,
   request_id: String(n).repeat(64).slice(0, 64),
+  status: "prepared",
+  signature: null,
+  slot: null,
+  error: null,
   transaction: "AQID",
-  transaction_version: 1,
-  required_signers: ["wallet"],
-  recent_blockhash: "blockhash",
   last_valid_block_height: 1000 + n,
-  payment_id: `b0000000-0000-4000-8000-00000000000${n}`,
-  person_id: `a0000000-0000-4000-8000-00000000000${n}`,
+  required_signers: ["wallet"],
 })
+const key = (n: number) => paymentKey(RUN, n)
 
 describe("lookupHeld", () => {
   it("has nothing to sign for a transaction this page never held", () => {
@@ -34,47 +38,60 @@ describe("lookupHeld", () => {
     expect(lookupHeld(held, 1_000 + 10 * heldMaxAgeMs).status).toBe("stale")
   })
 
-  it("uses the same clock as the deposit's reconciliation", () => {
-    expect(heldMaxAgeMs).toBe(EXPIRY_MS)
+  it("lets go of a transaction once its blockhash may have run out, about a minute", () => {
+    expect(heldMaxAgeMs).toBe(60_000)
   })
 })
 
 describe("the held store", () => {
-  it("holds a run's transactions by payment and ages them from when they were held", () => {
+  it("holds a run's transactions by position and ages them from when they were held", () => {
     let time = 0
     const store = createHeldStore(() => time)
-    store.holdAll([prepared(1), prepared(2)])
-    expect(store.has(prepared(1).payment_id)).toBe(true)
-    expect(store.lookup(prepared(2).payment_id)).toEqual({
+    store.hold(key(1), prepared(1))
+    store.hold(key(2), prepared(2))
+    expect(store.has(key(1))).toBe(true)
+    expect(store.lookup(key(2))).toEqual({
       status: "ready",
       prepared: prepared(2),
     })
     time = heldMaxAgeMs
-    expect(store.lookup(prepared(1).payment_id)).toEqual({ status: "stale" })
+    expect(store.lookup(key(1))).toEqual({ status: "stale" })
     // A transaction prepared later by a retry has its own age.
-    store.hold(prepared(3))
-    expect(store.lookup(prepared(3).payment_id).status).toBe("ready")
+    store.hold(key(3), prepared(3))
+    expect(store.lookup(key(3)).status).toBe("ready")
   })
 
   it("keeps a transaction when it is only looked at, and loses it once dropped", () => {
     const store = createHeldStore(() => 0)
-    store.hold(prepared(1))
-    store.lookup(prepared(1).payment_id)
-    store.lookup(prepared(1).payment_id)
-    expect(store.has(prepared(1).payment_id)).toBe(true)
-    store.drop(prepared(1).payment_id)
-    expect(store.has(prepared(1).payment_id)).toBe(false)
-    expect(store.lookup(prepared(1).payment_id)).toEqual({ status: "gone" })
+    store.hold(key(1), prepared(1))
+    store.lookup(key(1))
+    store.lookup(key(1))
+    expect(store.has(key(1))).toBe(true)
+    store.drop(key(1))
+    expect(store.has(key(1))).toBe(false)
+    expect(store.lookup(key(1))).toEqual({ status: "gone" })
   })
 
-  it("replaces a transaction that a retry prepared for the same payment", () => {
+  it("replaces a transaction that a retry prepared for the same position", () => {
     const store = createHeldStore(() => 0)
-    store.hold(prepared(1))
-    const replacement = { ...prepared(1), request_id: "f".repeat(64) }
-    store.hold(replacement)
-    expect(store.lookup(prepared(1).payment_id)).toEqual({
+    store.hold(key(1), prepared(1))
+    const replacement = {
+      ...prepared(1),
+      attempt: 1,
+      request_id: "f".repeat(64),
+    }
+    store.hold(key(1), replacement)
+    expect(store.lookup(key(1))).toEqual({
       status: "ready",
       prepared: replacement,
     })
+  })
+
+  it("lists one run's held transactions in position order, and no other run's", () => {
+    const store = createHeldStore(() => 0)
+    store.hold(key(2), prepared(2))
+    store.hold(key(0), prepared(0))
+    store.hold(paymentKey("another-run", 1), prepared(1))
+    expect(store.ofRun(RUN).map((p) => p.position)).toEqual([0, 2])
   })
 })
