@@ -15,9 +15,12 @@ export const scenarioNames = [
   "setup-required",
   // Every confirm is rejected by the network.
   "tx-failed",
-  // In a run: payment 2 fails and payment 3 expires on their first attempt, so
-  // a retry of either confirms. The rest confirm.
+  // In a run: the network rejects the second payment (position 1) on its first
+  // attempt, so the run stops there and a retry of it confirms.
   "partial-failure",
+  // In a run: the second payment (position 1) cannot be prepared on its first
+  // attempt; a retry prepares it.
+  "prepare-failed",
   // Apply-pending finds a credit that arrived mid-flight.
   "credit-mismatch",
   // The chain read behind the public USDC balance fails (not a proof-service call).

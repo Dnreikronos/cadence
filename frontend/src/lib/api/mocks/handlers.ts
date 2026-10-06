@@ -16,8 +16,14 @@ import {
   seedPeople,
   type MockAuditor,
   type MockPayment,
+  type MockRun,
   type MockRunPayment,
 } from "./db"
+import {
+  MOCK_BLOCKHASH_LIFETIME,
+  mockBlockHeight,
+  mockTokenAccount,
+} from "./chain"
 import { scenarios, timing } from "./scenario"
 
 // Mock of the proof service, written against docs/dev/API_CONTRACT.md. It answers
@@ -81,7 +87,6 @@ const confirmBody = z.strictObject({
   request_id: z.string(),
   signature: z.string(),
 })
-const signatureBody = z.strictObject({ signature: z.string() })
 
 function badConfirm(requestId: string | undefined, signature: string) {
   if (
@@ -99,7 +104,6 @@ function badConfirm(requestId: string | undefined, signature: string) {
 const alreadyConfirmedCode: Record<string, string> = {
   wrap: "wrap_already_confirmed",
   transfer: "transfer_already_confirmed",
-  "run-payment": "transfer_already_confirmed",
 }
 
 // A repeat with the same signature returns the stored receipt; another
@@ -307,46 +311,150 @@ function revealRisk(amount: bigint) {
 
 // ---- Runs -------------------------------------------------------------------
 
-function runPaymentPrepared(runPayment: MockRunPayment) {
+// docs/dev/RUNS_API.md: positions, token accounts, a batch confirm with per-position
+// errors, and a run-level retry. No role check and no idempotency, like the service.
+
+// Who a token account belongs to: an activated person of the company, or no one.
+function personOfAccount(account: string) {
+  return (
+    seedPeople.find(
+      (person) => person.activated && mockTokenAccount(person.id) === account,
+    )?.id ?? null
+  )
+}
+
+const liveAt = (payment: MockRunPayment, height: number) =>
+  payment.lastValidBlockHeight !== undefined &&
+  height <= payment.lastValidBlockHeight
+
+// partial-failure: position 1 is rejected by the network on its first attempt.
+// prepare-failed: position 1 cannot be prepared on its first attempt.
+const rejectsFirst = (payment: MockRunPayment) =>
+  scenarios.has("partial-failure") &&
+  payment.position === 1 &&
+  payment.attempt === 0
+const cannotPrepare = (payment: MockRunPayment) =>
+  scenarios.has("prepare-failed") &&
+  payment.position === 1 &&
+  payment.attempt === 0
+
+// A new attempt for a position: prepared with a fresh transaction, or
+// `preparation_failed` with no transaction when its account cannot be paid.
+function prepareAttempt(payment: MockRunPayment, attempt: number) {
+  Object.assign(payment, {
+    attempt,
+    signature: null,
+    slot: null,
+    polls: 0,
+    transaction: undefined,
+    lastValidBlockHeight: undefined,
+  })
+  if (payment.personId === null || cannotPrepare(payment)) {
+    payment.status = "preparation_failed"
+    payment.requestId = null
+    payment.error =
+      payment.personId === null
+        ? "invalid_confidential_state"
+        : "proof_generation_failed"
+    return
+  }
   const p = prepared(COMPANY_WALLET)
-  remember("run-payment", p, COMPANY_WALLET, runPayment.amount)
-  runPayment.request = p.request_id
-  runPayment.polls = 0
-  runPayment.attempts += 1
-  runPayment.status = "pending"
-  runPayment.failure = null
-  runPayment.receipt = undefined
+  payment.status = "prepared"
+  payment.requestId = p.request_id
+  payment.error = null
+  payment.transaction = p.transaction
+  payment.lastValidBlockHeight = mockBlockHeight() + MOCK_BLOCKHASH_LIFETIME
+}
+
+// The run as the service answers it. `withTransactions` lists the positions whose
+// transaction is returned: those prepared in this call.
+function runBody(
+  run: MockRun,
+  withTransactions: ReadonlySet<number> = new Set(),
+  errors: { position: number; error: string }[] = [],
+) {
+  const statuses = run.payments.map((p) => p.status)
   return {
-    ...p,
-    payment_id: runPayment.paymentId,
-    person_id: runPayment.personId,
+    run_id: run.id,
+    company_wallet: run.companyWallet,
+    sender: run.sender,
+    mint: "CGL4U4VC8arAEUDxLh7c6K4rJnZr1T6faK9QQRn2sYmb",
+    transaction_version: 1,
+    required_signers: [run.companyWallet],
+    status: statuses.every((status) => status === "finalized")
+      ? "completed"
+      : statuses.some((status) =>
+            ["failed", "expired", "preparation_failed"].includes(status),
+          )
+        ? "partial_failure"
+        : "prepared",
+    payments: run.payments.map((p) => ({
+      position: p.position,
+      destination: p.destination,
+      attempt: p.attempt,
+      request_id: p.requestId,
+      status: p.status,
+      signature: p.signature,
+      slot: p.slot,
+      error: p.error,
+      ...(withTransactions.has(p.position) && p.status === "prepared"
+        ? {
+            transaction: p.transaction,
+            last_valid_block_height: p.lastValidBlockHeight,
+          }
+        : {}),
+    })),
+    ...(errors.length ? { errors } : {}),
   }
 }
 
-// partial-failure: payments 2 and 3 fail on their first attempt only, so a retry
-// can be exercised end to end.
-const failsFirstAttempt = (payment: MockRunPayment, index: number) =>
-  scenarios.has("partial-failure") &&
-  (index === 1 || index === 2) &&
-  payment.attempts === 1
-
-// A payment that never confirmed outlives its blockhash: payment 3 reports
-// `expired` until it is retried.
-function reportedStatus(
-  payment: MockRunPayment,
-  index: number,
-): s.PaymentStatus {
-  return index === 2 &&
-    payment.status === "pending" &&
-    failsFirstAttempt(payment, index)
-    ? "expired"
-    : payment.status
-}
-
-function findRunPayment(runId: string, paymentId: string) {
-  const run = db.runs.get(runId)
-  const index = run?.payments.findIndex((p) => p.paymentId === paymentId) ?? -1
-  return { run, index, payment: run?.payments[index] }
+// One confirm item: the item error, or null once the outcome is recorded.
+function confirmPosition(
+  run: MockRun,
+  item: { position: number; request_id: string; signature: string },
+): string | null {
+  const payment = run.payments.find((p) => p.position === item.position)
+  if (!payment) return "invalid_payment"
+  if (payment.status === "finalized" || payment.status === "failed") {
+    // A recorded outcome is idempotent for the same attempt and signature.
+    return payment.requestId === item.request_id &&
+      payment.signature === item.signature
+      ? null
+      : "payment_already_resolved"
+  }
+  if (payment.status !== "prepared") return "payment_not_prepared"
+  if (payment.requestId !== item.request_id) return "payment_attempt_changed"
+  if (scenarios.has("tx-failed") || rejectsFirst(payment)) {
+    payment.status = "failed"
+    payment.error = "transaction_failed"
+    payment.signature = item.signature
+    payment.slot = 507_000_000 + nextId()
+    return null
+  }
+  payment.polls += 1
+  if (stillPending(payment.polls)) return "transaction_not_finalized"
+  // The proof was built for the balance as it stood: one that no longer covers the
+  // amount fails on the network.
+  if (payment.amount > db.company.available) {
+    payment.status = "failed"
+    payment.error = "transaction_failed"
+  } else {
+    db.company.available -= payment.amount
+    payment.status = "finalized"
+    if (payment.personId === ME_PERSON) db.me.pending += payment.amount
+    db.payments.push({
+      id: randomUuid(),
+      runId: run.id,
+      personId: payment.personId ?? "",
+      amount: payment.amount,
+      status: "confirmed",
+      paidAt: new Date().toISOString(),
+      signature: item.signature,
+    })
+  }
+  payment.signature = item.signature
+  payment.slot = 507_000_000 + nextId()
+  return null
 }
 
 export const handlers = [
@@ -412,135 +520,118 @@ export const handlers = [
 
   // ---- Runs
   http.post(at("/runs"), async ({ request }) => {
-    const stopped = await guard(request, "admin", "transfer_rate_limited")
+    const stopped = await guard(request, undefined, "transfer_rate_limited")
     if (stopped) return stopped
     const { data, error } = await parse(request, s.runRequestSchema)
     if (error) return error
-
-    // The same key returns the same run, with the transactions it first issued.
-    const existing = db.runKeys.get(data.idempotency_key)
-    if (existing) return HttpResponse.json(db.runs.get(existing)?.response)
-
-    for (const payment of data.payments) {
-      const person = seedPeople.find((p) => p.id === payment.person_id)
-      if (!person) return fail(404, "person_not_found")
-      if (!person.activated) return fail(409, "recipient_not_activated")
+    const recipients = data.payments.map((p) => p.recipient)
+    if (
+      new Set(recipients).size !== recipients.length ||
+      recipients.includes(data.sender)
+    ) {
+      return fail(400, "invalid_payments")
     }
-    const runId = randomUuid()
-    const run: NonNullable<ReturnType<typeof db.runs.get>> = {
-      id: runId,
-      createdAt: new Date().toISOString(),
-      payments: data.payments.map<MockRunPayment>((p) => ({
-        paymentId: randomUuid(),
-        personId: p.person_id,
+    if (!db.linkedWallets.has(data.company_wallet)) {
+      if (!data.wallet_signature) return fail(409, "wallet_link_required")
+      db.linkedWallets.add(data.company_wallet)
+    }
+    if (data.sender !== mockTokenAccount(data.company_wallet)) {
+      return fail(403, "wallet_access_denied")
+    }
+    const run: MockRun = {
+      id: randomUuid(),
+      companyWallet: data.company_wallet,
+      sender: data.sender,
+      payments: data.payments.map((p, position) => ({
+        position,
+        destination: p.recipient,
+        personId: personOfAccount(p.recipient),
         amount: BigInt(p.amount),
-        status: "pending",
-        failure: null,
+        attempt: 0,
+        requestId: null,
+        status: "prepared",
         signature: null,
-        request: "",
+        slot: null,
+        error: null,
         polls: 0,
-        attempts: 0,
       })),
     }
-    db.runs.set(runId, run)
-    db.runKeys.set(data.idempotency_key, runId)
-    run.response = {
-      run_id: run.id,
-      payments: run.payments.map(runPaymentPrepared),
-    }
-    return HttpResponse.json(run.response)
+    for (const payment of run.payments) prepareAttempt(payment, 0)
+    db.runs.set(run.id, run)
+    return HttpResponse.json(
+      runBody(run, new Set(run.payments.map((p) => p.position))),
+    )
   }),
 
   http.get(at("/runs/:runId"), async ({ request, params }) => {
-    const stopped = await guard(request, "admin")
+    const stopped = await guard(request)
     if (stopped) return stopped
     const run = db.runs.get(String(params.runId))
     if (!run) return fail(404, "run_not_found")
-    return HttpResponse.json({
-      run_id: run.id,
-      created_at: run.createdAt,
-      payments: run.payments.map((p, index) => ({
-        payment_id: p.paymentId,
-        person_id: p.personId,
-        status: reportedStatus(p, index),
-        transparent: false,
-        failure: p.failure,
-        signature: p.signature,
-      })),
-    })
+    return HttpResponse.json(runBody(run))
   }),
 
-  http.post(
-    at("/runs/:runId/payments/:paymentId/confirm"),
-    async ({ request, params }) => {
-      const stopped = await guard(request, "admin", "transfer_rate_limited")
-      if (stopped) return stopped
-      const { data, error } = await parse(request, signatureBody)
-      if (error) return error
-      const bad = badConfirm(undefined, data.signature)
-      if (bad) return bad
-      const { run, index, payment } = findRunPayment(
-        String(params.runId),
-        String(params.paymentId),
-      )
-      if (!run || !payment) return fail(404, "payment_not_found")
-      if (payment.receipt) {
-        return replay("run-payment", payment.receipt, data.signature)
-      }
-      const firstAttempt = failsFirstAttempt(payment, index)
-      if (scenarios.has("tx-failed") || firstAttempt) {
-        // Payment 3 stays unconfirmed and is reported as expired.
-        if (!(firstAttempt && index === 2)) {
-          payment.status = "failed"
-          payment.failure = "transaction_failed"
-        }
-        return fail(409, "transaction_failed")
-      }
-      payment.polls += 1
-      payment.status = "signed"
-      if (stillPending(payment.polls)) {
-        return fail(409, "transaction_not_finalized")
-      }
-      if (payment.amount > db.company.available) {
-        return fail(409, "invalid_confidential_state")
-      }
-      db.company.available -= payment.amount
-      payment.status = "confirmed"
-      payment.signature = data.signature
-      payment.receipt = receiptFor(payment.request, data.signature)
-      if (payment.personId === ME_PERSON) db.me.pending += payment.amount
-      db.payments.push({
-        id: payment.paymentId,
-        runId: run.id,
-        personId: payment.personId,
-        amount: payment.amount,
-        status: "confirmed",
-        paidAt: new Date().toISOString(),
-        signature: data.signature,
-      })
-      return HttpResponse.json(payment.receipt)
-    },
-  ),
+  http.post(at("/runs/:runId/confirm"), async ({ request, params }) => {
+    const stopped = await guard(request, undefined, "transfer_rate_limited")
+    if (stopped) return stopped
+    const { data, error } = await parse(request, s.runConfirmRequestSchema)
+    if (error) return error
+    const run = db.runs.get(String(params.runId))
+    if (!run) return fail(404, "run_not_found")
+    const positions = data.payments.map((p) => p.position)
+    if (new Set(positions).size !== positions.length) {
+      return fail(400, "invalid_payments")
+    }
+    const errors = data.payments.flatMap((item) => {
+      const code = confirmPosition(run, item)
+      return code ? [{ position: item.position, error: code }] : []
+    })
+    return HttpResponse.json(runBody(run, new Set(), errors))
+  }),
 
-  http.post(
-    at("/runs/:runId/payments/:paymentId/retry"),
-    async ({ request, params }) => {
-      const stopped = await guard(request, "admin", "transfer_rate_limited")
-      if (stopped) return stopped
-      const { payment, index } = findRunPayment(
-        String(params.runId),
-        String(params.paymentId),
-      )
-      if (!payment) return fail(404, "payment_not_found")
-      // Only a payment that did not land gets a new transaction: a confirmed
-      // one would be paid twice. Mock-only code; the draft contract has none.
-      const status = reportedStatus(payment, index)
-      if (status !== "failed" && status !== "expired") {
-        return fail(409, "payment_not_retryable")
+  http.post(at("/runs/:runId/retry"), async ({ request, params }) => {
+    const stopped = await guard(request, undefined, "transfer_rate_limited")
+    if (stopped) return stopped
+    const { data, error } = await parse(request, s.runRetryRequestSchema)
+    if (error) return error
+    const run = db.runs.get(String(params.runId))
+    if (!run) return fail(404, "run_not_found")
+    const asked = new Map(data.payments.map((p) => [p.position, p]))
+    if (
+      asked.size !== data.payments.length ||
+      [...asked.keys()].some((position) => !run.payments[position])
+    ) {
+      return fail(400, "invalid_payments")
+    }
+    const height = mockBlockHeight()
+    // Every live prepared position must come with its original signature. The mock
+    // cannot see the network: a live one that was signed has not landed yet.
+    for (const payment of run.payments) {
+      if (payment.status !== "prepared" || !liveAt(payment, height)) continue
+      const item = asked.get(payment.position)
+      if (!item) return fail(409, "outstanding_payments")
+      if (!item.signature) return fail(409, "original_signature_required")
+      return fail(409, "transaction_not_finalized")
+    }
+    const errors: { position: number; error: string }[] = []
+    const rebuilt = new Set<number>()
+    for (const payment of run.payments) {
+      if (payment.status === "prepared") {
+        // Expired with no history: unresolved, never rebuilt.
+        errors.push({
+          position: payment.position,
+          error: "transaction_history_unavailable",
+        })
+        continue
       }
-      return HttpResponse.json(runPaymentPrepared(payment))
-    },
-  ),
+      const item = asked.get(payment.position)
+      if (!item || payment.status === "finalized") continue
+      payment.amount = BigInt(item.amount)
+      prepareAttempt(payment, payment.attempt + 1)
+      rebuilt.add(payment.position)
+    }
+    return HttpResponse.json(runBody(run, rebuilt, errors))
+  }),
 
   // ---- Unwrap
   http.post(at("/unwrap"), async ({ request }) => {
@@ -661,6 +752,18 @@ export const handlers = [
     const rows = [...db.amounts].map(([person_id, amount]) => ({
       person_id,
       amount: amount.toString(),
+    }))
+    return paged(request, rows)
+  }),
+  // Proposed (API_CONTRACT Q36): an activated person has a token account.
+  http.get(at("/company/people/accounts"), async ({ request }) => {
+    const stopped = await guard(request, "admin")
+    if (stopped) return stopped
+    const rows = [...db.people].map((person_id) => ({
+      person_id,
+      token_account: seedPeople.some((p) => p.id === person_id && p.activated)
+        ? mockTokenAccount(person_id)
+        : null,
     }))
     return paged(request, rows)
   }),

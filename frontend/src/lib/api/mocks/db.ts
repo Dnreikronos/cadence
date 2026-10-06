@@ -1,9 +1,8 @@
 import type {
   AccessLogItem,
   AuditorStatus,
-  PaymentStatus,
   Receipt,
-  RunCreated,
+  RunPaymentStatus,
 } from "../schemas"
 
 // Fixed ids so tests and screens can refer to the seed data.
@@ -32,18 +31,31 @@ export type MockRequest = {
   receipt?: Receipt
 }
 
+// One position of a run, as the service stores it, plus what the mock needs to move
+// the ledgers: the amount (the real service keeps none) and who it pays.
 export type MockRunPayment = {
-  paymentId: string
-  personId: string
+  position: number
+  destination: string
+  // Null when the account belongs to no one the mock knows.
+  personId: string | null
   amount: bigint
-  status: PaymentStatus
-  failure: string | null
+  attempt: number
+  requestId: string | null
+  status: RunPaymentStatus
   signature: string | null
-  request: string
+  slot: number | null
+  error: string | null
+  transaction?: string
+  lastValidBlockHeight?: number
+  // How many confirm calls have asked about this attempt.
   polls: number
-  // Transactions issued for this payment: the first, then one per retry.
-  attempts: number
-  receipt?: Receipt
+}
+
+export type MockRun = {
+  id: string
+  companyWallet: string
+  sender: string
+  payments: MockRunPayment[]
 }
 
 export type MockAuditor = {
@@ -213,16 +225,10 @@ function seed() {
     // people table, which a screen's own mock fills through `registerPerson`.
     people: new Set<string>(seedPeople.map((person) => person.id)),
     requests: new Map<string, MockRequest>(),
-    runs: new Map<
-      string,
-      {
-        id: string
-        createdAt: string
-        payments: MockRunPayment[]
-        response?: RunCreated
-      }
-    >(),
-    runKeys: new Map<string, string>(),
+    runs: new Map<string, MockRun>(),
+    // Wallets that signed the link to the user: the first run of any other is refused
+    // with `wallet_link_required`.
+    linkedWallets: new Set<string>(),
     // The demo recipient starts activated, so a page reload does not send every
     // recipient screen back to /activate; `resetAccountStatus` makes a new one.
     enrolled: new Set<string>([ME_WALLET]),
