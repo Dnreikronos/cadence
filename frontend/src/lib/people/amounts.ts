@@ -1,6 +1,6 @@
 import type { PersonAmount } from "@/lib/api/schemas"
 
-type Page = { items: PersonAmount[]; next_cursor: string | null }
+type Page<T> = { items: T[]; next_cursor: string | null }
 
 export type AmountsRead = {
   byPerson: Record<string, string>
@@ -15,8 +15,17 @@ export const MAX_AMOUNT_PAGES = 50
 // the end. A cursor that does not advance would loop forever, so it ends the read
 // as complete (the service has nothing more to say); the page cap does not, it
 // says so.
-export async function readAllAmounts(
-  fetchPage: (cursor?: string) => Promise<Page>,
+export function readAllAmounts(
+  fetchPage: (cursor?: string) => Promise<Page<PersonAmount>>,
+  maxPages = MAX_AMOUNT_PAGES,
+): Promise<AmountsRead> {
+  return readAllByPerson(fetchPage, (item) => item.amount, maxPages)
+}
+
+// The same walk for any per-person read: one value per person id, null left out.
+export async function readAllByPerson<T extends { person_id: string }>(
+  fetchPage: (cursor?: string) => Promise<Page<T>>,
+  valueOf: (item: T) => string | null,
   maxPages = MAX_AMOUNT_PAGES,
 ): Promise<AmountsRead> {
   const byPerson: Record<string, string> = {}
@@ -24,7 +33,10 @@ export async function readAllAmounts(
   let more = false
   for (let pages = 0; pages < maxPages; pages++) {
     const page = await fetchPage(cursor)
-    for (const item of page.items) byPerson[item.person_id] = item.amount
+    for (const item of page.items) {
+      const value = valueOf(item)
+      if (value !== null) byPerson[item.person_id] = value
+    }
     more = page.next_cursor !== null && page.next_cursor !== cursor
     if (!more) break
     cursor = page.next_cursor ?? undefined

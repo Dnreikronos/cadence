@@ -26,6 +26,8 @@ export const queryKeys = {
     detail: (id: string) => [...people, "detail", id] as const,
     // Per-person amounts live in the proof service.
     amounts: (query: PageQuery = {}) => [...people, "amounts", query] as const,
+    // Where each person's private payments go, also from the proof service.
+    accounts: () => [...people, "accounts"] as const,
   },
   // Private balances: the company's and the signed-in recipient's, per viewer, so
   // an answer cached for one person is never read by another on the same tab.
