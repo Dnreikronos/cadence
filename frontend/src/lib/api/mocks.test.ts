@@ -11,7 +11,6 @@ import { createApiClient } from "./client"
 import { MOCK_ORIGIN } from "./config"
 import * as s from "./schemas"
 import { expectNoAmount } from "./no-amount"
-import { signAndConfirm, type Signer } from "./sign"
 import {
   COMPANY_ID,
   COMPANY_WALLET,
@@ -44,10 +43,6 @@ const api = createApiClient({
 
 const SIG = "5SigMockSignature1111111111111111111111111111"
 const OTHER_SIG = "4AnotherMockSignature".padEnd(64, "1")
-const signer: Signer = {
-  address: COMPANY_WALLET,
-  signTransaction: async (bytes) => Uint8Array.from([...bytes, 1]),
-}
 const [bruno, , diego, northwind] = seedPeople
 
 // A request as the browser would send it, without the client's own checks.
@@ -303,7 +298,8 @@ describe("confirm", () => {
 
 describe("runs", () => {
   it("refuses the first run of a wallet until it is linked, then remembers the link", async () => {
-    const { wallet_signature: _, ...unlinked } = runOf([bruno.id])
+    db.linkedWallets.clear()
+    const unlinked = { ...runOf([bruno.id]), wallet_signature: undefined }
     expect(await caught(api.runs.create(unlinked))).toMatchObject({
       status: 409,
       code: "wallet_link_required",

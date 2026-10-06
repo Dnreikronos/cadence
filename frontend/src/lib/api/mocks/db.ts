@@ -227,8 +227,9 @@ function seed() {
     requests: new Map<string, MockRequest>(),
     runs: new Map<string, MockRun>(),
     // Wallets that signed the link to the user: the first run of any other is refused
-    // with `wallet_link_required`.
-    linkedWallets: new Set<string>(),
+    // with `wallet_link_required`. The demo company's starts linked, so a demo run does
+    // not open with a refused request; `linkedWallets.clear()` replays the first one.
+    linkedWallets: new Set<string>([COMPANY_WALLET]),
     // The demo recipient starts activated, so a page reload does not send every
     // recipient screen back to /activate; `resetAccountStatus` makes a new one.
     enrolled: new Set<string>([ME_WALLET]),
