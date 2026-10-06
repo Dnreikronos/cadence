@@ -8,11 +8,11 @@ import { receiptSummary } from "@/lib/receipts/receipt"
 import { recentlyPaidIds } from "@/lib/runs/plan"
 import { createApiClient } from "./client"
 import {
+  isKnownRunPaymentStatus,
   knownPaymentStatus,
-  knownRunPaymentStatus,
   paymentItemSchema,
   paymentItemStatuses,
-  paymentStatuses,
+  runPaymentStatuses,
   runSchema,
 } from "./schemas"
 
@@ -37,17 +37,25 @@ const item = (status: unknown) => ({
   signature: null,
 })
 
+const WALLET = "4egAZELoLKWqJwHwAwaZwS2su9rewh7is3ukCagHnSQ5"
 const run = (status: unknown) => ({
   run_id: GUID,
-  created_at: "2026-09-01T12:00:00Z",
+  company_wallet: WALLET,
+  sender: WALLET,
+  mint: WALLET,
+  transaction_version: 1,
+  required_signers: [WALLET],
+  status: "prepared",
   payments: [
     {
-      payment_id: GUID,
-      person_id: GUID,
+      position: 0,
+      destination: WALLET,
+      attempt: 0,
+      request_id: null,
       status,
-      transparent: false,
-      failure: null,
       signature: null,
+      slot: null,
+      error: null,
     },
   ],
 })
@@ -64,7 +72,7 @@ describe("an unknown payment status", () => {
     const api = clientFor(run("reversed"))
     const read = await api.runs.get(GUID)
     expect(read.payments[0].status).toBe("reversed")
-    expect(knownRunPaymentStatus(read.payments[0].status)).toBe("pending")
+    expect(isKnownRunPaymentStatus(read.payments[0].status)).toBe(false)
   })
 
   it("still refuses a status that is not a non-empty string", () => {
@@ -78,8 +86,8 @@ describe("an unknown payment status", () => {
     for (const status of paymentItemStatuses) {
       expect(knownPaymentStatus(status)).toBe(status)
     }
-    for (const status of paymentStatuses) {
-      expect(knownRunPaymentStatus(status)).toBe(status)
+    for (const status of runPaymentStatuses) {
+      expect(isKnownRunPaymentStatus(status)).toBe(true)
     }
   })
 
@@ -94,8 +102,8 @@ describe("an unknown payment status", () => {
     ]) {
       expect(knownPaymentStatus(status), status).toBe("pending")
     }
-    expect(knownRunPaymentStatus("settled")).toBe("pending")
-    expect(knownRunPaymentStatus("Confirmed")).toBe("pending")
+    expect(isKnownRunPaymentStatus("settled")).toBe(false)
+    expect(isKnownRunPaymentStatus("Finalized")).toBe(false)
 
     expect(receiptSummary({ status: "refunded", transparent: false })).toBe(
       "Waiting for the network to confirm.",

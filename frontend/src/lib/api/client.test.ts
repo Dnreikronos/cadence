@@ -138,10 +138,21 @@ describe("ids in paths", () => {
     const { api, fetch } = setup(() => json({}))
     const calls = [
       () => api.runs.get(value),
-      () => api.runs.confirmPayment(value, GUID, "s"),
-      () => api.runs.confirmPayment(GUID, value, "s"),
-      () => api.runs.retryPayment(value, GUID),
-      () => api.runs.retryPayment(GUID, value),
+      () =>
+        api.runs.confirm(value, {
+          payments: [
+            {
+              position: 0,
+              request_id: "a".repeat(64),
+              signature: "5".repeat(64),
+            },
+          ],
+        }),
+      () =>
+        api.runs.retry(value, {
+          aes_key: "AAAAAAAAAAAAAAAAAAAAAA==",
+          payments: [{ position: 0, amount: "1" }],
+        }),
       () => api.company.setAmount(value, "1"),
       () => api.company.invite(value),
       () => api.audit.payments(value),

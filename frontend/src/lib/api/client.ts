@@ -165,37 +165,39 @@ export function createApiClient({
         }),
     },
 
+    // docs/dev/RUNS_API.md. Confirm and retry answer the whole run, with problems for
+    // single positions in `errors`.
     runs: {
       create: (request: s.RunRequest, options: RequestOptions = {}) =>
         call("/runs", {
           ...options,
           method: "POST",
           body: body(s.runRequestSchema, request),
-          response: s.runCreatedSchema,
+          response: s.runSchema,
         }),
       get: async (runId: string, options: RequestOptions = {}) =>
         call(`/runs/${segment(runId)}`, { ...options, response: s.runSchema }),
-      confirmPayment: async (
+      confirm: async (
         runId: string,
-        paymentId: string,
-        signature: string,
+        request: s.RunConfirmRequest,
         options: RequestOptions = {},
       ) =>
-        call(`/runs/${segment(runId)}/payments/${segment(paymentId)}/confirm`, {
+        call(`/runs/${segment(runId)}/confirm`, {
           ...options,
           method: "POST",
-          body: body(s.paymentConfirmSchema, { signature }),
-          response: s.receiptSchema,
+          body: body(s.runConfirmRequestSchema, request),
+          response: s.runSchema,
         }),
-      retryPayment: async (
+      retry: async (
         runId: string,
-        paymentId: string,
+        request: s.RunRetryRequest,
         options: RequestOptions = {},
       ) =>
-        call(`/runs/${segment(runId)}/payments/${segment(paymentId)}/retry`, {
+        call(`/runs/${segment(runId)}/retry`, {
           ...options,
           method: "POST",
-          response: s.runPaymentPreparedSchema,
+          body: body(s.runRetryRequestSchema, request),
+          response: s.runSchema,
         }),
     },
 
@@ -306,6 +308,16 @@ export function createApiClient({
           method: "PUT",
           body: body(s.setAmountRequestSchema, { amount }),
           response: s.personAmountSchema,
+        }),
+      // Each person's token account, for a payroll run (proposed).
+      recipientAccounts: (
+        query: PageQuery = {},
+        options: RequestOptions = {},
+      ) =>
+        call("/company/people/accounts", {
+          ...options,
+          query,
+          response: page(s.recipientAccountSchema),
         }),
       invite: async (personId: string, options: RequestOptions = {}) =>
         call(`/company/people/${segment(personId)}/invite`, {

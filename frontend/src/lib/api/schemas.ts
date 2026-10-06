@@ -110,74 +110,130 @@ function open<const T extends readonly [string, ...string[]]>(values: T) {
 
 // ---- Payroll runs -----------------------------------------------------------
 
+// docs/dev/RUNS_API.md (#107). Recipients and the sender are token accounts, not people
+// or wallets. A run never carries a person or an amount: the client knows who each
+// `position` is from the request it built (the index in `payments`).
 export const runRequestSchema = z.strictObject({
   company_wallet: key,
+  // The company's source token account.
+  sender: key,
+  aes_key: aesKey,
+  // Only the first request for a wallet (`wallet_link_required` otherwise).
+  wallet_signature: signatureSchema.optional(),
   payments: z
-    .array(z.strictObject({ person_id: id, amount: unitsSchema }))
+    .array(z.strictObject({ recipient: key, amount: unitsSchema }))
     .min(1)
-    // Each entry is about 80 bytes of JSON, and the service takes 8 KiB bodies.
+    // The service takes at most 100 payments, in a 32 KiB body.
     .max(100),
-  idempotency_key: id,
 })
 export type RunRequest = z.infer<typeof runRequestSchema>
 
-export const runPaymentPreparedSchema = preparedSchema.extend({
-  payment_id: id,
-  person_id: id,
-})
-export type RunPaymentPrepared = z.infer<typeof runPaymentPreparedSchema>
-
-export const runCreatedSchema = z.object({
-  run_id: id,
-  // In signing order.
-  payments: z.array(runPaymentPreparedSchema).min(1),
-})
-export type RunCreated = z.infer<typeof runCreatedSchema>
-
-export const paymentStatuses = [
-  "pending",
-  "signed",
-  "confirmed",
+export const runPaymentStatuses = [
+  "prepared",
+  "finalized",
   "failed",
   "expired",
+  "preparation_failed",
 ] as const
-export type PaymentStatus = (typeof paymentStatuses)[number]
+export type RunPaymentStatus = (typeof runPaymentStatuses)[number]
 
 export function isKnownRunPaymentStatus(
   status: string,
-): status is PaymentStatus {
-  return (paymentStatuses as readonly string[]).includes(status)
+): status is RunPaymentStatus {
+  return (runPaymentStatuses as readonly string[]).includes(status)
 }
 
-// An unknown status of a payment in a run is read as pending: it never claims a
-// payment is confirmed, and no retry is offered for it. A run screen goes further and
-// shows it as unrecognized (`mergeRow`), since it may mean the payment is in flight.
-export function knownRunPaymentStatus(status: string): PaymentStatus {
-  return (paymentStatuses as readonly string[]).includes(status)
-    ? (status as PaymentStatus)
-    : "pending"
+export const runStatuses = ["prepared", "partial_failure", "completed"] as const
+
+const runPaymentSchema = z.object({
+  position: z.number().int().nonnegative(),
+  destination: z.string().min(1),
+  attempt: z.number().int().nonnegative(),
+  request_id: requestIdSchema.nullable(),
+  status: open(runPaymentStatuses),
+  signature: z.string().min(1).nullable(),
+  slot: z.number().int().nonnegative().nullable(),
+  // A stable code, never a message with values.
+  error: z.string().min(1).nullable(),
+  // Only on prepare and retry, and only for a position prepared in that call.
+  transaction: z.base64().optional(),
+  last_valid_block_height: z.number().int().nonnegative().optional(),
+})
+export type RunPayment = z.infer<typeof runPaymentSchema>
+
+// A position whose transaction was not received cannot be signed, whatever its status.
+export type RunPaymentPrepared = RunPayment & {
+  request_id: string
+  transaction: string
+  last_valid_block_height: number
 }
+
+export const isSignable = (
+  payment: RunPayment,
+): payment is RunPaymentPrepared =>
+  payment.status === "prepared" &&
+  payment.request_id !== null &&
+  payment.transaction !== undefined &&
+  payment.last_valid_block_height !== undefined
+
+// Problems with single positions, in a 200: the rest of the call still counts.
+const runItemErrorSchema = z.object({
+  position: z.number().int().nonnegative(),
+  error: z.string().min(1),
+})
+export type RunItemError = z.infer<typeof runItemErrorSchema>
 
 export const runSchema = z.object({
   run_id: id,
-  created_at: timestamp,
-  payments: z.array(
-    z.object({
-      payment_id: id,
-      person_id: id,
-      status: open(paymentStatuses),
-      transparent: z.boolean(),
-      // A stable code when failed, never a message with values.
-      failure: z.string().nullable(),
-      signature: z.string().nullable(),
-    }),
-  ),
+  company_wallet: z.string().min(1),
+  sender: z.string().min(1),
+  mint: z.string().min(1),
+  transaction_version: z.literal(1),
+  required_signers: z.array(z.string().min(1)).min(1),
+  status: open(runStatuses),
+  // In signing order.
+  payments: z.array(runPaymentSchema),
+  errors: z.array(runItemErrorSchema).optional(),
 })
 export type Run = z.infer<typeof runSchema>
 
-export const paymentConfirmSchema = z.strictObject({
-  signature: signatureSchema,
+export const runConfirmRequestSchema = z.strictObject({
+  payments: z
+    .array(
+      z.strictObject({
+        position: z.number().int().nonnegative(),
+        request_id: requestIdSchema,
+        signature: signatureSchema,
+      }),
+    )
+    .min(1)
+    .max(100),
 })
+export type RunConfirmRequest = z.infer<typeof runConfirmRequestSchema>
+
+export const runRetryRequestSchema = z.strictObject({
+  aes_key: aesKey,
+  payments: z
+    .array(
+      z.strictObject({
+        position: z.number().int().nonnegative(),
+        amount: unitsSchema,
+        // The original signature of a prepared position that is still live.
+        signature: signatureSchema.optional(),
+      }),
+    )
+    .min(1)
+    .max(100),
+})
+export type RunRetryRequest = z.infer<typeof runRetryRequestSchema>
+
+// Where a person's private payments go (proposed, API_CONTRACT Q36): null until they
+// have configured an account.
+export const recipientAccountSchema = z.object({
+  person_id: id,
+  token_account: z.string().min(1).nullable(),
+})
+export type RecipientAccount = z.infer<typeof recipientAccountSchema>
 
 // ---- Unwrap -----------------------------------------------------------------
 
