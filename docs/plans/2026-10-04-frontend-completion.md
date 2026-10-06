@@ -244,11 +244,12 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
 - [ ] **Remove `spikes/embedded-wallet/web` from `main`.** It has unauthenticated routes
       that use the Turnkey root key, and Dependabot still watches it only because it is
       there.
-- [ ] Reconcile the payroll client and mock with the `/runs` the backend implemented
+- [x] Reconcile the payroll client and mock with the `/runs` the backend implemented
       (#107, `docs/dev/RUNS_API.md`): token-account recipients and a sender account,
       the `aes_key`, `position`-based batch confirm, retry with amounts and the
       original signatures, no idempotency key, and the `prepared`/`finalized` statuses.
-      Today the client's `POST /runs` body would be refused by the real service.
+      Done on 2026-10-06. Where the browser gets the token accounts, the sender and its
+      key is still open (asked on #63): real mode refuses them.
 - [ ] Get answers to the [open questions](../dev/API_CONTRACT.md#open-questions),
       especially 26 to 37 and the CORS requests (`PUT`, `Retry-After`), or change the
       screens to match what the backend decides.
@@ -270,10 +271,13 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
 - **The real-Supabase repository paths are covered by unit tests with fakes** and by the
   auth task against a local Supabase stack. They were not run against a hosted project
   or against the real proof service.
-- **The payroll client does not match the implemented `/runs`.** The backend (#107)
-  built a different shape from the one the client and mock use; see
-  [Payroll run](../dev/API_CONTRACT.md#payroll-run-one-approval-many-recipients-). The
-  run screens work on the mock only.
+- **Runs work on the mock only.** The client uses the implemented `/runs`, but each
+  person's token account, the sender account and the `aes_key` have no real source yet
+  (questions on #63), and `GET /company/people/accounts` is a proposal.
+- **A failure strands the payments after it.** Signing stops at the first payment that
+  does not finalize, and the ones after it are never signed. The service keeps them
+  `prepared` and never rebuilds them once expired, so those people show "Not sent" and
+  are paid in a new run (asked on #63).
 - **A reload or a new tab does not lose a sent payment or withdrawal, but unsigned run
   payments are still lost.** Sent run payments, held withdrawals, and the deposit's wrap and
   apply-pending records are kept per viewer in `localStorage`, shared by every tab of the
