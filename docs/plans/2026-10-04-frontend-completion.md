@@ -158,7 +158,7 @@ security review of the whole frontend found. The checklist is one list, in the o
 work is likely to land; the first items are done.
 
 **Done.** Persisting submissions for withdraw and payroll; and, in the security-hardening
-PR: a stage 1 CSP and the other response headers (`src/lib/security-headers.ts`), shorter
+PR: a stage 1 CSP (since replaced by stage 2, below) and the other response headers (`src/lib/security-headers.ts`), shorter
 and `Secure`-when-https session cookies from one helper, an emailed-link origin fixed by
 `NEXT_PUBLIC_SITE_URL`, `enable_confirmations = true` in the local Supabase config, a
 cluster that production builds must name, landing copy that no longer overclaims, pinned
@@ -168,14 +168,12 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
       check them on return as deposit and apply-pending do. Done: a reload no longer
       forgets a withdrawal or a run payment that may have landed, and a second tab of the
       same browser sees it too. They are kept per viewer, and a sign-out keeps what is unresolved.
-- [ ] **Strict CSP, stage 2, before the wallet lands (recommended).** Stage 1 allows
-      `'unsafe-inline'` scripts. Once a session key can sign silently, an XSS is a wallet
-      drain: move to a nonce with `'strict-dynamic'` and no `unsafe-inline`, plus Trusted
-      Types if the libraries allow. It costs far less than it first looked: the app routes
-      and `/` already render per request (the viewer is read from cookies and the responses
-      are no-store), so a nonce does not take static pages away; it needs a middleware that
-      mints it and a pass over the inline scripts. Not done in the security-hardening PR,
-      and the team should confirm the date.
+- [x] **Strict CSP, stage 2, before the wallet lands.** Done: the middleware sends a
+      policy with a nonce per request, `'strict-dynamic'` and no `unsafe-inline` for
+      scripts, and Trusted Types enforced (only Next's chunk loader policy, plus a
+      `default` policy for MSW's worker URL in mock builds). Every page renders per
+      request so it carries the nonce. Styles keep `unsafe-inline`. See the frontend
+      README, "Session cookie and security headers".
 - [ ] **Pre-sign transaction decoder and a program/destination allowlist.** The client
       signs whatever the service prepares: `lib/api/sign.ts` only checks `required_signers`.
       Decode the v1 message in the browser, check its programs and destinations against an
