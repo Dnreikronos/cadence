@@ -118,11 +118,14 @@ test("the confirmation total equals the sum, and the run completes", async ({
   ).toBeVisible()
 })
 
-test("a partial failure shows one failed and one expired, and the failed one can be retried", async ({
+test("a failure stops the run there, and a retry waits until nothing can still land", async ({
   page,
   watch,
 }) => {
-  watch.allowStatus(409, /\/runs\/[^/]+\/payments\/[^/]+\/confirm$/)
+  // The first retry is refused while the payment after the failed one can still land.
+  watch.allowStatus(409, /\/runs\/[^/]+\/retry$/)
+  // A fake clock, to let that payment's blockhash run out.
+  await page.clock.install()
   await openNewRun(page, "partial-failure")
   await payButton(page).click()
   await page
@@ -130,42 +133,70 @@ test("a partial failure shows one failed and one expired, and the failed one can
     .getByRole("button", { name: "Confirm and sign" })
     .click()
 
+  // Signed in position order: Bruno lands, the network refuses Diego, and Northwind's
+  // payment, built on a balance that assumed Diego's, is never signed.
   const progress = page.getByRole("region", { name: "Payments in this run" })
   await expect(progress.getByRole("status")).toContainText("1 of 3 confirmed")
   await expect(progress.getByRole("status")).toContainText("2 need attention")
-  await expect(progress.getByText("Failed", { exact: true })).toHaveCount(1)
-  await expect(progress.getByText("Expired", { exact: true })).toHaveCount(1)
-  await expect(progress.getByText("Confirmed", { exact: true })).toHaveCount(1)
-
-  const failed = progress
-    .getByRole("listitem")
-    .filter({ has: page.getByText("Failed", { exact: true }) })
-  const confirmed = progress
-    .getByRole("listitem")
-    .filter({ has: page.getByText("Confirmed", { exact: true }) })
-  const names = Object.keys(amounts)
-  const failedText = await failed.innerText()
-  const confirmedText = await confirmed.innerText()
-  const failedPerson = names.find((name) => failedText.includes(name))
-  const confirmedPerson = names.find((name) => confirmedText.includes(name))
-  expect(failedPerson).toBeDefined()
-  expect(confirmedPerson).toBeDefined()
-
-  // Only the confirmed payment has left the balance.
+  await expect(rowOf(page, "Bruno Costa")).toContainText("Confirmed")
+  await expect(rowOf(page, "Diego Martins")).toContainText("Failed")
+  await expect(rowOf(page, "Northwind Audit")).toContainText("Not sent")
   await expect(sidebar(page)).toContainText(
-    usd(startBalance - amounts[confirmedPerson!]),
+    usd(startBalance - amounts["Bruno Costa"]),
   )
 
-  await progress
-    .getByRole("button", { name: `Retry the payment to ${failedPerson}` })
+  const retry = async () => {
+    await progress
+      .getByRole("button", { name: "Retry failed payments" })
+      .click()
+    const dialog = page.getByRole("dialog", { name: "Retry 1 payment" })
+    expect(await listedAmounts(dialog)).toEqual([amounts["Diego Martins"]])
+    await dialog.getByRole("button", { name: "Confirm and sign" }).click()
+  }
+  await retry()
+  await expect(rowOf(page, "Diego Martins")).toContainText(
+    "Retry once they have expired",
+  )
+
+  await page.clock.fastForward(120_000)
+  await retry()
+  await expect(rowOf(page, "Diego Martins")).toContainText("Confirmed")
+  await expect(progress.getByRole("status")).toContainText("2 of 3 confirmed")
+  // Northwind was never paid in this run, and nothing offers to send it again here.
+  await expect(rowOf(page, "Northwind Audit")).toContainText("Not sent")
+  await expect(rowOf(page, "Northwind Audit").getByRole("button")).toHaveCount(
+    0,
+  )
+  await expect(sidebar(page)).toContainText(
+    usd(startBalance - amounts["Bruno Costa"] - amounts["Diego Martins"]),
+  )
+})
+
+test("a payment that could not be prepared does not stop the others, and is retried", async ({
+  page,
+}) => {
+  await openNewRun(page, "prepare-failed")
+  await payButton(page).click()
+  await page
+    .getByRole("dialog", { name: "Pay 3 people · $20,000.00" })
+    .getByRole("button", { name: "Confirm and sign" })
     .click()
 
+  const progress = page.getByRole("region", { name: "Payments in this run" })
   await expect(progress.getByRole("status")).toContainText("2 of 3 confirmed")
-  await expect(progress.getByText("Failed", { exact: true })).toHaveCount(0)
-  await expect(progress.getByText("Expired", { exact: true })).toHaveCount(1)
-  await expect(sidebar(page)).toContainText(
-    usd(startBalance - amounts[confirmedPerson!] - amounts[failedPerson!]),
+  await expect(rowOf(page, "Diego Martins")).toContainText("Failed")
+  await expect(rowOf(page, "Diego Martins")).toContainText(
+    "couldn't be prepared",
   )
+
+  // Nothing of the run can still land, so the retry goes through at once.
+  await progress.getByRole("button", { name: "Retry failed payments" }).click()
+  await page
+    .getByRole("dialog", { name: "Retry 1 payment" })
+    .getByRole("button", { name: "Confirm and sign" })
+    .click()
+  await expect(progress.getByRole("status")).toContainText("3 of 3 confirmed")
+  await expect(sidebar(page)).toContainText(usd(startBalance - 20_000))
 })
 
 test("people who were just paid are not ticked for the next run, and ticking them warns", async ({
@@ -217,8 +248,7 @@ test("a reload mid-run keeps who may have been paid out of the next run, and say
 }) => {
   // After the reload the mock is empty, so asking about the saved payment gets a 404:
   // that is no answer about the payment, so the person stays out of the roster.
-  watch.allowStatus(404, /\/runs\/[^/]+\/payments\/[^/]+\/confirm$/)
-  watch.allowStatus(409, /\/runs\/[^/]+\/payments\/[^/]+\/confirm$/)
+  watch.allowStatus(404, /\/runs\/[^/]+\/confirm$/)
   const prompts: string[] = []
   page.on("dialog", (dialog) => {
     prompts.push(dialog.type())
@@ -256,15 +286,15 @@ test("a reload mid-run keeps who may have been paid out of the next run, and say
   await expect(checking).toContainText("could pay them twice")
 })
 
-test("the same list asked for again after a reload goes out with the saved key", async ({
+test("a run whose answer was lost keeps no one out: nothing was signed", async ({
   page,
 }) => {
   page.on("dialog", (dialog) => void dialog.accept())
-  const keys: string[] = []
+  let creates = 0
   page.on("request", (request) => {
-    if (request.method() !== "POST" || !/\/runs$/.test(request.url())) return
-    const key = request.postDataJSON()?.idempotency_key
-    if (typeof key === "string") keys.push(key)
+    if (request.method() === "POST" && /\/runs$/.test(request.url())) {
+      creates += 1
+    }
   })
 
   await signInAs(page, "admin")
@@ -278,23 +308,23 @@ test("the same list asked for again after a reload goes out with the saved key",
     .getByRole("dialog", { name: "Pay 3 people · $20,000.00" })
     .getByRole("button", { name: "Confirm and sign" })
     .click()
-  await expect.poll(() => keys.length).toBe(1)
+  await expect.poll(() => creates).toBe(1)
   await page.reload()
 
-  await expect(
-    page.getByRole("checkbox", { name: /Bruno Costa/ }),
-  ).toBeVisible()
+  // Its transactions were never signed, so they cannot land: everyone is still payable,
+  // and a new run pays them once.
+  await expect(person(page, "Bruno Costa")).toBeChecked()
   await setMock(page, "instant")
+  await expect(payButton(page)).toHaveText("Pay 3 people · $20,000.00")
   await payButton(page).click()
   await page
     .getByRole("dialog", { name: "Pay 3 people · $20,000.00" })
     .getByRole("button", { name: "Confirm and sign" })
     .click()
-  await expect.poll(() => keys.length).toBe(2)
-  expect(keys[1]).toBe(keys[0])
   await expect(
     page
       .getByRole("region", { name: "Payments in this run" })
       .getByRole("status"),
   ).toContainText("3 of 3 confirmed")
+  expect(creates).toBe(2)
 })

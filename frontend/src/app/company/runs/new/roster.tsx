@@ -10,6 +10,7 @@ import { unitsToUsd } from "@/lib/money"
 import { ReleaseAction } from "@/components/app/release-action"
 import { releaseWarning, type SentPayment } from "@/lib/runs/evidence"
 import { initialsOf } from "@/lib/runs/people"
+import { paymentKey } from "@/lib/runs/executor"
 import {
   excludedNote,
   isTicked,
@@ -205,7 +206,7 @@ export function CheckingList({
                 <span className="mt-0.5 block text-caption text-ink-muted">
                   {!sent?.signature
                     ? "May have been sent and can't be looked up: check the company's payments and balance"
-                    : lookingUp.has(sent.payment_id)
+                    : lookingUp.has(paymentKey(sent.run_id, sent.position))
                       ? "Checking whether it went through"
                       : "Couldn't tell whether it went through: open the run to check again"}
                 </span>

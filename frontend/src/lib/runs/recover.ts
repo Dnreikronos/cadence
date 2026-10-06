@@ -2,16 +2,15 @@ import type { Receipt } from "@/lib/api/schemas"
 import { reconcileWrap, type Reconciled } from "@/lib/deposit/reconcile"
 import { PaymentNotOnChainError, SentPaymentError } from "./errors"
 import type { SentPayment } from "./evidence"
-import type { RunContext } from "./executor"
+import { confirmPosition, paymentKey, type RunContext } from "./executor"
 import { sentWithoutSignatureMessage } from "./messages"
 import type { LocalRows } from "./progress"
 
 // Picking a run back up after a reload. The payments that reached the submit step were
-// kept (`evidence.ts`); each is asked about again with its saved signature, which the
+// kept (`evidence.ts`); each is confirmed again with its saved signature, which the
 // service answers idempotently, and nothing is prepared or signed. A payment that never
 // reached the submit step has no record, and its transaction was only ever in the page
-// that created the run, so it cannot be signed any more: it is not paid, and a new run
-// is the way to pay that person.
+// that created the run, so it cannot be signed any more and cannot land: it is not paid.
 
 // What the screen shows for each saved payment before it has been asked about: one with
 // a signature is being checked (waiting, not yet stalled, so no "Check again"), one
@@ -19,7 +18,7 @@ import type { LocalRows } from "./progress"
 export function hydrateLocal(payments: readonly SentPayment[]): LocalRows {
   const rows: LocalRows = {}
   for (const payment of payments) {
-    rows[payment.payment_id] = payment.signature
+    rows[paymentKey(payment.run_id, payment.position)] = payment.signature
       ? { status: "waiting", signature: payment.signature }
       : { status: "unknown", message: sentWithoutSignatureMessage }
   }
@@ -68,7 +67,7 @@ export async function recoverOne(
   record: SentPayment,
   options: ReconcileOptions = {},
 ) {
-  const id = record.payment_id
+  const id = paymentKey(record.run_id, record.position)
   if (!record.signature) {
     events.failed(id, new SentPaymentError(null, null))
     return
@@ -78,7 +77,7 @@ export async function recoverOne(
   try {
     outcome = await reconcilePayment(
       record,
-      (signature) => api.confirmPayment(record.run_id, id, signature),
+      (signature) => confirmPosition(api, record.run_id, record, signature),
       signal,
       options,
     )

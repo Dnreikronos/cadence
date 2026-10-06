@@ -131,8 +131,7 @@ test("releasing a person from a payroll hold keeps focus on the page", async ({
   watch,
 }) => {
   test.setTimeout(60_000)
-  watch.allowStatus(404, /\/runs\/[^/]+\/payments\/[^/]+\/confirm$/)
-  watch.allowStatus(409, /\/runs\/[^/]+\/payments\/[^/]+\/confirm$/)
+  watch.allowStatus(404, /\/runs\/[^/]+\/confirm$/)
   page.on("dialog", (dialog) => void dialog.accept())
 
   await signInAs(page, "admin")
@@ -154,14 +153,14 @@ test("releasing a person from a payroll hold keeps focus on the page", async ({
       page.evaluate(
         () =>
           Object.keys(window.localStorage).filter((key) =>
-            key.startsWith("cadence:submissions:payroll-payment:"),
+            key.startsWith("cadence:submissions:payroll-sent:"),
           ).length,
       ),
     )
     .toBe(1)
   await page.evaluate(() => {
     for (const key of Object.keys(window.localStorage)) {
-      if (!key.startsWith("cadence:submissions:payroll-payment:")) continue
+      if (!key.startsWith("cadence:submissions:payroll-sent:")) continue
       const records = JSON.parse(window.localStorage.getItem(key) ?? "[]")
       for (const record of records) record.at -= 3 * 60_000
       window.localStorage.setItem(key, JSON.stringify(records))

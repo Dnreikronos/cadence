@@ -185,8 +185,7 @@ test.describe("payroll", () => {
   }) => {
     test.setTimeout(90_000)
     // The first tab's mock is empty after its reload: the saved payment's lookup gets a 404.
-    watch.allowStatus(404, /\/runs\/[^/]+\/payments\/[^/]+\/confirm$/)
-    watch.allowStatus(409, /\/runs\/[^/]+\/payments\/[^/]+\/confirm$/)
+    watch.allowStatus(404, /\/runs\/[^/]+\/confirm$/)
     page.on("dialog", (dialog) => void dialog.accept())
 
     await signInAs(page, "admin")
@@ -202,7 +201,7 @@ test.describe("payroll", () => {
       .getByRole("button", { name: "Confirm and sign" })
       .click()
     await expect
-      .poll(() => saved(page, "cadence:submissions:payroll-payment:"))
+      .poll(() => saved(page, "cadence:submissions:payroll-sent:"))
       .toHaveLength(1)
     await page.reload()
     await expect(
@@ -257,6 +256,7 @@ test.describe("payroll", () => {
     })
     await expect(dialog).toBeVisible()
 
+    const first = posts(page, /\/runs$/)
     await page.goto("/company/runs/new?mock=slow")
     await expect(personBox(page, "Bruno Costa")).toBeVisible()
     await payButton(page, 3).click()
@@ -264,10 +264,8 @@ test.describe("payroll", () => {
       .getByRole("dialog", { name: "Pay 3 people · $20,000.00" })
       .getByRole("button", { name: "Confirm and sign" })
       .click()
-    // The attempt is saved once the run lock is held.
-    await expect
-      .poll(() => saved(page, "cadence:submissions:payroll-attempt:"))
-      .toHaveLength(1)
+    // The run is asked for once the run lock is held.
+    await expect.poll(() => first.length).toBe(1)
 
     await dialog.getByRole("button", { name: "Confirm and sign" }).click()
     await expect(dialog.getByRole("alert")).toContainText(otherTab("run"))

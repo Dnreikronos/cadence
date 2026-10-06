@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { expiredMessage, unrecognizedMessage } from "./messages"
+import {
+  cancelledMessage,
+  expiredMessage,
+  notSentMessage,
+  unrecognizedMessage,
+} from "./messages"
 import {
   canRecheck,
   canRetry,
@@ -13,7 +18,7 @@ import {
   type Row,
 } from "./progress"
 
-const ID = "b0000000-0000-4000-8000-000000000001"
+const ID = "c0000000-0000-4000-8000-000000000001:0"
 const SIGNATURE = "5SigMockSignature1111111111111111111111111111"
 
 function play(...actions: Parameters<typeof localReducer>[1][]) {
@@ -114,7 +119,7 @@ describe("localReducer", () => {
   })
 
   it("leaves other payments alone", () => {
-    const other = "b0000000-0000-4000-8000-000000000002"
+    const other = "c0000000-0000-4000-8000-000000000001:1"
     const state = play(
       { type: "signing", id: other },
       { type: "failed", id: ID, message: "x", sent: false },
@@ -123,116 +128,132 @@ describe("localReducer", () => {
   })
 })
 
+const server = (status: string, error: string | null = null) => ({
+  status,
+  error,
+})
+
 describe("mergeRow", () => {
-  it("shows pending for a payment nothing has touched, and for `signed`", () => {
-    expect(
-      mergeRow(undefined, { status: "pending", failure: null }).status,
-    ).toBe("pending")
-    expect(
-      mergeRow(undefined, { status: "signed", failure: null }).status,
-    ).toBe("pending")
-    expect(mergeRow().status).toBe("pending")
+  it("shows pending for a prepared payment this page holds, not sent for one it does not", () => {
+    expect(mergeRow(undefined, server("prepared"), true).status).toBe("pending")
+    expect(mergeRow(undefined, undefined, true).status).toBe("pending")
+    expect(mergeRow(undefined, server("prepared"))).toEqual({
+      status: "not-sent",
+      message: notSentMessage,
+      stalled: false,
+      signature: null,
+    })
+    expect(mergeRow().status).toBe("not-sent")
+  })
+
+  it("says a payment that was not sent was not paid in this run, and how to pay them", () => {
+    expect(notSentMessage).toMatch(/wasn't paid in this run/)
+    expect(notSentMessage).toMatch(/new run/)
   })
 
   it("shows what this browser is doing over an older server status", () => {
-    expect(
-      mergeRow({ status: "signing" }, { status: "failed", failure: "x" })
-        .status,
-    ).toBe("signing")
-    expect(
-      mergeRow({ status: "waiting" }, { status: "expired", failure: null })
-        .status,
-    ).toBe("waiting")
+    expect(mergeRow({ status: "signing" }, server("failed", "x")).status).toBe(
+      "signing",
+    )
+    expect(mergeRow({ status: "waiting" }, server("expired")).status).toBe(
+      "waiting",
+    )
   })
 
-  it("keeps a sent payment as sent, whatever else the server says short of confirmed", () => {
+  it("keeps a sent payment as sent, whatever else the server says short of finalized", () => {
     const stalled = {
       status: "waiting" as const,
       stalled: true,
       signature: SIGNATURE,
       message: "Sent",
     }
-    for (const server of ["pending", "failed", "expired"] as const) {
-      expect(
-        mergeRow(stalled, { status: server, failure: null }),
-      ).toMatchObject({ status: "waiting", stalled: true })
+    for (const status of [
+      "prepared",
+      "failed",
+      "expired",
+      "preparation_failed",
+    ]) {
+      expect(mergeRow(stalled, server(status))).toMatchObject({
+        status: "waiting",
+        stalled: true,
+      })
     }
     expect(
-      mergeRow(
-        { status: "unknown", message: "Maybe sent" },
-        { status: "expired", failure: null },
-      ).status,
+      mergeRow({ status: "unknown", message: "Maybe sent" }, server("expired"))
+        .status,
     ).toBe("unknown")
   })
 
-  it("lets the server's `confirmed` end a waiting, stalled or unknown payment", () => {
-    const server = { status: "confirmed" as const, failure: null }
-    expect(mergeRow({ status: "waiting" }, server).status).toBe("confirmed")
+  it("lets the server's `finalized` end a waiting, stalled or unknown payment", () => {
+    const done = server("finalized")
+    expect(mergeRow({ status: "waiting" }, done).status).toBe("confirmed")
     expect(
       mergeRow(
         { status: "waiting", stalled: true, signature: SIGNATURE },
-        server,
+        done,
       ),
     ).toMatchObject({ status: "confirmed", stalled: false, message: null })
-    expect(mergeRow({ status: "unknown", message: "x" }, server).status).toBe(
+    expect(mergeRow({ status: "unknown", message: "x" }, done).status).toBe(
       "confirmed",
     )
-    expect(mergeRow({ status: "signing" }, server).status).toBe("confirmed")
+    expect(mergeRow({ status: "signing" }, done).status).toBe("confirmed")
   })
 
   it("never un-confirms a payment that confirmed here", () => {
+    expect(mergeRow({ status: "confirmed" }, server("prepared")).status).toBe(
+      "confirmed",
+    )
     expect(
-      mergeRow({ status: "confirmed" }, { status: "pending", failure: null })
-        .status,
-    ).toBe("confirmed")
-    expect(
-      mergeRow({ status: "confirmed" }, { status: "failed", failure: "x" })
-        .status,
+      mergeRow({ status: "confirmed" }, server("failed", "x")).status,
     ).toBe("confirmed")
   })
 
-  it("shows a confirmation from the server", () => {
-    expect(
-      mergeRow(undefined, { status: "confirmed", failure: null }).status,
-    ).toBe("confirmed")
+  it("shows a finalized payment from the server as confirmed", () => {
+    expect(mergeRow(undefined, server("finalized")).status).toBe("confirmed")
   })
 
   it("lets the server's `expired` replace a failure seen here", () => {
     const row = mergeRow(
       { status: "failed", message: "Rejected" },
-      { status: "expired", failure: null },
+      server("expired"),
     )
     expect(row).toMatchObject({ status: "expired", message: expiredMessage })
   })
 
-  it("says a retry of an expired payment depends on the service", () => {
-    expect(expiredMessage).toMatch(/only if the service confirms/)
+  it("says an expired payment can be retried", () => {
+    expect(expiredMessage).toMatch(/retry/)
   })
 
-  it("keeps a local failure while the server still says pending", () => {
+  it("keeps a local failure while the server still says prepared", () => {
     const row = mergeRow(
       { status: "failed", message: "Rejected" },
-      { status: "pending", failure: null },
+      server("prepared"),
     )
     expect(row).toMatchObject({ status: "failed", message: "Rejected" })
   })
 
   it("words a server failure from its code, never from raw text", () => {
-    const row = mergeRow(undefined, {
-      status: "failed",
-      failure: "transaction_failed",
-    })
+    const row = mergeRow(undefined, server("failed", "transaction_failed"))
     expect(row.status).toBe("failed")
     expect(row.message).toBe(
       "The network rejected this payment. You can retry it.",
     )
   })
 
-  it("has a plain message for a failure code it does not know", () => {
-    const row = mergeRow(undefined, {
+  it("shows a payment that could not be prepared as failed, from its code", () => {
+    const row = mergeRow(
+      undefined,
+      server("preparation_failed", "proof_generation_failed"),
+    )
+    expect(row).toMatchObject({
       status: "failed",
-      failure: "something_new",
+      message: "This payment couldn't be prepared. Retry it.",
     })
+    expect(canRetry(row)).toBe(true)
+  })
+
+  it("has a plain message for a failure code it does not know", () => {
+    const row = mergeRow(undefined, server("failed", "something_new"))
     expect(row.message).toBe("Something went wrong. Try again.")
   })
 })
@@ -247,6 +268,7 @@ describe("what can be done to a row", () => {
   })
   const all = [
     "pending",
+    "not-sent",
     "signing",
     "waiting",
     "unknown",
@@ -280,8 +302,13 @@ describe("what can be done to a row", () => {
     expect(canRecheck(row("waiting", { signature: SIGNATURE }))).toBe(false)
   })
 
-  it("settles on confirmed, failed and expired", () => {
-    expect(all.filter(isSettled)).toEqual(["confirmed", "failed", "expired"])
+  it("settles on not sent, confirmed, failed and expired", () => {
+    expect(all.filter(isSettled)).toEqual([
+      "not-sent",
+      "confirmed",
+      "failed",
+      "expired",
+    ])
   })
 
   it("counts what needs attention apart from what is still open", () => {
@@ -293,17 +320,19 @@ describe("what can be done to a row", () => {
         row("expired"),
         row("waiting", { stalled: true, signature: SIGNATURE }),
         row("unknown"),
+        row("not-sent"),
         row("pending"),
         row("signing"),
       ]),
     ).toEqual({
-      total: 8,
+      total: 9,
       confirmed: 2,
       retryable: 2,
       cancelled: 0,
       unrecognized: 0,
       sent: 2,
-      attention: 4,
+      notSent: 1,
+      attention: 5,
       open: 2,
     })
   })
@@ -317,6 +346,7 @@ describe("what can be done to a row", () => {
         cancelled: 1,
         unrecognized: 0,
         sent: 0,
+        notSent: 0,
         attention: 1,
         open: 1,
       },
@@ -334,17 +364,32 @@ describe("what can be done to a row", () => {
 })
 
 describe("a cancelled signature", () => {
-  const message = "You cancelled the signature. Nothing was sent."
+  const message = cancelledMessage
   const cancelled = play(
     { type: "signing", id: ID },
     { type: "failed", id: ID, message, sent: false, cancelled: true },
   )
 
-  it("is its own row, not a failure", () => {
+  it("is its own row, not a failure, while this page holds its transaction", () => {
     expect(cancelled[ID]).toEqual({ status: "cancelled", message })
-    expect(
-      mergeRow(cancelled[ID], { status: "pending", failure: null }),
-    ).toEqual({ status: "cancelled", message, stalled: false, signature: null })
+    expect(mergeRow(cancelled[ID], server("prepared"), true)).toEqual({
+      status: "cancelled",
+      message,
+      stalled: false,
+      signature: null,
+    })
+  })
+
+  it("says nothing was sent and that signing again continues the run", () => {
+    expect(message).toMatch(/Nothing was sent/)
+    expect(message).toMatch(/sign again/)
+  })
+
+  it("is not sent once this page no longer holds its transaction", () => {
+    expect(mergeRow(cancelled[ID], server("prepared"), false)).toMatchObject({
+      status: "not-sent",
+      message: notSentMessage,
+    })
   })
 
   it("is an ordinary failure when it was not a refusal", () => {
@@ -368,23 +413,23 @@ describe("a cancelled signature", () => {
   })
 
   it("gives way to the server's final answer, and to a confirmation", () => {
-    expect(
-      mergeRow(cancelled[ID], { status: "confirmed", failure: null }).status,
-    ).toBe("confirmed")
-    expect(
-      mergeRow(cancelled[ID], { status: "expired", failure: null }).status,
-    ).toBe("expired")
-    const failed = mergeRow(cancelled[ID], {
-      status: "failed",
-      failure: "transaction_failed",
-    })
+    expect(mergeRow(cancelled[ID], server("finalized"), true).status).toBe(
+      "confirmed",
+    )
+    expect(mergeRow(cancelled[ID], server("expired"), true).status).toBe(
+      "expired",
+    )
+    const failed = mergeRow(
+      cancelled[ID],
+      server("failed", "transaction_failed"),
+      true,
+    )
     expect(failed.status).toBe("failed")
     // The cancelled text is not carried over to a payment that did fail.
     expect(failed.message).not.toBe(message)
-    // Anything else the server says leaves it cancelled.
     expect(
-      mergeRow(cancelled[ID], { status: "signed", failure: null }).status,
-    ).toBe("cancelled")
+      mergeRow(cancelled[ID], server("preparation_failed", "x"), true).status,
+    ).toBe("failed")
   })
 
   it("keeps the leave guard up, because the held transaction dies with the page", () => {
@@ -401,7 +446,7 @@ describe("a cancelled signature", () => {
 })
 
 describe("an unknown status from the service", () => {
-  const unknown = { status: "finalized", failure: null }
+  const unknown = server("settled")
 
   it("is its own row, not pending, and says the status is unknown", () => {
     expect(mergeRow(undefined, unknown)).toEqual({
@@ -410,14 +455,14 @@ describe("an unknown status from the service", () => {
       stalled: false,
       signature: null,
     })
-    expect(
-      mergeRow(undefined, { status: "Confirmed", failure: null }).status,
-    ).toBe("unrecognized")
+    expect(mergeRow(undefined, server("Finalized")).status).toBe("unrecognized")
+    // The names of the shape before #107's runs are unknown too.
+    expect(mergeRow(undefined, server("confirmed")).status).toBe("unrecognized")
     expect(unrecognizedMessage).toMatch(/Status unknown/)
   })
 
   it("offers nothing: no retry, no sign again, no check, and it is not pending", () => {
-    const row = mergeRow(undefined, { status: "reversed", failure: "x" })
+    const row = mergeRow(undefined, server("reversed", "x"), true)
     expect(canRetry(row)).toBe(false)
     expect(canSignAgain(row)).toBe(false)
     expect(canRecheck(row)).toBe(false)
@@ -430,7 +475,7 @@ describe("an unknown status from the service", () => {
     expect(
       tally([
         mergeRow(undefined, unknown),
-        mergeRow(undefined, { status: "pending", failure: null }),
+        mergeRow(undefined, server("prepared"), true),
       ]),
     ).toMatchObject({ unrecognized: 1, attention: 1, open: 1, retryable: 0 })
   })
@@ -443,7 +488,7 @@ describe("an unknown status from the service", () => {
       sent: false,
       cancelled: true,
     })
-    expect(mergeRow(cancelled[ID], unknown).status).toBe("unrecognized")
+    expect(mergeRow(cancelled[ID], unknown, true).status).toBe("unrecognized")
     expect(mergeRow({ status: "failed", message: "x" }, unknown).status).toBe(
       "unrecognized",
     )
@@ -459,10 +504,18 @@ describe("an unknown status from the service", () => {
       ),
     ).toMatchObject({ status: "waiting", stalled: true })
   })
+})
 
-  it("leaves `signed` as the pending it has always been", () => {
+describe("a retried payment", () => {
+  it("forgets what this page saw of the old attempt", () => {
+    const failed = localReducer(
+      {},
+      { type: "failed", id: "r:1", message: "x", sent: false },
+    )
+    expect(localReducer(failed, { type: "reset", id: "r:1" })).toEqual({})
+    // Then it reads as the service and the held transaction say.
     expect(
-      mergeRow(undefined, { status: "signed", failure: null }).status,
+      mergeRow(undefined, { status: "prepared", error: null }, true).status,
     ).toBe("pending")
   })
 })

@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { runRequestSchema } from "@/lib/api/schemas"
+import { mockTokenAccount } from "@/lib/api/mocks/chain"
+import { runRequestSchema, type Run } from "@/lib/api/schemas"
 import {
   allChoices,
-  attemptKey,
   buildRunRequest,
   createdMatches,
   excludedNote,
-  fingerprintOf,
   formatExact,
   holdChecking,
   isTicked,
@@ -25,6 +24,9 @@ import {
 } from "./plan"
 
 const WALLET = "4egAZELoLKWqJwHwAwaZwS2su9rewh7is3ukCagHnSQ5"
+const SENDER = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
+const AES_KEY = "AAAAAAAAAAAAAAAAAAAAAA=="
+const account = (n: number) => mockTokenAccount(`person-${n}`)
 const guid = (n: number) =>
   `a0000000-0000-4000-8000-${String(n).padStart(12, "0")}`
 
@@ -36,6 +38,7 @@ function person(n: number, patch: Partial<PayrollPerson> = {}): PayrollPerson {
     kind: "employee",
     activation: "active",
     amount: "1000000",
+    tokenAccount: account(n),
     ...patch,
   }
 }
@@ -48,6 +51,7 @@ describe("splitRoster", () => {
       person(3, { activation: "invite-expired" }),
       person(4, { activation: "not-invited" }),
       person(5, { amount: null }),
+      person(6, { tokenAccount: null }),
     ]
     const { payable, excluded } = splitRoster(people)
     expect(payable.map((p) => p.id)).toEqual([guid(1)])
@@ -56,20 +60,23 @@ describe("splitRoster", () => {
       [guid(3), "not-activated"],
       [guid(4), "not-activated"],
       [guid(5), "no-amount"],
+      [guid(6), "no-account"],
     ])
   })
 
   it("says why each person is left out", () => {
-    const [invited, expired, fresh, noAmount] = splitRoster([
+    const [invited, expired, fresh, noAmount, noAccount] = splitRoster([
       person(1, { activation: "invited" }),
       person(2, { activation: "invite-expired" }),
       person(3, { activation: "not-invited" }),
       person(4, { amount: null }),
+      person(5, { tokenAccount: null }),
     ]).excluded
     expect(excludedNote(invited)).toBe("Invite sent, not accepted yet")
     expect(excludedNote(expired)).toBe("Invite expired")
     expect(excludedNote(fresh)).toBe("Hasn't been invited yet")
     expect(excludedNote(noAmount)).toBe("No monthly amount set")
+    expect(excludedNote(noAccount)).toBe("Hasn't set up private payments yet")
   })
 
   it("keeps an inactive person out even with no amount", () => {
@@ -78,10 +85,17 @@ describe("splitRoster", () => {
     ])
     expect(excluded[0].reason).toBe("not-activated")
   })
+
+  it("names a missing amount before a missing account", () => {
+    const { excluded } = splitRoster([
+      person(1, { amount: null, tokenAccount: null }),
+    ])
+    expect(excluded[0].reason).toBe("no-amount")
+  })
 })
 
 describe("withAmounts", () => {
-  it("joins by person id and leaves a missing amount null", () => {
+  it("joins by person id and leaves a missing amount or account null", () => {
     const bare = (n: number) => ({
       id: guid(n),
       name: `Person ${n}`,
@@ -92,8 +106,10 @@ describe("withAmounts", () => {
     const joined = withAmounts(
       [bare(1), bare(2)],
       new Map([[guid(1), "4200000000"]]),
+      new Map([[guid(2), account(2)]]),
     )
     expect(joined.map((p) => p.amount)).toEqual(["4200000000", null])
+    expect(joined.map((p) => p.tokenAccount)).toEqual([null, account(2)])
   })
 })
 
@@ -302,36 +318,72 @@ describe("createdMatches", () => {
   const request = (...people: number[]) =>
     buildRunRequest(
       WALLET,
+      SENDER,
+      AES_KEY,
       people.map((n) => person(n)),
-      "d0000000-0000-4000-8000-000000000009",
     )
-  const created = (people: number[], paymentIds = people) => ({
+  // A run whose position i pays person `people[i]`.
+  const created = (people: number[], patch: Partial<Run> = {}): Run => ({
     run_id: "c0000000-0000-4000-8000-000000000001",
-    payments: people.map((n, i) => ({
-      payment_id: guid(500 + paymentIds[i]),
-      person_id: guid(n),
+    company_wallet: WALLET,
+    sender: SENDER,
+    mint: "mint",
+    transaction_version: 1,
+    required_signers: [WALLET],
+    status: "prepared",
+    payments: people.map((n, position) => ({
+      position,
+      destination: account(n),
+      attempt: 0,
       request_id: "a".repeat(64),
+      status: "prepared",
+      signature: null,
+      slot: null,
+      error: null,
       transaction: "AQID",
-      transaction_version: 1 as const,
-      required_signers: ["w"],
-      recent_blockhash: "h",
       last_valid_block_height: 1,
     })),
+    ...patch,
   })
 
-  it("accepts the same people, in any order", () => {
-    expect(createdMatches(request(1, 2, 3), created([3, 1, 2]))).toBe(true)
+  it("accepts each position paying the account asked for at that index", () => {
+    expect(createdMatches(request(1, 2, 3), created([1, 2, 3]))).toBe(true)
   })
 
-  it("refuses a different person, a missing one, an extra one and a duplicate", () => {
+  it("accepts the payments listed in another order, matched by position", () => {
+    const run = created([1, 2, 3])
+    run.payments.reverse()
+    expect(createdMatches(request(1, 2, 3), run)).toBe(true)
+  })
+
+  it("refuses positions that pay someone else, a missing one, an extra one", () => {
+    expect(createdMatches(request(1, 2), created([2, 1]))).toBe(false)
     expect(createdMatches(request(1, 2), created([1, 9]))).toBe(false)
     expect(createdMatches(request(1, 2), created([1]))).toBe(false)
     expect(createdMatches(request(1, 2), created([1, 2, 3]))).toBe(false)
-    expect(createdMatches(request(1, 2), created([1, 1]))).toBe(false)
   })
 
-  it("refuses two payments with the same id", () => {
-    expect(createdMatches(request(1, 2), created([1, 2], [7, 7]))).toBe(false)
+  it("refuses two payments at the same position", () => {
+    const run = created([1, 2])
+    run.payments[1] = { ...run.payments[1], position: 0 }
+    expect(createdMatches(request(1, 1), run)).toBe(false)
+  })
+
+  it("refuses another wallet, another sender, or a signer that is not the wallet", () => {
+    const asked = request(1)
+    expect(
+      createdMatches(asked, created([1], { company_wallet: SENDER })),
+    ).toBe(false)
+    expect(createdMatches(asked, created([1], { sender: WALLET }))).toBe(false)
+    expect(
+      createdMatches(asked, created([1], { required_signers: [SENDER] })),
+    ).toBe(false)
+    expect(
+      createdMatches(
+        asked,
+        created([1], { required_signers: [WALLET, SENDER] }),
+      ),
+    ).toBe(false)
   })
 })
 
@@ -348,118 +400,54 @@ describe("shortfall", () => {
 })
 
 describe("buildRunRequest", () => {
-  it("builds a request the contract accepts, in the given order", () => {
-    const request = buildRunRequest(
-      WALLET,
-      [person(2), person(1)],
-      "d0000000-0000-4000-8000-000000000009",
-    )
+  it("builds a request the contract accepts, each person at their index", () => {
+    const request = buildRunRequest(WALLET, SENDER, AES_KEY, [
+      person(2),
+      person(1),
+    ])
     expect(runRequestSchema.safeParse(request).success).toBe(true)
-    expect(request.payments.map((p) => p.person_id)).toEqual([guid(2), guid(1)])
-    expect(request.idempotency_key).toBe("d0000000-0000-4000-8000-000000000009")
+    expect(request).toMatchObject({
+      company_wallet: WALLET,
+      sender: SENDER,
+      aes_key: AES_KEY,
+    })
+    expect(request.payments.map((p) => p.recipient)).toEqual([
+      account(2),
+      account(1),
+    ])
+    expect(request.wallet_signature).toBeUndefined()
   })
 
   it("accepts a single recipient, the supplier case", () => {
-    const request = buildRunRequest(
-      WALLET,
-      [person(4, { kind: "supplier", amount: "9500000000" })],
-      "d0000000-0000-4000-8000-000000000009",
-    )
+    const request = buildRunRequest(WALLET, SENDER, AES_KEY, [
+      person(4, { kind: "supplier", amount: "9500000000" }),
+    ])
     expect(request.payments).toEqual([
-      { person_id: guid(4), amount: "9500000000" },
+      { recipient: account(4), amount: "9500000000" },
     ])
   })
 
   it("refuses an empty run and one past the service's limit", () => {
-    const key = "d0000000-0000-4000-8000-000000000009"
-    expect(() => buildRunRequest(WALLET, [], key)).toThrow()
+    expect(() => buildRunRequest(WALLET, SENDER, AES_KEY, [])).toThrow()
     expect(maxRunPayments).toBe(100)
     const many = Array.from({ length: maxRunPayments + 1 }, (_, i) =>
       person(i + 1),
     )
-    expect(() => buildRunRequest(WALLET, many, key)).toThrow()
+    expect(() => buildRunRequest(WALLET, SENDER, AES_KEY, many)).toThrow()
     expect(() =>
-      buildRunRequest(WALLET, many.slice(0, maxRunPayments), key),
+      buildRunRequest(WALLET, SENDER, AES_KEY, many.slice(0, maxRunPayments)),
     ).not.toThrow()
   })
 
-  it("refuses a person with no amount", () => {
+  it("refuses a person with no amount or no account", () => {
     expect(() =>
-      buildRunRequest(
-        WALLET,
-        [person(1, { amount: null })],
-        "d0000000-0000-4000-8000-000000000009",
-      ),
+      buildRunRequest(WALLET, SENDER, AES_KEY, [person(1, { amount: null })]),
     ).toThrow()
-  })
-})
-
-describe("fingerprintOf", () => {
-  const list = [
-    person(1, { amount: "1000000" }),
-    person(2, { amount: "2000000" }),
-    person(3, { amount: "3000000" }),
-  ]
-
-  it("is a short hex hash that holds no id or amount", () => {
-    const fingerprint = fingerprintOf(WALLET, list)
-    expect(fingerprint).toMatch(/^[0-9a-f]{16}$/)
-    expect(fingerprint).not.toContain("a0000000")
-    expect(fingerprint).not.toContain("1000000")
-  })
-
-  it("is stable: the same people and amounts give the same value, in any order", () => {
-    const first = fingerprintOf(WALLET, list)
-    expect(fingerprintOf(WALLET, [...list])).toBe(first)
-    expect(fingerprintOf(WALLET, [list[2], list[0], list[1]])).toBe(first)
-    // Only ids and amounts count.
-    expect(fingerprintOf(WALLET, [person(1)])).toBe(
-      fingerprintOf(WALLET, [person(1, { name: "Renamed" })]),
-    )
-  })
-
-  it("never changes for a given list: a value saved before a reload is the one computed after", () => {
-    expect(fingerprintOf(WALLET, [person(1)])).toBe("0c94734bb2090732")
-  })
-
-  it("changes when someone is added or removed, or an id or an amount changes", () => {
-    const first = fingerprintOf(WALLET, list)
-    expect(fingerprintOf(WALLET, list.slice(1))).not.toBe(first)
-    expect(fingerprintOf(WALLET, [...list, person(4)])).not.toBe(first)
-    expect(
-      fingerprintOf(WALLET, [
-        list[0],
-        list[1],
-        person(9, { amount: "3000000" }),
+    expect(() =>
+      buildRunRequest(WALLET, SENDER, AES_KEY, [
+        person(1, { tokenAccount: null }),
       ]),
-    ).not.toBe(first)
-    expect(
-      fingerprintOf(WALLET, [
-        list[0],
-        list[1],
-        { ...list[2], amount: "3000001" },
-      ]),
-    ).not.toBe(first)
-  })
-
-  it("does not confuse an id and an amount that run together", () => {
-    expect(
-      fingerprintOf(WALLET, [
-        person(1, { amount: "12" }),
-        person(2, { amount: "3" }),
-      ]),
-    ).not.toBe(
-      fingerprintOf(WALLET, [
-        person(1, { amount: "1" }),
-        person(2, { amount: "23" }),
-      ]),
-    )
-  })
-
-  it("changes with the wallet the run is paid from", () => {
-    expect(fingerprintOf(WALLET, list)).not.toBe(
-      fingerprintOf("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin", list),
-    )
+    ).toThrow()
   })
 })
 
@@ -488,42 +476,5 @@ describe("holdChecking", () => {
     const { payable, checking } = holdChecking(people, new Set([guid(99)]))
     expect(payable).toHaveLength(3)
     expect(checking).toEqual([])
-  })
-})
-
-describe("attemptKey", () => {
-  let made = 0
-  const make = () => `key-${++made}`
-
-  it("keeps the key while the payment list is the same, so a double click makes one run", () => {
-    const list = [person(1), person(2)]
-    const first = attemptKey(null, fingerprintOf(WALLET, list), make)
-    const again = attemptKey(first, fingerprintOf(WALLET, [...list]), make)
-    expect(again).toBe(first)
-    expect(made).toBe(1)
-  })
-
-  it("makes a new key when someone is ticked or unticked", () => {
-    const first = attemptKey(
-      null,
-      fingerprintOf(WALLET, [person(1), person(2)]),
-      make,
-    )
-    const next = attemptKey(first, fingerprintOf(WALLET, [person(1)]), make)
-    expect(next.key).not.toBe(first.key)
-  })
-
-  it("makes a new key when an amount changes", () => {
-    const first = attemptKey(
-      null,
-      fingerprintOf(WALLET, [person(1, { amount: "1000000" })]),
-      make,
-    )
-    const next = attemptKey(
-      first,
-      fingerprintOf(WALLET, [person(1, { amount: "2000000" })]),
-      make,
-    )
-    expect(next.key).not.toBe(first.key)
   })
 })

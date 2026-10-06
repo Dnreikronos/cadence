@@ -1,11 +1,10 @@
 import {
   runRequestSchema,
   type PaymentItem,
-  type RunCreated,
+  type Run,
   type RunRequest,
 } from "@/lib/api/schemas"
 import { formatBaseUnits, formatUnits, sumUnits } from "@/lib/money"
-import { stableHash } from "@/lib/submissions"
 
 // Who a payroll run can pay, and what it would cost. All amounts are base-unit strings.
 
@@ -29,29 +28,34 @@ export type PayrollPerson = {
   activation: PayrollActivation
   // Held by the proof service. Null when none is set for this person.
   amount: string | null
+  // The Token-2022 account a run pays. Null until the person has configured one.
+  tokenAccount: string | null
 }
 
-// People rows plus the amounts the proof service holds, joined by person id.
+// People rows plus the amounts and token accounts the proof service holds, joined by
+// person id.
 export function withAmounts(
-  people: readonly Omit<PayrollPerson, "amount">[],
+  people: readonly Omit<PayrollPerson, "amount" | "tokenAccount">[],
   amounts: ReadonlyMap<string, string>,
+  accounts: ReadonlyMap<string, string> = new Map(),
 ): PayrollPerson[] {
   return people.map((person) => ({
     ...person,
     amount: amounts.get(person.id) ?? null,
+    tokenAccount: accounts.get(person.id) ?? null,
   }))
 }
 
-export type ExcludedReason = "not-activated" | "no-amount"
+export type ExcludedReason = "not-activated" | "no-amount" | "no-account"
 
 export type Excluded = { person: PayrollPerson; reason: ExcludedReason }
 
-// The service takes at most this many payments in one run (runRequestSchema): its body
-// limit is 8 KiB and an entry is about 80 bytes of JSON.
+// The service takes at most this many payments in one run (runRequestSchema).
 export const maxRunPayments = 100
 
-// Only an activated person with an amount can be paid: the service rejects anyone else
-// with `recipient_not_activated`, so they are listed apart before a call is made.
+// Only an activated person with an amount and a token account can be paid: the service
+// could not prepare a payment for anyone else, so they are listed apart before a call
+// is made.
 export function splitRoster(people: readonly PayrollPerson[]) {
   const payable: PayrollPerson[] = []
   const excluded: Excluded[] = []
@@ -60,6 +64,8 @@ export function splitRoster(people: readonly PayrollPerson[]) {
       excluded.push({ person, reason: "not-activated" })
     } else if (person.amount === null) {
       excluded.push({ person, reason: "no-amount" })
+    } else if (person.tokenAccount === null) {
+      excluded.push({ person, reason: "no-account" })
     } else {
       payable.push(person)
     }
@@ -75,9 +81,9 @@ const activationNotes: Record<PayrollActivation, string> = {
 }
 
 export function excludedNote({ person, reason }: Excluded) {
-  return reason === "no-amount"
-    ? "No monthly amount set"
-    : activationNotes[person.activation]
+  if (reason === "no-amount") return "No monthly amount set"
+  if (reason === "no-account") return "Hasn't set up private payments yet"
+  return activationNotes[person.activation]
 }
 
 // Someone paid inside this window is not ticked by default: running the roster again
@@ -185,49 +191,40 @@ export function payLabel(count: number, total: string) {
 
 export function buildRunRequest(
   companyWallet: string,
+  sender: string,
+  aesKey: string,
   recipients: readonly PayrollPerson[],
-  idempotencyKey: string,
 ): RunRequest {
   return runRequestSchema.parse({
     company_wallet: companyWallet,
+    sender,
+    aes_key: aesKey,
+    // A payment's position is its index here, which is how a run row is matched to
+    // the person it pays.
     payments: recipients.map((person) => ({
-      person_id: person.id,
+      recipient: person.tokenAccount,
       amount: person.amount,
     })),
-    idempotency_key: idempotencyKey,
   })
 }
 
-// What `POST /runs` answered must be what was asked: the same people, once each. Anything
-// else is not signed, since the payments it prepared are not the ones that were approved.
-export function createdMatches(request: RunRequest, created: RunCreated) {
-  const asked = request.payments.map((payment) => payment.person_id).sort()
-  const got = created.payments.map((payment) => payment.person_id).sort()
-  const paymentIds = new Set(created.payments.map((p) => p.payment_id))
+// What `POST /runs` answered must be what was asked: the same wallet and sender, our
+// wallet as the only signer, and each position paying the account asked for at that
+// index, once. Anything else is not signed, since its payments are not the approved ones.
+export function createdMatches(request: RunRequest, run: Run) {
+  const positions = run.payments.map((payment) => payment.position)
   return (
-    asked.length === got.length &&
-    asked.every((id, index) => id === got[index]) &&
-    new Set(got).size === got.length &&
-    paymentIds.size === created.payments.length
+    run.company_wallet === request.company_wallet &&
+    run.sender === request.sender &&
+    run.required_signers.length === 1 &&
+    run.required_signers[0] === request.company_wallet &&
+    run.payments.length === request.payments.length &&
+    new Set(positions).size === positions.length &&
+    run.payments.every(
+      (payment) =>
+        request.payments[payment.position]?.recipient === payment.destination,
+    )
   )
-}
-
-// One key per attempt. The same payment list keeps its key, so a double click or a
-// retry after a lost response returns the run already created instead of a second
-// one; a changed list is a different attempt and gets its own.
-export type AttemptKey = { fingerprint: string; key: string }
-
-// A stable hash of the wallet and the sorted person ids with their amounts: the same
-// people and amounts give the same value in any order and after a reload, and any other
-// list gives another. It is what a saved attempt is matched on (see `evidence.ts`).
-export function fingerprintOf(
-  companyWallet: string,
-  recipients: readonly PayrollPerson[],
-) {
-  const entries = recipients
-    .map((person) => `${person.id}:${person.amount ?? ""}`)
-    .sort()
-  return stableHash(companyWallet, ...entries)
 }
 
 // People who would be paid but have a payment of an earlier run that may have been sent
@@ -241,14 +238,4 @@ export function holdChecking(
     payable: payable.filter((person) => !checking.has(person.id)),
     checking: payable.filter((person) => checking.has(person.id)),
   }
-}
-
-export function attemptKey(
-  previous: AttemptKey | null,
-  fingerprint: string,
-  makeKey: () => string,
-): AttemptKey {
-  return previous?.fingerprint === fingerprint
-    ? previous
-    : { fingerprint, key: makeKey() }
 }

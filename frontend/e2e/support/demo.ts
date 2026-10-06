@@ -12,6 +12,7 @@ export type Scenario =
   | "setup-required"
   | "tx-failed"
   | "partial-failure"
+  | "prepare-failed"
   | "credit-mismatch"
   | "rpc-down"
 

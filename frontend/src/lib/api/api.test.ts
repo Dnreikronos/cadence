@@ -22,7 +22,8 @@ import {
 import { scenarios, timing } from "./mocks/scenario"
 import { server } from "./mocks/server"
 import { expectNoAmount } from "./no-amount"
-import { accessActions, accessActorKinds } from "./schemas"
+import { accessActions, accessActorKinds, isSignable } from "./schemas"
+import { mockTokenAccount } from "./mocks/chain"
 import { UnexpectedSignerError, signAndConfirm, type Signer } from "./sign"
 
 const BASE = "http://mock.cadence.test"
@@ -397,91 +398,45 @@ describe("payroll runs", () => {
   const [bruno, mariana, diego] = seedPeople
   const request = (ids: string[]) => ({
     company_wallet: COMPANY_WALLET,
-    payments: ids.map((person_id) => ({ person_id, amount: "1000000000" })),
-    idempotency_key: crypto.randomUUID(),
+    sender: mockTokenAccount(COMPANY_WALLET),
+    aes_key: "AAAAAAAAAAAAAAAAAAAAAA==",
+    wallet_signature: SIG,
+    payments: ids.map((id) => ({
+      recipient: mockTokenAccount(id),
+      amount: "1000000000",
+    })),
   })
 
-  it("returns one transaction per recipient, in order, and the same run for the same key", async () => {
-    const body = request([bruno.id, diego.id])
-    const run = await api.runs.create(body)
-    expect(run.payments.map((p) => p.person_id)).toEqual([bruno.id, diego.id])
-    expect(new Set(run.payments.map((p) => p.request_id)).size).toBe(2)
-    expect(await api.runs.create(body)).toEqual(run)
-  })
-
-  it("replays a key whose first create failed as a fresh create, then as the same run", async () => {
-    const body = request([bruno.id, mariana.id])
-    expect(await caught(api.runs.create(body))).toMatchObject({
-      code: "recipient_not_activated",
-    })
-    // The failed call stored nothing under the key.
-    expect(db.runs.size).toBe(0)
-    const fixed = { ...body, payments: [body.payments[0]] }
-    const run = await api.runs.create(fixed)
-    expect(run.payments).toHaveLength(1)
-    expect(await api.runs.create(fixed)).toEqual(run)
-    expect(db.runs.size).toBe(1)
-  })
-
-  it("refuses people who have not activated", async () => {
-    const error = await caught(api.runs.create(request([bruno.id, mariana.id])))
-    expect(error).toMatchObject({
-      status: 409,
-      code: "recipient_not_activated",
-    })
-  })
-
-  it("runs three payments and each reports its own status", async () => {
+  it("confirms each position in order, and the run reads completed", async () => {
     scenarios.set("instant")
     const run = await api.runs.create(
       request([bruno.id, diego.id, seedPeople[3].id]),
     )
-    for (const [i, payment] of run.payments.entries()) {
-      await api.runs.confirmPayment(run.run_id, payment.payment_id, sigOf(i))
+    for (const payment of run.payments) {
+      if (!isSignable(payment)) throw new Error("expected a transaction")
+      const after = await api.runs.confirm(run.run_id, {
+        payments: [
+          {
+            position: payment.position,
+            request_id: payment.request_id,
+            signature: sigOf(payment.position),
+          },
+        ],
+      })
+      expect(after.payments[payment.position].status).toBe("finalized")
     }
     const status = await api.runs.get(run.run_id)
-    expect(status.payments.map((p) => p.status)).toEqual([
-      "confirmed",
-      "confirmed",
-      "confirmed",
-    ])
+    expect(status.status).toBe("completed")
     // The status has no amount anywhere.
     expect(JSON.stringify(status)).not.toMatch(/amount/)
   })
 
-  it("one failure does not block the rest, and a retry prepares only that payment", async () => {
-    scenarios.set("instant", "partial-failure")
-    const run = await api.runs.create(
-      request([bruno.id, diego.id, seedPeople[3].id]),
-    )
-    const [first, second, third] = run.payments
-    await api.runs.confirmPayment(run.run_id, first.payment_id, sigOf(1))
-    expect(
-      await caught(
-        api.runs.confirmPayment(run.run_id, second.payment_id, sigOf(2)),
-      ),
-    ).toMatchObject({
-      code: "transaction_failed",
-    })
-    expect(
-      await caught(
-        api.runs.confirmPayment(run.run_id, third.payment_id, sigOf(3)),
-      ),
-    ).toMatchObject({
-      code: "transaction_failed",
-    })
-
-    const status = await api.runs.get(run.run_id)
-    expect(status.payments.map((p) => p.status)).toEqual([
-      "confirmed",
-      "failed",
-      "expired",
+  it("prepares nothing for someone without an account, and the rest as usual", async () => {
+    const run = await api.runs.create(request([bruno.id, mariana.id]))
+    expect(run.payments.map((p) => p.status)).toEqual([
+      "prepared",
+      "preparation_failed",
     ])
-    expect(status.payments[1].failure).toBe("transaction_failed")
-
-    const retry = await api.runs.retryPayment(run.run_id, second.payment_id)
-    expect(retry.payment_id).toBe(second.payment_id)
-    expect(retry.request_id).not.toBe(second.request_id)
   })
 })
 
@@ -1122,11 +1077,23 @@ describe("account status", () => {
     scenarios.set("instant")
     const run = await api.runs.create({
       company_wallet: COMPANY_WALLET,
-      payments: [{ person_id: seedPeople[0].id, amount: "1000000000" }],
-      idempotency_key: crypto.randomUUID(),
+      sender: mockTokenAccount(COMPANY_WALLET),
+      aes_key: "AAAAAAAAAAAAAAAAAAAAAA==",
+      wallet_signature: SIG,
+      payments: [
+        { recipient: mockTokenAccount(seedPeople[0].id), amount: "1000000000" },
+      ],
     })
     expect((await api.me.status()).pending_credits).toBe(false)
-    await api.runs.confirmPayment(run.run_id, run.payments[0].payment_id, SIG)
+    await api.runs.confirm(run.run_id, {
+      payments: [
+        {
+          position: 0,
+          request_id: run.payments[0].request_id ?? "",
+          signature: SIG,
+        },
+      ],
+    })
     expect((await api.me.status()).pending_credits).toBe(true)
   })
 

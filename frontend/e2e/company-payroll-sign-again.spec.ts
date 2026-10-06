@@ -2,9 +2,9 @@ import { clearMock, setMock, sidebar, signInAs } from "./support/demo"
 import { expect, test } from "./support/test"
 import type { Page } from "@playwright/test"
 
-// The wallet refusing to sign (a cancelled prompt) sends nothing: the row offers "Sign
-// again" for the same prepared transaction, never "Retry", which the service refuses for
-// a payment that neither failed nor expired.
+// The wallet refusing to sign (a cancelled prompt) sends nothing and stops the run there:
+// the row offers "Sign again" for the same prepared transaction, which continues the run
+// from it, never "Retry", which the service refuses while a payment can still land.
 
 async function startRun(page: Page) {
   await signInAs(page, "admin")
@@ -30,39 +30,37 @@ const rowOf = (page: Page, name: string) =>
     .getByRole("listitem")
     .filter({ hasText: name })
 
-test("a cancelled signature is signed again from the same transaction, never retried", async ({
+test("a cancelled signature stops the run, and signing again continues it from there", async ({
   page,
 }) => {
   await startRun(page)
 
   const bruno = rowOf(page, "Bruno Costa")
   const diego = rowOf(page, "Diego Martins")
-  for (const row of [bruno, diego]) {
-    await expect(row).toContainText("Not signed")
-    await expect(row).toContainText(
-      "You cancelled the signature. Nothing was sent.",
-    )
-    await expect(row.getByRole("button", { name: /^Sign again/ })).toBeVisible()
-    await expect(row.getByRole("button", { name: /^Retry/ })).toHaveCount(0)
-  }
+  await expect(bruno).toContainText("Not signed")
+  await expect(bruno).toContainText("You cancelled the signature.")
+  await expect(bruno.getByRole("button", { name: /^Sign again/ })).toBeVisible()
+  // Diego's payment waits its turn: nothing was asked of the wallet for it.
+  await expect(diego).toContainText("Pending")
+  await expect(diego.getByRole("button")).toHaveCount(0)
   const progress = page.getByRole("region", { name: "Payments in this run" })
+  await expect(
+    progress.getByRole("button", { name: "Retry failed payments" }),
+  ).toHaveCount(0)
   await expect(progress.getByRole("status")).toContainText("0 of 2 confirmed")
-  await expect(progress.getByRole("status")).toContainText("2 need attention")
-  await expect(progress).toContainText("weren't signed, so nothing was sent")
+  await expect(progress).toContainText(
+    "The run stopped at a signature you cancelled",
+  )
   // Nothing moved.
   await expect(sidebar(page)).toContainText("$84,000.00")
 
-  // The person signs this time.
+  // The person signs this time: the run goes on to the end.
   await clearMock(page)
   await setMock(page, "instant")
   await bruno.getByRole("button", { name: /^Sign again/ }).click()
-  await expect(bruno).toContainText("Confirmed")
-  await expect(bruno.getByRole("button")).toHaveCount(0)
-  await expect(diego).toContainText("Not signed")
-
-  await diego.getByRole("button", { name: /^Sign again/ }).click()
-  await expect(diego).toContainText("Confirmed")
   await expect(progress.getByRole("status")).toContainText("2 of 2 confirmed")
+  await expect(bruno).toContainText("Confirmed")
+  await expect(diego).toContainText("Confirmed")
   await expect(progress).toContainText("Every payment is confirmed.")
   // Each person was paid once.
   await expect(sidebar(page)).toContainText("$73,500.00")

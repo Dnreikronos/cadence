@@ -1,16 +1,18 @@
 import {
-  payOne,
+  paySequence,
+  paymentKey,
   type RunApi,
   type RunContext,
   type RunEvents,
 } from "./executor"
 import { keepsHeld, type HeldStore } from "./held"
-import { cancelledStaleMessage, describeFailure } from "./messages"
+import { describeFailure } from "./messages"
 import type { LocalAction } from "./progress"
 
 // The wiring between a run's events, the local rows and the held transactions, kept free
 // of React so that the hook and its tests run the same code. What it decides: a
-// transaction stays held only while nothing was handed to the network.
+// transaction stays held only while nothing was handed to the network, and a run that
+// stopped for any reason but a cancelled signature lets go of everything after the stop.
 
 // Every event goes to the reducer; `submitted` and `confirmed` also drop the held
 // transaction, and so does any failure that is not a refused signature (one that came
@@ -44,36 +46,33 @@ export function runEvents(
   }
 }
 
-// A transaction prepared by a retry is held like the first ones.
-export function holdingRetries(api: RunApi, held: HeldStore): RunApi {
-  return {
-    ...api,
-    retryPayment: async (runId, paymentId) => {
-      const prepared = await api.retryPayment(runId, paymentId)
-      if (prepared.payment_id === paymentId) held.hold(prepared)
-      return prepared
-    },
-  }
-}
+export type { RunApi }
 
-// Signs the held transaction of a cancelled payment again, without preparing a new one.
-// Past its blockhash it is dropped and the payment is shown as failed, so the normal
-// retry applies; one this page does not hold is left as it is.
-export async function signAgain(
-  context: RunContext,
-  held: HeldStore,
-  dispatch: (action: LocalAction) => void,
-  paymentId: string,
-) {
-  const found = held.lookup(paymentId)
-  if (found.status === "ready") return payOne(context, found.prepared)
-  if (found.status === "stale") {
-    held.drop(paymentId)
-    dispatch({
-      type: "failed",
-      id: paymentId,
-      message: cancelledStaleMessage,
-      sent: false,
-    })
+// Signs what this page holds for the run, in order, from the first one. A cancelled
+// signature keeps it and the ones after it held, to sign again. Any other stop lets go of
+// the ones after it: their proofs assumed the stopped payment landed, so they must never
+// be sent, and nothing was. A held transaction past its blockhash is let go of too, with
+// every one after it.
+export async function continueRun(context: RunContext, held: HeldStore) {
+  const pending = held.ofRun(context.runId)
+  const ready = []
+  for (const prepared of pending) {
+    if (
+      held.lookup(paymentKey(context.runId, prepared.position)).status !==
+      "ready"
+    ) {
+      break
+    }
+    ready.push(prepared)
+  }
+  const stoppedAt = await paySequence(context, ready)
+  if (context.signal?.aborted) return
+  const cancelled =
+    stoppedAt !== null && held.has(paymentKey(context.runId, stoppedAt))
+  if (cancelled) return
+  for (const prepared of pending) {
+    if (stoppedAt === null || prepared.position > stoppedAt) {
+      held.drop(paymentKey(context.runId, prepared.position))
+    }
   }
 }

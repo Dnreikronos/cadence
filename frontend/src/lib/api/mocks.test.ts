@@ -11,7 +11,6 @@ import { createApiClient } from "./client"
 import { MOCK_ORIGIN } from "./config"
 import * as s from "./schemas"
 import { expectNoAmount } from "./no-amount"
-import { signAndConfirm, type Signer } from "./sign"
 import {
   COMPANY_ID,
   COMPANY_WALLET,
@@ -21,6 +20,7 @@ import {
   seedPeople,
 } from "./mocks/db"
 import { handlers } from "./mocks/handlers"
+import { mockBlockHeight, mockTokenAccount } from "./mocks/chain"
 import { scenarios } from "./mocks/scenario"
 import { server } from "./mocks/server"
 
@@ -43,10 +43,6 @@ const api = createApiClient({
 
 const SIG = "5SigMockSignature1111111111111111111111111111"
 const OTHER_SIG = "4AnotherMockSignature".padEnd(64, "1")
-const signer: Signer = {
-  address: COMPANY_WALLET,
-  signTransaction: async (bytes) => Uint8Array.from([...bytes, 1]),
-}
 const [bruno, , diego, northwind] = seedPeople
 
 // A request as the browser would send it, without the client's own checks.
@@ -74,11 +70,27 @@ async function caught(promise: Promise<unknown>) {
   throw new Error("expected the call to fail")
 }
 
+const AES_KEY = "AAAAAAAAAAAAAAAAAAAAAA=="
 const runOf = (ids: string[], amount = "1000000000") => ({
   company_wallet: COMPANY_WALLET,
-  payments: ids.map((person_id) => ({ person_id, amount })),
-  idempotency_key: crypto.randomUUID(),
+  sender: mockTokenAccount(COMPANY_WALLET),
+  aes_key: AES_KEY,
+  // The first run of the wallet links it.
+  wallet_signature: SIG,
+  payments: ids.map((id) => ({ recipient: mockTokenAccount(id), amount })),
 })
+
+// Confirms one position of a run with the attempt it was given.
+const confirmAt = (run: s.Run, position: number, signature: string) =>
+  api.runs.confirm(run.run_id, {
+    payments: [
+      {
+        position,
+        request_id: run.payments[position].request_id ?? "",
+        signature,
+      },
+    ],
+  })
 
 // A signature that is valid base58 and different for each payment.
 const sigOf = (n: number) => `TestSignature${"abcdefghij"[n]}`.padEnd(64, "1")
@@ -107,9 +119,8 @@ describe("bad requests", () => {
 
   it("answers invalid_amount when any issue is on an amount, however deep", async () => {
     const bad = await post("/runs", {
-      company_wallet: COMPANY_WALLET,
-      payments: [{ person_id: bruno.id, amount: "1.5" }],
-      idempotency_key: crypto.randomUUID(),
+      ...runOf([bruno.id]),
+      payments: [{ recipient: COMPANY_WALLET, amount: "1.5" }],
     })
     expect(await code(bad)).toBe("invalid_amount")
 
@@ -122,9 +133,8 @@ describe("bad requests", () => {
     expect(await code(both)).toBe("invalid_amount")
 
     const notAmount = await post("/runs", {
-      company_wallet: COMPANY_WALLET,
-      payments: [{ person_id: "not-a-guid", amount: "1" }],
-      idempotency_key: crypto.randomUUID(),
+      ...runOf([bruno.id]),
+      payments: [{ recipient: "not base58!", amount: "1" }],
     })
     expect(await code(notAmount)).toBe("invalid_request")
   })
@@ -264,133 +274,216 @@ describe("confirm", () => {
     expect(response.headers.get("retry-after")).toBe("60")
   })
 
-  it("repeats a run payment's receipt, slot included, and conflicts on another signature", async () => {
+  it("records a run payment once, repeats it for the same signature, and refuses another", async () => {
     scenarios.set("instant")
     const run = await api.runs.create(runOf([bruno.id]))
-    const [payment] = run.payments
-    const first = await api.runs.confirmPayment(
-      run.run_id,
-      payment.payment_id,
-      SIG,
-    )
-    const second = await api.runs.confirmPayment(
-      run.run_id,
-      payment.payment_id,
-      SIG,
-    )
-    expect(second).toEqual(first)
-    expect(second.slot).toBe(first.slot)
-
-    const conflict = await caught(
-      api.runs.confirmPayment(run.run_id, payment.payment_id, OTHER_SIG),
-    )
-    expect(conflict).toMatchObject({
-      status: 409,
-      code: "transfer_already_confirmed",
+    const first = await confirmAt(run, 0, SIG)
+    expect(first.payments[0]).toMatchObject({
+      status: "finalized",
+      signature: SIG,
     })
-    const bad = await post(
-      `/runs/${run.run_id}/payments/${payment.payment_id}/confirm`,
-      { signature: "sig" },
-    )
-    expect(await code(bad)).toBe("invalid_signature")
+    const second = await confirmAt(run, 0, SIG)
+    expect(second.payments[0]).toEqual(first.payments[0])
+    expect(second.errors).toBeUndefined()
+
+    const conflict = await confirmAt(run, 0, OTHER_SIG)
+    expect(conflict.errors).toEqual([
+      { position: 0, error: "payment_already_resolved" },
+    ])
     // Paid once.
     expect(db.company.available).toBe(83_000_000_000n)
-    expect(db.payments.filter((p) => p.id === payment.payment_id)).toHaveLength(
-      1,
-    )
+    expect(db.payments.filter((p) => p.runId === run.run_id)).toHaveLength(1)
+  })
+})
+
+describe("runs", () => {
+  it("refuses the first run of a wallet until it is linked, then remembers the link", async () => {
+    db.linkedWallets.clear()
+    const unlinked = { ...runOf([bruno.id]), wallet_signature: undefined }
+    expect(await caught(api.runs.create(unlinked))).toMatchObject({
+      status: 409,
+      code: "wallet_link_required",
+    })
+    await api.runs.create(runOf([bruno.id]))
+    expect((await api.runs.create(unlinked)).payments).toHaveLength(1)
+  })
+
+  it("refuses a sender the wallet does not own, and duplicate or self payments", async () => {
+    const run = runOf([bruno.id, diego.id])
+    expect(
+      await caught(api.runs.create({ ...run, sender: ME_WALLET })),
+    ).toMatchObject({ status: 403, code: "wallet_access_denied" })
+    const twice = await post("/runs", {
+      ...run,
+      payments: [run.payments[0], run.payments[0]],
+    })
+    expect(await code(twice)).toBe("invalid_payments")
+    const self = await post("/runs", {
+      ...run,
+      payments: [{ recipient: run.sender, amount: "1" }],
+    })
+    expect(await code(self)).toBe("invalid_payments")
+  })
+
+  it("prepares each position in order, with its transaction, and no person or amount", async () => {
+    const run = await api.runs.create(runOf([bruno.id, diego.id]))
+    expect(run.required_signers).toEqual([COMPANY_WALLET])
+    expect(run.payments.map((p) => [p.position, p.destination])).toEqual([
+      [0, mockTokenAccount(bruno.id)],
+      [1, mockTokenAccount(diego.id)],
+    ])
+    for (const payment of run.payments) {
+      expect(s.isSignable(payment)).toBe(true)
+      expect(payment.last_valid_block_height).toBeGreaterThan(mockBlockHeight())
+    }
+    for (const payment of run.payments) {
+      expect(
+        Object.keys(payment).filter((key) => /amount|person/.test(key)),
+      ).toEqual([])
+    }
+    // A read carries no transaction.
+    const read = await api.runs.get(run.run_id)
+    expect(read.payments.some((p) => p.transaction !== undefined)).toBe(false)
+  })
+
+  it("answers an account that belongs to no one with preparation_failed and no transaction", async () => {
+    const run = await api.runs.create({
+      ...runOf([bruno.id]),
+      payments: [{ recipient: ME_WALLET, amount: "1" }],
+    })
+    expect(run.payments[0]).toMatchObject({
+      status: "preparation_failed",
+      error: "invalid_confidential_state",
+      request_id: null,
+    })
+    expect(run.status).toBe("partial_failure")
+  })
+
+  it("answers not finalized as an item error, never as an HTTP error", async () => {
+    const run = await api.runs.create(runOf([bruno.id]))
+    const first = await confirmAt(run, 0, SIG)
+    expect(first.errors).toEqual([
+      { position: 0, error: "transaction_not_finalized" },
+    ])
+    expect(first.payments[0].status).toBe("prepared")
+  })
+
+  it("records a payment the network rejected as failed, with its signature", async () => {
+    scenarios.set("tx-failed")
+    const run = await api.runs.create(runOf([bruno.id]))
+    const after = await confirmAt(run, 0, SIG)
+    expect(after.payments[0]).toMatchObject({
+      status: "failed",
+      error: "transaction_failed",
+      signature: SIG,
+    })
+    expect(after.status).toBe("partial_failure")
+    expect(db.company.available).toBe(84_000_000_000n)
+  })
+
+  it("answers a confirm of an old attempt with payment_attempt_changed", async () => {
+    scenarios.set("instant", "partial-failure")
+    const run = await api.runs.create(runOf([bruno.id, diego.id]))
+    await confirmAt(run, 0, sigOf(0))
+    await confirmAt(run, 1, sigOf(1))
+    await api.runs.retry(run.run_id, {
+      aes_key: AES_KEY,
+      payments: [{ position: 1, amount: "1000000000" }],
+    })
+    const stale = await confirmAt(run, 1, sigOf(1))
+    expect(stale.errors).toEqual([
+      { position: 1, error: "payment_attempt_changed" },
+    ])
   })
 })
 
 describe("retry", () => {
-  it("refuses a payment that is pending, signed or confirmed, and credits nothing twice", async () => {
-    scenarios.set("instant")
-    const run = await api.runs.create(runOf([bruno.id, diego.id]))
-    const [first, second] = run.payments
-    expect(
-      await caught(api.runs.retryPayment(run.run_id, first.payment_id)),
-    ).toMatchObject({ status: 409, code: "payment_not_retryable" })
-
-    await api.runs.confirmPayment(run.run_id, first.payment_id, SIG)
-    const pending = db.me.pending
-    const payments = db.payments.length
-    expect(
-      await caught(api.runs.retryPayment(run.run_id, first.payment_id)),
-    ).toMatchObject({ status: 409, code: "payment_not_retryable" })
-    // And a confirm of the old request cannot pay again.
-    expect(db.me.pending).toBe(pending)
-    expect(db.payments).toHaveLength(payments)
-
-    // Signed: the confirm is under way but not final.
-    scenarios.clear()
-    await caught(
-      api.runs.confirmPayment(run.run_id, second.payment_id, OTHER_SIG),
-    )
-    const status = await api.runs.get(run.run_id)
-    expect(status.payments[1].status).toBe("signed")
-    expect(
-      await caught(api.runs.retryPayment(run.run_id, second.payment_id)),
-    ).toMatchObject({ code: "payment_not_retryable" })
-  })
-
-  it("lets a failed payment be retried", async () => {
-    scenarios.set("tx-failed")
-    const run = await api.runs.create(runOf([bruno.id]))
-    const [payment] = run.payments
-    await caught(api.runs.confirmPayment(run.run_id, payment.payment_id, SIG))
-    expect((await api.runs.get(run.run_id)).payments[0].status).toBe("failed")
-    const retry = await api.runs.retryPayment(run.run_id, payment.payment_id)
-    expect(retry.request_id).not.toBe(payment.request_id)
-  })
-})
-
-describe("partial-failure", () => {
-  it("fails payments 2 and 3 once, so a retry can succeed end to end", async () => {
+  const live = async () => {
     scenarios.set("instant", "partial-failure")
     const run = await api.runs.create(runOf([bruno.id, diego.id, northwind.id]))
-    const confirm = (i: number) =>
-      api.runs.confirmPayment(run.run_id, run.payments[i].payment_id, sigOf(i))
-    const statuses = async () =>
-      (await api.runs.get(run.run_id)).payments.map((p) => p.status)
+    await confirmAt(run, 0, sigOf(0))
+    // Rejected by the network: the run stops here, and position 2 is never sent.
+    await confirmAt(run, 1, sigOf(1))
+    return run
+  }
+  const retryBody = (
+    payments: { position: number; amount: string; signature?: string }[],
+  ) => ({ aes_key: AES_KEY, payments })
 
-    await confirm(0)
-    expect(await caught(confirm(1))).toMatchObject({
-      code: "transaction_failed",
-    })
-    expect(await caught(confirm(2))).toMatchObject({
-      code: "transaction_failed",
-    })
-    expect(await statuses()).toEqual(["confirmed", "failed", "expired"])
+  it("refuses while a prepared position is live: left out, without a signature, or not landed", async () => {
+    const run = await live()
+    const failed = { position: 1, amount: "1000000000" }
+    expect(
+      await caught(api.runs.retry(run.run_id, retryBody([failed]))),
+    ).toMatchObject({ status: 409, code: "outstanding_payments" })
+    expect(
+      await caught(
+        api.runs.retry(
+          run.run_id,
+          retryBody([failed, { position: 2, amount: "1000000000" }]),
+        ),
+      ),
+    ).toMatchObject({ code: "original_signature_required" })
+    expect(
+      await caught(
+        api.runs.retry(
+          run.run_id,
+          retryBody([
+            failed,
+            { position: 2, amount: "1000000000", signature: sigOf(2) },
+          ]),
+        ),
+      ),
+    ).toMatchObject({ code: "transaction_not_finalized" })
+  })
 
-    for (const i of [1, 2]) {
-      const retry = await api.runs.retryPayment(
-        run.run_id,
-        run.payments[i].payment_id,
-      )
-      expect(retry.request_id).not.toBe(run.payments[i].request_id)
-      // A new transaction is out, so it is no longer reported as expired.
-      expect((await statuses())[i]).toBe("pending")
-      await signAndConfirm(retry, {
-        signer,
-        submit: async () => sigOf(i),
-        confirm: (signature) =>
-          api.runs.confirmPayment(run.run_id, retry.payment_id, signature),
-      })
-    }
-    expect(await statuses()).toEqual(["confirmed", "confirmed", "confirmed"])
+  it("once the live ones expired, rebuilds the failed position and leaves the expired one unresolved", async () => {
+    const run = await live()
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 120_000)
+    const after = await api.runs.retry(
+      run.run_id,
+      retryBody([{ position: 1, amount: "2000000000" }]),
+    )
+    expect(after.errors).toEqual([
+      { position: 2, error: "transaction_history_unavailable" },
+    ])
+    const [paid, rebuilt, stuck] = after.payments
+    expect(paid.status).toBe("finalized")
+    expect(rebuilt).toMatchObject({ status: "prepared", attempt: 1 })
+    expect(rebuilt.request_id).not.toBe(run.payments[1].request_id)
+    expect(s.isSignable(rebuilt)).toBe(true)
+    // Its transaction is not handed out again.
+    expect(stuck).toMatchObject({ status: "prepared", attempt: 0 })
+    expect(stuck.transaction).toBeUndefined()
+
+    const done = await confirmAt(after, 1, sigOf(3))
+    expect(done.payments[1].status).toBe("finalized")
+    // The amount sent with the retry is the one paid.
     expect(db.company.available).toBe(84_000_000_000n - 3_000_000_000n)
   })
 
-  it("keeps payment 3 reported as expired until it is retried, even before a confirm", async () => {
-    scenarios.set("partial-failure")
-    const run = await api.runs.create(runOf([bruno.id, diego.id, northwind.id]))
-    const status = await api.runs.get(run.run_id)
-    expect(status.payments.map((p) => p.status)).toEqual([
-      "pending",
-      "pending",
-      "expired",
-    ])
-    await api.runs.retryPayment(run.run_id, run.payments[2].payment_id)
-    expect((await api.runs.get(run.run_id)).payments[2].status).toBe("pending")
+  it("rebuilds a position that could not be prepared, with no signature", async () => {
+    scenarios.set("instant", "prepare-failed")
+    const run = await api.runs.create(runOf([bruno.id, diego.id]))
+    expect(run.payments[1].status).toBe("preparation_failed")
+    await confirmAt(run, 0, sigOf(0))
+    const after = await api.runs.retry(
+      run.run_id,
+      retryBody([{ position: 1, amount: "1000000000" }]),
+    )
+    expect(after.payments[1]).toMatchObject({ status: "prepared", attempt: 1 })
+  })
+
+  it("skips a finalized position, so nothing is paid twice", async () => {
+    scenarios.set("instant")
+    const run = await api.runs.create(runOf([bruno.id]))
+    await confirmAt(run, 0, SIG)
+    const after = await api.runs.retry(
+      run.run_id,
+      retryBody([{ position: 0, amount: "1000000000" }]),
+    )
+    expect(after.payments[0]).toMatchObject({ status: "finalized", attempt: 0 })
+    expect(db.payments.filter((p) => p.runId === run.run_id)).toHaveLength(1)
   })
 })
 
@@ -432,8 +525,8 @@ describe("ledgers", () => {
     expect(db.me).toEqual({ available: 8_000_000_000n, pending: 0n })
 
     const run = await api.runs.create(runOf([bruno.id, diego.id]))
-    for (const [i, payment] of run.payments.entries()) {
-      await api.runs.confirmPayment(run.run_id, payment.payment_id, sigOf(i))
+    for (const position of [0, 1]) {
+      await confirmAt(run, position, sigOf(position))
     }
     expect(await api.company.balance()).toMatchObject({
       available: "84500000000",
@@ -442,22 +535,18 @@ describe("ledgers", () => {
     expect(db.me.pending).toBe(1_000_000_000n)
   })
 
-  it("refuses a run payment that would take the company below zero", async () => {
+  it("fails a run payment that would take the company below zero", async () => {
     scenarios.set("instant")
     db.company.available = 500_000_000n
     const run = await api.runs.create(runOf([bruno.id]))
-    const [payment] = run.payments
-    expect(
-      await caught(
-        api.runs.confirmPayment(run.run_id, payment.payment_id, SIG),
-      ),
-    ).toMatchObject({ status: 409, code: "invalid_confidential_state" })
+    const after = await confirmAt(run, 0, SIG)
+    expect(after.payments[0]).toMatchObject({
+      status: "failed",
+      error: "transaction_failed",
+    })
     expect(db.company.available).toBe(500_000_000n)
     expect(db.me.pending).toBe(0n)
-    expect(db.payments.some((p) => p.id === payment.payment_id)).toBe(false)
-    expect((await api.runs.get(run.run_id)).payments[0].status).not.toBe(
-      "confirmed",
-    )
+    expect(db.payments.some((p) => p.runId === run.run_id)).toBe(false)
   })
 
   it("refuses an unwrap confirm that would take the recipient below zero", async () => {

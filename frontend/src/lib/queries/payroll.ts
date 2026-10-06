@@ -2,12 +2,12 @@
 
 import { useMemo } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { api } from "@/lib/api"
-import type { RunRequest } from "@/lib/api/schemas"
+import { api, currentUserId } from "@/lib/api"
+import type { Signer } from "@/lib/api/sign"
+import { createRun } from "@/lib/runs/create"
+import { readAllByPerson, type AmountsRead } from "@/lib/people/amounts"
 import { readRecentlyPaid } from "@/lib/runs/recent"
-import { runPollInterval } from "@/lib/runs/poll"
 import { withAmounts, type PayrollPerson } from "@/lib/runs/plan"
-import { isApiError } from "@/lib/api/errors"
 import { queryKeys, type ViewerScope } from "./keys"
 import { usePeople, usePersonAmounts } from "./people"
 
@@ -25,31 +25,52 @@ export type PayrollPeople = {
   refetch: () => void
 }
 
+// Each person's token account (proposed, API_CONTRACT Q36), by person id. A person
+// without one has not configured an account and cannot be paid yet.
+export function useRecipientAccounts() {
+  return useQuery<AmountsRead>({
+    queryKey: queryKeys.people.accounts(),
+    queryFn: ({ signal }) =>
+      readAllByPerson(
+        (cursor) =>
+          api.company.recipientAccounts({ cursor, limit: 100 }, { signal }),
+        (item) => item.token_account,
+      ),
+  })
+}
+
 // An amount from a failed refresh is not used: paying a figure that may be out of date
-// is worse than not paying yet, so a failure of either read is an error here.
+// is worse than not paying yet, so a failure of any read is an error here.
 export function usePayrollPeople(): PayrollPeople {
   const people = usePeople()
   const amounts = usePersonAmounts()
-  const failed = people.isError || amounts.isError
+  const accounts = useRecipientAccounts()
+  const failed = people.isError || amounts.isError || accounts.isError
   const list = people.data
   const read = amounts.data
+  const where = accounts.data
   const data = useMemo(
     () =>
-      !failed && list && read
-        ? withAmounts(list.people, new Map(Object.entries(read.byPerson)))
+      !failed && list && read && where
+        ? withAmounts(
+            list.people,
+            new Map(Object.entries(read.byPerson)),
+            new Map(Object.entries(where.byPerson)),
+          )
         : undefined,
-    [failed, list, read],
+    [failed, list, read, where],
   )
   return {
     data,
     isPending: !data && !failed,
     isError: !data && failed,
-    error: people.error ?? amounts.error,
-    isFetching: people.isFetching || amounts.isFetching,
-    truncated: Boolean(list?.truncated || read?.truncated),
+    error: people.error ?? amounts.error ?? accounts.error,
+    isFetching: people.isFetching || amounts.isFetching || accounts.isFetching,
+    truncated: Boolean(list?.truncated || read?.truncated || where?.truncated),
     refetch: () => {
       void people.refetch()
       void amounts.refetch()
+      void accounts.refetch()
     },
   }
 }
@@ -85,33 +106,33 @@ export function useRecentlyPaid() {
   })
 }
 
-// The run's payments, without amounts. Asks again while any payment is still open, so
-// a run started elsewhere (or confirmed by the network later) catches up.
+// The run's payments, without amounts or people. The service changes a payment only when
+// it is confirmed or retried, never on its own, so there is nothing to poll for.
 export function useRun(runId: string) {
   return useQuery({
     queryKey: queryKeys.runs.detail(runId),
     queryFn: ({ signal }) => api.runs.get(runId, { signal }),
-    refetchInterval: (query) => {
-      const run = query.state.data
-      if (!run || query.state.status === "error") return false
-      // A status the app does not know is polled a bounded number of times.
-      return runPollInterval(
-        run.payments.map((payment) => payment.status),
-        query.state.dataUpdateCount,
-      )
-    },
   })
 }
 
-// Creating a run moves no money: the payments are signed one by one afterwards.
-// The idempotency key is the caller's, so the same attempt never makes two runs.
+// Creating a run moves no money: its transactions are unsigned, and a run whose answer
+// was lost can never pay anyone. Someone may have changed since the list was read.
 export function useCreateRun() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (request: RunRequest) => api.runs.create(request),
-    onError: (error) => {
-      // Someone's status changed since the list was read.
-      if (isApiError(error) && error.code === "recipient_not_activated") {
+    mutationFn: ({
+      signer,
+      recipients,
+    }: {
+      signer: Signer
+      recipients: readonly PayrollPerson[]
+    }) =>
+      createRun(signer, recipients, {
+        create: (request) => api.runs.create(request),
+        userId: currentUserId,
+      }),
+    onSettled: (_, error) => {
+      if (error) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.people.all })
       }
     },

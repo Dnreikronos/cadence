@@ -56,7 +56,7 @@ details are easy to over-read, so they are stated exactly:
 | CORS             | `PROOF_CORS_ORIGINS` defaults to `*` when unset (any origin, no credentials). An explicitly empty value disables cross-origin access. Otherwise it is a comma-separated list of exact origins. Allowed methods are **GET and POST only**. Allowed request headers are `Content-Type` and `Authorization`. Preflight is cached for 600 s (`cors.rs:13-43`). `PUT`, `PATCH` and `DELETE` fail preflight today. The web app's `Content-Security-Policy` also names this service's origin in `connect-src`, taken from `NEXT_PUBLIC_PROOF_API_URL` at build time, so a service that moves to another origin needs a new web build, not only a CORS entry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Format           | JSON in and out, `Content-Type: application/json`. Bodies are limited to 8 KiB by a `DefaultBodyLimit` on the wrap and transfer routers and to 32 KiB on the runs router (not on `/health`). An oversize body, a missing or wrong `Content-Type`, malformed JSON, a wrong field type and an unknown field all return `400 invalid_request`. The service never returns 413 or 415. The web app sends `Content-Type` only when a request has a body: the 🟡 `POST` routes that take none (revoke, retry, invite) send none (see question 34).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Amounts          | **Integer base units as a decimal string**, six decimals: `"1000000"` is 1 USDC. Never a JSON number (that is `400 invalid_request`), never `"1.5"`. The server accepts 1 to 15 ASCII digits whose value is `1` to `2^48 - 1` (`281474976710655`); an empty string, more than 15 characters, a non-digit, `0` or a larger value is `400 invalid_amount`. The server accepts leading zeros today (`"0001"` is 1). The web app is stricter on purpose and never sends them. The web app converts at the edge with exact integer math and never uses floats for money.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Identifiers      | `request_id` is 64 **lowercase** hexadecimal characters, the SHA-256 of the transaction wire bytes (uppercase is `400 invalid_request_id`). `company_wallet` must be a base58 public key that is on the ed25519 curve. Other wallet and account fields are base58 public keys. Signatures are base58 transaction signatures. Ids of runs, payments, people, auditors and companies, and `idempotency_key`, are UUIDs (the client accepts any GUID shape).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Identifiers      | `request_id` is 64 **lowercase** hexadecimal characters, the SHA-256 of the transaction wire bytes (uppercase is `400 invalid_request_id`). `company_wallet` must be a base58 public key that is on the ed25519 curve. Other wallet and account fields are base58 public keys. Signatures are base58 transaction signatures. Ids of runs, payments, people, auditors and companies are UUIDs (the client accepts any GUID shape).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Time             | RFC 3339 UTC.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Cluster          | Devnet only today. On another cluster `/wrap` and `/wrap/confirm` fail with `wrap_requires_devnet`. Only `/transfer` and `/transfer/confirm` remap it to `transfer_requires_devnet` (`client.rs:68`, `transfer.rs:335-340`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Rate limits      | Fixed 60 s windows, held in memory per service instance and reset on restart. The wrap routes and the transfer routes each have their own limiter, so a wrap call does not spend transfer quota. Per window and limiter: 120 requests in total, 30 per direct socket peer, and (prepare only) 10 per `company_wallet`. Forwarded IP headers are ignored, so behind a proxy all users share the proxy's peer quota. These are **not** windows: at most 8 requests in flight per limiter, and on `/transfer` at most 4 proof workers. Every limit returns `429` with `Retry-After: 60` and the route's `wrap_rate_limited` or `transfer_rate_limited` code, concurrency caps included. A confirm call spends the same peer and global quota as a prepare call, so polling uses budget. The runs routes use the transfer codes, have their own 120 and 30 per window and share the four proof workers with `/transfer` (see [`RUNS_API.md`](RUNS_API.md)). `/transfer` and `/transfer/confirm` also give up after 30 s with `503 transfer_timeout` (`wrap_limits.rs:41-115`, `transfer.rs:89`). `/health` is not limited. |
@@ -204,10 +204,8 @@ Statuses and routes are part of the proposal.
 | ------ | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 403    | `forbidden_role`                          | Any `/me`, `/company`, `/audit` route called outside the caller's role.                                                                                                                                                                                                                               |
 | 404    | `run_not_found`                           | The mock's `GET /runs/:run_id`, when the run is not the caller's (the implemented service has the code too, see [Codes in use](#codes-in-use-)).                                                                                                                                                      |
-| 404    | `payment_not_found`                       | `POST /runs/:run_id/payments/:payment_id/confirm` and `/retry`, when the payment is not in that run.                                                                                                                                                                                                  |
-| 404    | `person_not_found`                        | `POST /runs`, `PUT /company/people/:person_id/amount` and `POST /company/people/:person_id/invite`, when `person_id` is not in the caller's company.                                                                                                                                                  |
+| 404    | `person_not_found`                        | `PUT /company/people/:person_id/amount` and `POST /company/people/:person_id/invite`, when `person_id` is not in the caller's company.                                                                                                                                                                |
 | 404    | `auditor_not_found`                       | `POST /company/auditors/:auditor_id/revoke`, when the id is not an auditor or pending invite of the caller's company.                                                                                                                                                                                 |
-| 409    | `recipient_not_activated`                 | `POST /runs` and the retry route, for a person without an activated account.                                                                                                                                                                                                                          |
 | 409    | `reveal_risk_not_acknowledged`            | `POST /unwrap`, see [Unwrap](#unwrap-private-usdc-to-public-with-the-reveal-risk-flag-).                                                                                                                                                                                                              |
 | 409    | `credit_counter_mismatch`                 | `POST /accounts/apply-pending/confirm`. It can come for an apply that did land: see [Accounts](#accounts-configure-and-apply-pending-).                                                                                                                                                               |
 | 409    | `key_already_enrolled`                    | `POST /keys/enroll`.                                                                                                                                                                                                                                                                                  |
@@ -424,14 +422,14 @@ exception is `transaction_failed`: the network ran the transaction and refused i
 so nothing moved. Every flow that moves money applies the rule, but they do not keep
 the evidence equally:
 
-| Flow                                    | After "may have been sent"                                                                                                                                                                                                                   | Evidence kept across a reload                                                              |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Deposit, wrap step (`/company/deposit`) | no new wrap until the earlier one is reconciled; "Check my balances". An outcome that cannot be told stays held, in every tab, until released                                                                                                | yes: a submission record in `localStorage`, per viewer (every tab of the browser)          |
-| Deposit, apply step                     | past "signing", every failure except `transaction_failed` is sent: no retry; "Check my balances", and "Check again" (re-confirms the saved signature) when there is one                                                                      | no: kept in memory for the screen only                                                     |
-| Apply pending (`/me`)                   | no retry; the button locks while the saved signature is re-confirmed; "Check my balance", "Check again"                                                                                                                                      | yes: a submission record, per viewer (every tab of the browser)                            |
-| Withdraw (`/me/withdraw`)               | no retry, and the same amount is held back until a lookup of its saved signature settles it; the form waits while it runs                                                                                                                    | yes: a list of held withdrawals in `localStorage`, per viewer (every tab)                  |
-| Payroll payment (`/company/runs/...`)   | that payment is never retried or signed again; "Check again" re-confirms with its signature, and a payment with no signature only says to check the company's payments and balance. A cancelled signature (nothing sent) may be signed again | yes: the run attempt and each payment that reached the submit step, per viewer (every tab) |
-| Activation, account step (`/activate`)  | the next try settles the saved transaction instead of preparing a second one                                                                                                                                                                 | no: an in-memory map per wallet                                                            |
+| Flow                                    | After "may have been sent"                                                                                                                                                                                                                   | Evidence kept across a reload                                                     |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Deposit, wrap step (`/company/deposit`) | no new wrap until the earlier one is reconciled; "Check my balances". An outcome that cannot be told stays held, in every tab, until released                                                                                                | yes: a submission record in `localStorage`, per viewer (every tab of the browser) |
+| Deposit, apply step                     | past "signing", every failure except `transaction_failed` is sent: no retry; "Check my balances", and "Check again" (re-confirms the saved signature) when there is one                                                                      | no: kept in memory for the screen only                                            |
+| Apply pending (`/me`)                   | no retry; the button locks while the saved signature is re-confirmed; "Check my balance", "Check again"                                                                                                                                      | yes: a submission record, per viewer (every tab of the browser)                   |
+| Withdraw (`/me/withdraw`)               | no retry, and the same amount is held back until a lookup of its saved signature settles it; the form waits while it runs                                                                                                                    | yes: a list of held withdrawals in `localStorage`, per viewer (every tab)         |
+| Payroll payment (`/company/runs/...`)   | that payment is never retried or signed again; "Check again" re-confirms with its signature, and a payment with no signature only says to check the company's payments and balance. A cancelled signature (nothing sent) may be signed again | yes: each payment that reached the submit step, per viewer (every tab)            |
+| Activation, account step (`/activate`)  | the next try settles the saved transaction instead of preparing a second one                                                                                                                                                                 | no: an in-memory map per wallet                                                   |
 
 A submission record is `{ kind, request_id, signature | null, last_valid_block_height,
 wallet, at }`, one per kind and viewer, under `cadence:submission:<kind>:<viewer>` in
@@ -484,18 +482,14 @@ last_valid_block_height?, at }`, one per amount. It **does** hold the amount, wh
   when the network confirmed it, refused it (`transaction_failed`), or the service said
   it was not on chain 90 seconds after the send, and otherwise stays held (a lookup
   that fails, a `404`, or no signature to ask with).
-- Payroll keeps the run attempt `{ idempotency_key, fingerprint, run_id?, created_at }`
-  (the fingerprint is a hash of the wallet and the sorted person ids with their amounts)
-  and, for each payment that reached the submit step, `{ payment_id, run_id, person_id,
-request_id, signature | null, last_valid_block_height, at }`. The same list sent again
-  within a day reuses the saved key, so the service answers with the run it already made;
-  a run the browser had been given before, or one with payments that may have been sent,
-  is shown and never signed again. Each saved payment with a signature is re-confirmed
-  (`POST /runs/:run_id/payments/:payment_id/confirm`) and shown as checking, and its
-  person is not payable in a new run until it is settled. A payment that never reached
-  the submit step is not paid: its transaction existed only in the page that created the
-  run, so it cannot be signed after a reload, and the screen says to start a new run
-  for them only. The attempt is cleared once no payment of its run is in doubt.
+- Payroll keeps, for each payment that reached the submit step, `{ run_id, position,
+attempt, request_id, person_id, signature | null, last_valid_block_height, at }`
+  (`person_id` is the account when no person was known). Each saved payment with a
+  signature is re-confirmed (`POST /runs/:id/confirm` with its position) and shown as
+  checking, and its person is not payable in a new run until it is settled. A run that
+  was created and never signed keeps nothing: its transactions existed only in the page
+  that asked for them and cannot land, so the same people can be paid in a new run. A
+  payment that never reached the submit step is not paid, for the same reason.
 
 **No record, no send.** Before a deposit's wrap, an apply, a withdrawal or a payroll
 payment starts, the web app probes storage (it writes a sentinel, reads it back, removes
@@ -656,199 +650,86 @@ today; the `transparent` fields in this document describe a proposal. See
 For the headline flow (#55, #83). One confirmation by the admin, then one signature
 per recipient.
 
-**The backend has implemented `/runs` (#55), and not in the shape this draft
-proposed.** [`RUNS_API.md`](RUNS_API.md) and `services/proof/src` are the source of
-truth for the routes. The web app's client and mock still implement the proposal
-that follows under "The shape the client and mock implement", so **today the client
-cannot call the implemented routes**: its strict request body (`person_id`,
-`idempotency_key`, no `sender`, no `aes_key`) would be refused, and its per-payment
-confirm and retry routes do not exist. Reconciling them is open work (questions 36
-and 37).
-
-What is implemented, in short (read `RUNS_API.md` for the rest):
+[`RUNS_API.md`](RUNS_API.md) and `services/proof/src` are the source of truth for the
+routes (#55, #107). The client (`src/lib/api/client.ts`) and the mock implement them as
+they are.
 
 - `POST /runs` takes `company_wallet`, `sender` (the source token account), the
   transient `aes_key`, `wallet_signature` (first request only) and 1 to 100 distinct
   `payments` of `{ recipient, amount }`, where `recipient` is a **token account**, not
-  a person. It uses the transfer authentication and wallet association, and returns
-  the run with one unsigned v1 transaction per payment that could be built, each
-  identified by its `position`. A payment that cannot be prepared (a missing or
-  unusable recipient, a proof failure) comes back as `preparation_failed` with a fixed
-  error and no transaction; the others are still prepared.
-- Each payment's proofs assume the ones before it succeeded, so the wallet signs and
-  submits them in ascending `position`, waiting for finalized execution each time. If
-  one fails, the later transactions are stale and must not be sent.
+  a person. It returns the run with one unsigned v1 transaction per payment that could
+  be built, each identified by its `position` (its index in the request). A payment
+  that cannot be prepared comes back as `preparation_failed` with a fixed error and no
+  transaction; the others are still prepared, without counting it.
 - `POST /runs/:id/confirm` takes any subset of up to 100 positions as
-  `{ position, request_id, signature }` and records each receipt on its own; per-item
-  problems come back in an optional `errors` list.
+  `{ position, request_id, signature }` and records each receipt on its own. It always
+  answers `200` with the run; per-position problems (`transaction_not_finalized`,
+  `transaction_mismatch`, `payment_attempt_changed`, `payment_already_resolved`, ...)
+  are in an optional `errors` list.
 - `POST /runs/:id/retry` takes the `aes_key` again, the intended `amount` of each
-  position to rebuild and, for every attempt whose blockhash has not expired, its
-  original wallet signature. It keeps finalized payments, rebuilds the unpaid ones
-  against fresh sender state in the same run, and increments `attempt`. A run is never
-  restarted for a recipient who might already be paid.
-- `GET /runs/:id` returns the ordered metadata (`position`, `destination`, `attempt`,
-  `request_id`, `status`, `signature`, `slot`, `error`), no amounts and no transaction
-  bytes. Another user's run is `404 run_not_found`. Payment `status` is `prepared`,
-  `finalized`, `failed`, `expired` or `preparation_failed`; the run's is `prepared`,
-  `partial_failure` or `completed`.
-- Limits: 1 to 100 recipients, a 32 KiB body, the transfer rate-limit and timeout
-  codes, ten preparations or retries per wallet per minute and the four proof workers
-  shared with `/transfer`. New codes are in [Codes in use](#codes-in-use-).
-- It never signs or submits, and no response carries an amount or a key.
+  position to rebuild and, for every prepared attempt whose blockhash has not expired,
+  its original signature. It refuses the whole retry while such an attempt can still
+  land (`outstanding_payments`, `original_signature_required`,
+  `transaction_not_finalized`), keeps finalized payments, leaves expired prepared ones
+  unresolved (`transaction_history_unavailable`, never rebuilt) and rebuilds `failed`,
+  `expired` and `preparation_failed` ones with `attempt + 1`.
+- `GET /runs/:id` returns the run without transactions, amounts or people. Payment
+  `status` is `prepared`, `finalized`, `failed`, `expired` or `preparation_failed`; the
+  run's is `prepared`, `partial_failure` or `completed`. Another user's run is
+  `404 run_not_found`.
+- No idempotency key, and no role check beyond the user and the wallet's ownership of
+  the sender.
 
-| Topic            | Implemented (`RUNS_API.md`)                                                                    | Client and mock today                                                                                  |
-| ---------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Who is paid      | `recipient` token accounts, distinct                                                           | `person_id`s                                                                                           |
-| Request          | `company_wallet`, `sender`, `aes_key`, `wallet_signature`, `payments`                          | `company_wallet`, `payments`, `idempotency_key`                                                        |
-| Idempotency      | none; a second run for an unresolved recipient must not be started                             | `idempotency_key`, one per attempt                                                                     |
-| A payment is     | a `position` in the run                                                                        | a `payment_id` and a `person_id`                                                                       |
-| Confirm          | `POST /runs/:id/confirm`, a batch of `{ position, request_id, signature }`                     | `POST /runs/:run_id/payments/:payment_id/confirm { signature }`                                        |
-| Retry            | `POST /runs/:id/retry` with `aes_key`, amounts and the original signatures of live attempts    | `POST /runs/:run_id/payments/:payment_id/retry`, no body                                               |
-| Read             | `run_id`, `status`, `payments[]` as above; no `created_at`, no person                          | `run_id`, `created_at`, `payments[{ payment_id, person_id, status, transparent, failure, signature }]` |
-| Payment statuses | `prepared`, `finalized`, `failed`, `expired`, `preparation_failed`                             | `pending`, `signed`, `confirmed`, `failed`, `expired`                                                  |
-| Errors           | `run_not_found`, `invalid_payments`, `outstanding_payments`, `transaction_history_unavailable` | `person_not_found`, `recipient_not_activated`, `payment_not_found`, `payment_not_retryable` (mock)     |
-| Body limit       | 32 KiB                                                                                         | 100 payments checked in the browser                                                                    |
+**What the web app does with it.**
 
-Consequences for the web app, none done yet: it needs each person's token account and
-the company's source account (nothing returns them to it), it would have to send the
-`aes_key` (which no screen sends today), it has no `idempotency_key` to lean on for a
-double click, and its run screen reads statuses and per-payment ids that the service
-does not have. The sections below that name the proposal's routes and codes describe
-what the client and the mock do, not what the service answers.
+- **Inputs.** Each person's token account comes from the proposed
+  `GET /company/people/accounts` (🟡, below); a person without one is listed apart as
+  "Hasn't set up private payments yet". The sender account and the `aes_key` each come
+  from one place (`src/lib/runs/keys.ts`): the mock answers them, real mode refuses
+  until the service says where they come from (questions on #63). A first run refused
+  with `409 wallet_link_required` signs the association text
+  (`Cadence wallet association\nuser:<uuid>\nwallet:<wallet>`) and sends the same
+  request once more with `wallet_signature`.
+- **Before signing**, the client checks that the run is for its wallet and sender, that
+  the company wallet is the only signer, and that each position pays the account asked
+  for at that index, once. Otherwise it signs nothing.
+- **Signing.** One approval, then one payment at a time in ascending position: sign,
+  submit, confirm that position (repeating while `transaction_not_finalized`). The
+  sequence **stops at the first payment that does not finalize** (refused, cancelled,
+  or sent and not confirmed). The transactions after it were built for a balance that
+  assumed it landed; they are never signed, the page lets go of them, and they cannot
+  land. A cancelled signature keeps the rest held in the page, and "Sign again"
+  continues the run from it.
+- **Retry** is one action for the run: it derives the `aes_key` again, shows the people
+  and today's amounts in a confirmation, sends the `failed`, `expired` and
+  `preparation_failed` positions, and signs what comes back in order. While a prepared
+  payment can still land the service refuses it, and the screen says to retry once
+  those have expired (about a minute).
+- **Rows.** `finalized` is Confirmed; `failed`, `expired` and `preparation_failed` are
+  retryable; `prepared` is Pending while the page holds its transaction and **Not sent**
+  otherwise (never signed here, so not paid in this run, and a new run is the way to pay
+  that person); a payment that was sent and not confirmed is Checking, with "Check
+  again" through the batch confirm. An unknown status is Unknown, with no action.
+- **No idempotency and no attempt records.** A create whose answer was lost leaves a
+  run of unsigned transactions that can never land, so nothing is kept for it and the
+  same people can be paid in a new run.
+- **No polling.** The service changes a payment only on confirm or retry, so the run
+  screen reads `GET /runs/:id` once and the confirm answers drive it. After a reload,
+  the payments this browser sent (kept per viewer, see
+  [The sent-failure rule](#the-sent-failure-rule)) are confirmed again with their saved
+  signatures.
 
-#### The shape the client and mock implement 🟡
+Still open (questions on #63): where the browser gets token accounts and the sender's
+key; how a never-sent position after a failure is released (the service keeps it
+`prepared` and the expiry leaves it unresolved for good); a lost create response; and
+`expired`, which the service never writes, and confirm never classifying an expired
+attempt.
 
-`POST /runs`
+#### Recipient accounts 🟡
 
-```json
-{
-  "company_wallet": "<wallet public key>",
-  "payments": [{ "person_id": "<uuid>", "amount": "4200000000" }],
-  "idempotency_key": "<client uuid>"
-}
-```
-
-**Limits.** A run has 1 to **100** payments, the same count the implemented service
-accepts (it takes 32 KiB bodies; the client's first reasoning, about 80 bytes an entry
-under 8 KiB, no longer sets the limit). The client refuses 0 or more than 100 before it
-sends (the new-run screen tells the admin to untick people and pay the rest in a second
-run), and the mock answers an oversized list with `400 invalid_request` because its
-schema rejects it. The implemented service answers `400 invalid_payments`.
-`person_id` and `idempotency_key` are UUIDs; `amount` follows
-[Amounts](#conventions), here the amount the roster holds for that person, in base
-units.
-
-The same `idempotency_key` returns the same run, so a double click cannot create
-two. The mock returns the same run with the transactions it first issued, and
-accepts a reused key with a different list without complaint (finding 5 proposes
-`409 idempotency_key_reused`). The client keeps one key per attempt: the same wallet
-and the same people and amounts keep their key across clicks and retries, and a
-changed list gets a new one. The response:
-
-```json
-{
-  "run_id": "<uuid>",
-  "payments": [
-    {
-      "payment_id": "<uuid>",
-      "person_id": "<uuid>",
-      "request_id": "<64-character hash>",
-      "transaction": "<base64 unsigned wire transaction>",
-      "transaction_version": 1,
-      "required_signers": ["<company wallet>"],
-      "recent_blockhash": "<blockhash>",
-      "last_valid_block_height": 123
-    }
-  ]
-}
-```
-
-`payments` is **in signing order**. Before it signs anything, the web app checks that
-the response lists exactly the people it asked for, once each, with distinct payment
-ids; otherwise it signs nothing and tells the admin to check the company's payments.
-It then signs them one after another in a single silent session, sends each, and
-confirms each. One payment is in flight at a time, a failure of one never stops the
-next, and leaving the page stops the loop: payments not yet signed stay `pending`
-on the service, and, because only this response carries their transactions, **a
-payment can be signed only in the session that created its run**. The run screen
-says so ("Start a new run for them, and don't include people shown as Confirmed").
-
-- `POST /runs/:run_id/payments/:payment_id/confirm` takes
-  `{ "signature": "<signature>" }` and returns the receipt for that payment. Issue
-  #55 still says `POST /runs/:id/confirm` ("accepting signatures"); this document
-  uses the per-payment route, and the issue wording is stale.
-- `GET /runs/:run_id` returns the run and **per-payment status without amounts**:
-
-```json
-{
-  "run_id": "<uuid>",
-  "created_at": "2026-10-03T19:00:00Z",
-  "payments": [
-    {
-      "payment_id": "<uuid>",
-      "person_id": "<uuid>",
-      "status": "pending | signed | confirmed | failed | expired",
-      "transparent": false,
-      "failure": null,
-      "signature": null
-    }
-  ]
-}
-```
-
-`failure` is a stable code when `status` is `failed`, never a message with values;
-the screen words it from its own table, and an unknown code reads as its status
-class. One failed payment never blocks the rest.
-
-**Retry, as the client uses it.** `POST /runs/:run_id/payments/:payment_id/retry`
-takes no body and prepares a fresh transaction for that payment only. It answers
-with one element of the `payments` array above (same fields, `payment_id` and
-`person_id` included), and the client refuses the answer unless `payment_id` is the
-one it asked about. The client offers it only for a payment shown as `failed` or
-`expired`, then signs the new transaction like the first. It never offers it for a
-payment that may have been sent (see
-[The sent-failure rule](#the-sent-failure-rule)): that payment gets "Check again",
-which re-confirms its saved signature through the per-payment confirm route. The
-screen's `expired` text says a retry is allowed only if the service confirms the
-payment did not land, which relies on the service refusing a retry otherwise; the
-rule the service applies is open (questions 14 and 28). A retry can answer
-`invalid_confidential_state` when the sender's balance moved under the proofs
-(finding 1); the screen words that as "The balance changed while signing. Retry this
-payment." People who are not activated are rejected by `POST /runs` with
-`409 recipient_not_activated` and are excluded in the UI before the call, and the
-screen also leaves out anyone without an amount. Before the call the new-run screen
-also reads the company's confirmed payments of the last 24 hours and leaves unticked
-anyone paid in that window, because nothing in the service answers "was this person
-paid today"; it waits for that read and for `GET /company/balance`, and refuses a run
-whose total is above the available private balance.
-
-Notes on the status values:
-
-- **`signed` does not exist on the service, and `expired` means something narrower
-  than the client assumes.** The implemented service has no `signed` state (it never
-  sees a signed transaction until confirm) and no `pending`: payments are `prepared`,
-  `finalized`, `failed`, `expired` or `preparation_failed`. It sets `expired` only
-  during a retry, once the finalized block height is past the attempt's last valid
-  height and the signature does not verify as landed, and it states that a missing
-  lookup does not prove a payment never executed: an expired attempt with missing
-  history stays unresolved and is not rebuilt automatically. The client shows
-  `signed` as pending, and shows `expired` as its own state with a Retry button (see
-  above). The mock writes both: `signed` once a payment's confirm has been asked but
-  has not finalized yet, and `expired` for the third payment of a run in the
-  `partial-failure` scenario. Questions 14 and 28 are partly answered by
-  [`RUNS_API.md`](RUNS_API.md) for the implemented shape.
-- The status enums differ between the two shapes: a payment inside a run has five
-  values (`pending`, `signed`, `confirmed`, `failed`, `expired`), and a payment item
-  in the read routes has three (`pending`, `confirmed`, `failed`). The client does
-  not share one type between them.
-
-**How status reaches the screen.** There is no Realtime subscription in the web app.
-The run screen reads `GET /runs/:run_id` and asks again every 5 s while any payment
-is `pending` or `signed`, and stops when every payment is `confirmed`, `failed` or
-`expired`. What this browser is doing to a payment (signing, waiting, a signature it
-holds) is laid over the service's status: a payment this browser saw confirmed stays
-confirmed, and one that was sent and is not confirmed stays "waiting" however the
-service reports it. The service's `confirmed` always wins.
+`GET /company/people/accounts`, admin only, paged like the amounts read:
+`{ items: [{ person_id, token_account | null }], next_cursor }`. No amount. A person
+with `null` has not configured a private account and cannot be in a run.
 
 ### Unwrap: private USDC to public, with the reveal-risk flag ✅
 
@@ -1274,14 +1155,17 @@ handler, including each failure that changes the UI:
   public USDC and adds to the company's pending balance, apply-pending moves pending
   to available, an unwrap lowers the recipient's available balance, and a run payment
   lowers the company's available balance and adds to the recipient's pending one.
-- A run with a mix of confirmed, failed and expired payments (`partial-failure`: the
-  second fails and the third expires on their first attempt, so a retry of either
-  confirms). The mock also writes `signed`. Both are undefined, see
-  [Payroll run](#payroll-run-one-approval-many-recipients-).
+- Runs as [`RUNS_API.md`](RUNS_API.md) describes them: token accounts, positions,
+  `preparation_failed` for an account that belongs to no one, the batch confirm with
+  per-position errors, the wallet link, and the retry rules (live prepared positions
+  refuse it, expired ones are left unresolved). `partial-failure` has the network refuse
+  the second payment on its first attempt; `prepare-failed` has the second payment fail
+  to prepare on its first attempt. The block height is derived from the clock (a block
+  every 400 ms, a blockhash valid for 150 blocks), so a page's fake clock moves it.
 - `reveal_risk` at `none`, `near` (within 1% of a payment the person received) and
   `exact`, and `reveal_risk_not_acknowledged` when the flag is missing.
-- `confidential_setup_required` (`setup-required`), `recipient_not_activated`,
-  `person_not_found`, `transaction_failed` (`tx-failed`), `credit_counter_mismatch`
+- `confidential_setup_required` (`setup-required`), `person_not_found`,
+  `transaction_failed` (`tx-failed`), `credit_counter_mismatch`
   (`credit-mismatch`), `insufficient_usdc` at `/wrap` prepare and again at confirm,
   `invalid_confidential_state` at `/unwrap` prepare when the amount is above the
   available balance, `forbidden_role` once a role is chosen. **`transaction_mismatch`
@@ -1315,31 +1199,25 @@ real service until the header is exposed.
 What the mock does that the real service might not. Nothing should be built on these,
 and each one is a place where a screen has only been exercised against the mock.
 
-- **Runs.** The mock implements the frontend's proposed `/runs` (people, idempotency
-  key, per-payment confirm and retry, `pending`/`signed`/`confirmed` statuses), not the
-  implemented one (token accounts, positions, batch confirm, `prepared`/`finalized`
-  statuses). See [Payroll run](#payroll-run-one-approval-many-recipients-).
+- **Runs.** The mock cannot see a network: a retry that includes a live prepared
+  position with its signature always answers `transaction_not_finalized` (the service
+  would record it if it had landed), it never verifies a signature or the wallet link,
+  the token accounts are derived from the owner, not read from a chain, and a payment
+  the company's available balance cannot cover fails as `transaction_failed`.
+  `GET /company/people/accounts` is proposed, not implemented.
 - **CSV.** The mock's amount column is the shortest decimal (`4200`, `3800.5`), not
   six decimals (`4200.000000`); lines end in `\n`, not CRLF, with no trailing newline;
   it sends only `Content-Type: text/csv; charset=utf-8` (no `Content-Disposition`,
   `X-Content-Type-Options` or `Cache-Control`); and it ignores filters. The
   formula-neutralising and quoting rules are implemented.
-- **Codes that exist only in the mock.** `payment_not_retryable` (a retry of a payment
-  that is not failed or expired), `request_not_found` (a confirm of an unknown
+- **Codes that exist only in the mock.** `request_not_found` (a confirm of an unknown
   `request_id` on `/unwrap/confirm`, `/accounts/configure/confirm` and
   `/accounts/apply-pending/confirm`, where the draft names none), `already_confirmed`
   (a different signature for a confirmed request on those same routes) and
   `not_found` (an auditor asking for another company's payments or export).
-- **Run routes.** A missing run on a payment's confirm or retry answers
-  `payment_not_found`, never `run_not_found`. A payment's confirm answers
-  `409 invalid_confidential_state` when the company's available balance is short,
-  which no real confirm does (it has `transaction_failed`); the client treats it as
-  sent but unconfirmed, so the row stays at "Check again". `POST /runs` prepares every
-  payment at once and never refuses a run for balance, and a reused
-  `idempotency_key` returns the first run whatever the new list says.
 - **Rate limits.** `rate-limited` answers `wrap_rate_limited` on the wrap routes and
   `transfer_rate_limited` on the routes that prepare or confirm a transaction
-  (`/transfer`, `/runs` and its payments, `/unwrap`, `/accounts/configure` and
+  (`/transfer`, `/runs` and its confirm and retry, `/unwrap`, `/accounts/configure` and
   `/accounts/apply-pending`), and `rate_limited` on every other route, so reads and the
   people and invite routes use a code the draft does not assign them.
 - **Paging.** The cursor is an offset, `limit` is clamped at 100, and a malformed
@@ -1568,13 +1446,13 @@ Each points to the [open question](#open-questions) that asks it.
 - **Session length.** A signing session lasts long enough for a run of up to 100
   payments, and the app has no handling for a wallet session that expires mid-run
   beyond the failed payment. (Question 32.)
-- **Run shape.** The web app's run flow (people, `idempotency_key`, per-payment
-  confirm and retry) matches what the backend will build. It does not match what the
-  backend built. (Questions 36 and 37.)
+- **Run inputs.** Each person's token account, the company's sender account and the
+  `aes_key` reach the browser from somewhere. The client now uses the implemented
+  `/runs`, and the mock answers these three; real mode refuses them. (Question 36.)
 - **Key derivation.** The client can obtain the canonical key-derivation message, and
   the token account it belongs to, from somewhere. Today it builds a mock placeholder
   from the wallet address. (Question 35.)
-- **Paging and rate limits.** A `limit` of 100 is accepted; `GET /runs/:id` every 5 s,
+- **Paging and rate limits.** A `limit` of 100 is accepted; `GET /runs/:id` once per screen,
   `GET /me/status` on each `/me` page and `GET /me/balance` every 3 s for 30 s after an
   apply fit the limits and, where they decrypt nothing, write no audit row. (Questions
   8 and 21.)
@@ -1674,14 +1552,14 @@ These need an answer from the backend owner before the 🟡 routes are built.
     read reflect a confirmed apply at once or after some seconds? Is
     `POST /accounts/apply-pending` with nothing pending rejected, and with which code,
     or does it succeed and change nothing?
-27. **`request_id` across creates and retries.** Does a repeated `POST /runs` with the
-    same `idempotency_key` return the same `request_id`s, and does
-    `POST /runs/:run_id/payments/:payment_id/retry` always issue a new one? May a
+27. **`request_id` across creates and retries.** Answered for runs by the implemented
+    `/runs`: there is no idempotency key, and a retry gives a rebuilt position a new
+    attempt and `request_id`. Left open: may a
     wrap or an apply be confirmed again by `request_id` and signature at any time, or
     only while its record exists (`WRAP_API.md` says unsigned wrap records are deleted)?
-28. **What `expired` and "not finalized" prove.** When a run payment is `expired`, is
-    it certain that it cannot land, so that a retry cannot pay twice? What does the
-    retry route answer for a payment that is `pending`, `signed` or `confirmed`? Is
+28. **What `expired` and "not finalized" prove.** For runs, the implemented retry
+    refuses while a prepared attempt is live and never rebuilds an expired one with
+    missing history; `expired` itself is never written (asked on #63). Left open: is
     "the service said not finalized and 90 s have passed" a safe test that a wrap or
     an apply did not land, or should the client compare `last_valid_block_height` with
     the chain?
@@ -1714,13 +1592,12 @@ These need an answer from the backend owner before the 🟡 routes are built.
     throws outside mock mode.
 36. **Run recipients and sender.** The implemented `POST /runs` pays token accounts and
     needs the source token account and the `aes_key`. Where does the web app get each
-    person's token account (the people table has none) and the company's sender
-    account, and does it keep sending the `aes_key` for runs (finding 2, question 3)?
-37. **Reconciling the run flow.** Does the frontend move to the implemented `/runs`
-    (positions, batch confirm, retry with amounts and original signatures, no
-    idempotency key, `prepared` and `finalized` statuses), or does the backend add the
-    person-based, per-payment shape the screens use? Either way the client, the mock
-    and the run screens change.
+    person's token account (the people table has none; the client proposes
+    `GET /company/people/accounts`) and the company's sender account, and how is the
+    sender's key derived and enrolled? Asked on #63, with how a never-sent position
+    after a failure is released and what a lost create response leaves behind.
+37. **Reconciling the run flow.** Answered: the frontend moved to the implemented
+    `/runs` (2026-10-06).
 
 ## Revisions
 
@@ -1755,3 +1632,8 @@ These need an answer from the backend owner before the 🟡 routes are built.
   records that `/runs` is implemented in a different shape (see
   [`RUNS_API.md`](RUNS_API.md)); its codes moved into Codes in use. No ✅ route changed. The 🟡 shapes only gained what the
   client already sends or enforces (the 100-payment limit, the `/keys/enroll` body).
+- 2026-10-06: the client, the mock and the run screens moved to the implemented
+  `/runs` (#107): token accounts and positions, the batch confirm, the run-level
+  retry, the wallet link, no idempotency key and no polling. Signing stops at the
+  first payment that does not finalize. Proposed `GET /company/people/accounts`.
+  Removed `payment_not_found`, `recipient_not_activated` and `payment_not_retryable`.

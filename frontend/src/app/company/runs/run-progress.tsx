@@ -1,67 +1,56 @@
 "use client"
 
+import { useRef, useState } from "react"
 import { PenLine, RotateCw } from "lucide-react"
 import { AvatarPerson } from "@/components/ui/avatar-person"
 import { buttonVariants } from "@/components/ui/button"
 import { ErrorState } from "@/components/ui/error-state"
 import { Skeleton } from "@/components/ui/skeleton"
-import { TransparentBadge } from "@/components/ui/transparent-badge"
 import { useRun } from "@/lib/queries/payroll"
-import type { RunCreated } from "@/lib/api/schemas"
-import { cancelledGoneMessage, runMessage } from "@/lib/runs/messages"
-import { initialsOf } from "@/lib/runs/people"
+import type { Run } from "@/lib/api/schemas"
+import { sumUnits } from "@/lib/money"
+import { paymentKey } from "@/lib/runs/executor"
+import { runMessage } from "@/lib/runs/messages"
+import { initialsOf, peopleByAccount, unknownPerson } from "@/lib/runs/people"
+import type { PayrollPerson } from "@/lib/runs/plan"
 import {
   canRecheck,
   canRetry,
   canSignAgain,
   mergeRow,
   tally,
-  type Row,
-  type ServerRow,
 } from "@/lib/runs/progress"
 import type { RunSigner } from "@/lib/runs/use-run-signer"
+import { useRestoreFocus } from "@/lib/restore-focus"
 import { cn } from "@/lib/utils"
+import { ConfirmRunDialog } from "./new/confirm-dialog"
 import { RunStatusPill } from "./run-status"
 
-type Entry = {
-  paymentId: string
-  personId: string
-  server?: ServerRow
-  // Known only once the run has been read: the service decides how a payment went out.
-  transparent: boolean | null
-}
-
-// Every payment of a run, live. For a run created in this session `created` lists the
-// payments to show before the first read of the run; the signer holds what this browser
-// is doing to each one. The screen that owns the signer also owns the leave guard.
+// Every payment of a run, live. For a run created in this session `created` is shown
+// until the run has been read; the signer holds what this browser is doing to each one.
+// The screen that owns the signer also owns the leave guard.
 export function RunProgress({
   runId,
   created,
   signer,
-  nameOf,
+  people,
 }: {
   runId: string
-  created?: RunCreated
+  created?: Run
   signer: RunSigner
-  // Undefined until the people list has answered.
-  nameOf: (personId: string) => string | undefined
+  // The payroll people, with their accounts and current amounts; undefined until read.
+  people: readonly PayrollPerson[] | undefined
 }) {
   const run = useRun(runId)
+  const [retrying, setRetrying] = useState(false)
+  const sectionRef = useRef<HTMLElement>(null)
+  // Closing the retry dialog returns focus to its button; once the retry starts and the
+  // button is gone, to the list.
+  const restore = useRestoreFocus(() => sectionRef.current)
+  const data = run.data ?? created
+  const personAt = peopleByAccount(people)
 
-  const entries: Entry[] | undefined = run.data
-    ? run.data.payments.map((payment) => ({
-        paymentId: payment.payment_id,
-        personId: payment.person_id,
-        server: { status: payment.status, failure: payment.failure },
-        transparent: payment.transparent,
-      }))
-    : created?.payments.map((payment) => ({
-        paymentId: payment.payment_id,
-        personId: payment.person_id,
-        transparent: null,
-      }))
-
-  if (!entries) {
+  if (!data) {
     if (run.isError) {
       return (
         <ErrorState
@@ -74,16 +63,41 @@ export function RunProgress({
     return <ProgressSkeleton />
   }
 
-  const rows = entries.map((entry) => ({
-    entry,
-    row: mergeRow(signer.local[entry.paymentId], entry.server),
-  }))
+  const personOf = (position: number) => {
+    const destination = data.payments.find(
+      (p) => p.position === position,
+    )?.destination
+    return (destination && personAt(destination)?.id) ?? destination ?? ""
+  }
+  const rows = data.payments.map((payment) => {
+    const key = paymentKey(runId, payment.position)
+    return {
+      payment,
+      key,
+      person: personAt(payment.destination),
+      row: mergeRow(
+        signer.local[key],
+        payment,
+        signer.holds(runId, payment.position),
+      ),
+    }
+  })
   const counts = tally(rows.map(({ row }) => row))
   const canSign = signer.wallet.status === "ready" && !signer.busy
-  const anyTransparent = entries.some((entry) => entry.transparent === true)
+  // What a retry would pay, at today's amounts: a person no longer listed, or without an
+  // amount, cannot be retried from here.
+  const retryable = rows.filter(({ row }) => canRetry(row))
+  const retryPeople = retryable.flatMap(({ payment, person }) =>
+    person?.amount ? [{ position: payment.position, person }] : [],
+  )
 
   return (
-    <section aria-label="Payments in this run" className="space-y-4">
+    <section
+      ref={sectionRef}
+      tabIndex={-1}
+      aria-label="Payments in this run"
+      className="space-y-4 outline-none"
+    >
       <p role="status" className="text-ui text-ink-muted">
         <span className="font-medium text-ink">
           {counts.confirmed} of {counts.total}
@@ -100,28 +114,90 @@ export function RunProgress({
       </p>
 
       <ul className="overflow-hidden rounded-xl border border-line bg-surface">
-        {rows.map(({ entry, row }) => (
-          <PaymentRow
-            key={entry.paymentId}
-            name={nameOf(entry.personId)}
-            row={row}
-            transparent={entry.transparent === true}
-            checking={signer.checking.has(entry.paymentId)}
-            canSign={canSign}
-            held={signer.canSignAgain(entry.paymentId)}
-            onSignAgain={() => void signer.signAgain(runId, entry.paymentId)}
-            onRetry={() => void signer.retry(runId, entry.paymentId)}
-            onRecheck={() =>
-              row.signature &&
-              void signer.recheck(runId, entry.paymentId, row.signature)
-            }
-          />
-        ))}
+        {rows.map(({ payment, key, person, row }) => {
+          const name = people ? (person?.name ?? unknownPerson) : undefined
+          const label = name ?? "this person"
+          return (
+            <PaymentRow
+              key={key}
+              name={name}
+              status={
+                <RunStatusPill
+                  status={row.status}
+                  label={
+                    signer.checking.has(key) && row.status === "waiting"
+                      ? "Checking"
+                      : undefined
+                  }
+                />
+              }
+              message={row.message}
+              danger={row.status === "failed" || row.status === "expired"}
+              checking={signer.checking.has(key) && row.status === "waiting"}
+            >
+              {canSignAgain(row) && (
+                <RowButton
+                  icon={<PenLine className="size-3.5" />}
+                  label={`Sign again: the payment to ${label}`}
+                  disabled={!canSign}
+                  onClick={() => void signer.signAgain(runId, personOf)}
+                >
+                  Sign again
+                </RowButton>
+              )}
+              {canRecheck(row) && payment.request_id && (
+                <RowButton
+                  icon={<RotateCw className="size-3.5" />}
+                  label={`Check again: the payment to ${label}`}
+                  disabled={!canSign}
+                  onClick={() =>
+                    row.signature &&
+                    void signer.recheck(
+                      runId,
+                      {
+                        position: payment.position,
+                        request_id: payment.request_id ?? "",
+                      },
+                      row.signature,
+                      personOf,
+                    )
+                  }
+                >
+                  Check again
+                </RowButton>
+              )}
+            </PaymentRow>
+          )
+        })}
       </ul>
 
-      {run.isError && (
+      {retryable.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={!canSign || retryPeople.length === 0}
+            onClick={() => {
+              restore.remember()
+              setRetrying(true)
+            }}
+            className={buttonVariants({ variant: "secondary" })}
+          >
+            <RotateCw className="size-3.5" />
+            Retry failed payments
+          </button>
+          {retryPeople.length < retryable.length && (
+            <p className="text-caption/normal text-ink-muted">
+              {retryable.length - retryPeople.length === 1
+                ? "One failed payment is to someone with no amount or no longer on your list, and can't be retried from here."
+                : `${retryable.length - retryPeople.length} failed payments are to people with no amount or no longer on your list, and can't be retried from here.`}
+            </p>
+          )}
+        </div>
+      )}
+
+      {run.isError && run.data === undefined && created && (
         <p role="alert" className="text-caption text-danger-fg">
-          Couldn&apos;t refresh the status. Trying again.
+          Couldn&apos;t read this run from Cadence. Showing what was prepared.
         </p>
       )}
       {signer.wallet.status === "unavailable" && !signer.wallet.loading && (
@@ -130,59 +206,87 @@ export function RunProgress({
           can&apos;t be sent or retried from here.
         </p>
       )}
-      {!signer.busy && rows.some(({ row }) => row.status === "pending") && (
-        <p className="text-ui/normal text-ink-muted">
-          Payments still pending were not paid: they were not signed in this
-          session, and a payment can only be signed in the session that created
-          its run. Start a new run for them only, and don&apos;t include people
-          shown as Confirmed or Checking.
-        </p>
+      {/* A cancelled signature stopped the run: the payments after it wait on it. */}
+      {(counts.open === 0 || (counts.cancelled > 0 && !signer.busy)) && (
+        <Done counts={counts} />
       )}
-      {counts.open === 0 && (
-        <Done
-          counts={counts}
-          allRead={run.data !== undefined}
-          anyTransparent={anyTransparent}
-        />
-      )}
+
+      <ConfirmRunDialog
+        open={retrying}
+        onOpenChange={(open) => setRetrying(open)}
+        title={`Retry ${retryPeople.length === 1 ? "1 payment" : `${retryPeople.length} payments`}`}
+        recipients={retryPeople.map(({ person }) => person)}
+        repaid={[]}
+        total={sumUnits(retryPeople.map(({ person }) => person.amount ?? "0"))}
+        pending={false}
+        error={null}
+        finalFocus={restore.finalFocus}
+        onConfirm={() => {
+          setRetrying(false)
+          void signer.retry(
+            data,
+            new Map(
+              retryPeople.map(({ position, person }) => [
+                position,
+                person.amount ?? "",
+              ]),
+            ),
+            personOf,
+          )
+        }}
+      />
     </section>
+  )
+}
+
+function RowButton({
+  icon,
+  label,
+  disabled,
+  onClick,
+  children,
+}: {
+  icon: React.ReactNode
+  label: string
+  disabled: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      // The button disappears when the row starts signing: focus moves to the row so
+      // keyboard and screen reader users are not dropped at the top of the page.
+      onClick={(event) => {
+        event.currentTarget.closest("li")?.focus()
+        onClick()
+      }}
+      disabled={disabled}
+      aria-label={label}
+      className={buttonVariants({ variant: "secondary", size: "sm" })}
+    >
+      {icon}
+      {children}
+    </button>
   )
 }
 
 function PaymentRow({
   name,
-  row,
-  transparent,
+  status,
+  message,
+  danger,
   checking,
-  canSign,
-  held,
-  onSignAgain,
-  onRetry,
-  onRecheck,
+  children,
 }: {
   name: string | undefined
-  row: Row
-  transparent: boolean
+  status: React.ReactNode
+  message: string | null
+  danger: boolean
   // Sent before a reload and being asked about again: not paid again, not settled yet.
   checking: boolean
-  canSign: boolean
-  // This page still holds the transaction of a cancelled signature.
-  held: boolean
-  onSignAgain: () => void
-  onRetry: () => void
-  onRecheck: () => void
+  children: React.ReactNode
 }) {
-  const label = name ?? "this person"
-  // The button that was clicked disappears when the row starts signing: focus moves to
-  // the row so keyboard and screen reader users are not dropped at the top of the page.
-  const act = (action: () => void) => (event: React.MouseEvent) => {
-    event.currentTarget.closest("li")?.focus()
-    action()
-  }
-  // A cancelled signature whose transaction this page no longer holds cannot be signed
-  // again: say plainly that this person was not paid.
-  const message =
-    canSignAgain(row) && !held ? cancelledGoneMessage : row.message
   return (
     <li
       tabIndex={-1}
@@ -203,50 +307,9 @@ function PaymentRow({
           </>
         )}
       </span>
-      <span className="flex flex-wrap items-center gap-1.5">
-        <RunStatusPill
-          status={row.status}
-          label={checking && row.status === "waiting" ? "Checking" : undefined}
-        />
-        {transparent && <TransparentBadge />}
-      </span>
-      {canSignAgain(row) && held && (
-        <button
-          type="button"
-          onClick={act(onSignAgain)}
-          disabled={!canSign}
-          aria-label={`Sign again: the payment to ${label}`}
-          className={buttonVariants({ variant: "secondary", size: "sm" })}
-        >
-          <PenLine className="size-3.5" />
-          Sign again
-        </button>
-      )}
-      {canRetry(row) && (
-        <button
-          type="button"
-          onClick={act(onRetry)}
-          disabled={!canSign}
-          aria-label={`Retry the payment to ${label}`}
-          className={buttonVariants({ variant: "secondary", size: "sm" })}
-        >
-          <RotateCw className="size-3.5" />
-          Retry
-        </button>
-      )}
-      {canRecheck(row) && (
-        <button
-          type="button"
-          onClick={act(onRecheck)}
-          disabled={!canSign}
-          aria-label={`Check again: the payment to ${label}`}
-          className={buttonVariants({ variant: "secondary", size: "sm" })}
-        >
-          <RotateCw className="size-3.5" />
-          Check again
-        </button>
-      )}
-      {checking && row.status === "waiting" && (
+      <span className="flex flex-wrap items-center gap-1.5">{status}</span>
+      {children}
+      {checking && (
         <p className="basis-full text-caption/normal text-ink-muted">
           This payment was sent before the page was reloaded. Checking whether
           it went through; it won&apos;t be sent again.
@@ -256,9 +319,7 @@ function PaymentRow({
         <p
           className={cn(
             "basis-full text-caption/normal",
-            row.status === "failed" || row.status === "expired"
-              ? "text-danger-fg"
-              : "text-ink-muted",
+            danger ? "text-danger-fg" : "text-ink-muted",
           )}
         >
           {message}
@@ -268,16 +329,7 @@ function PaymentRow({
   )
 }
 
-function Done({
-  counts,
-  allRead,
-  anyTransparent,
-}: {
-  counts: ReturnType<typeof tally>
-  // The run has been read from the service, so its transparent flags are known.
-  allRead: boolean
-  anyTransparent: boolean
-}) {
+function Done({ counts }: { counts: ReturnType<typeof tally> }) {
   if (counts.sent > 0) {
     return (
       <p className="text-ui/normal text-ink-muted">
@@ -285,8 +337,6 @@ function Done({
           ? "One payment was sent but isn't confirmed."
           : `${counts.sent} payments were sent but aren't confirmed.`}{" "}
         Don&apos;t pay those people another way until they are.
-        {counts.retryable > 0 &&
-          " The others that didn't go through can be retried above."}
       </p>
     )
   }
@@ -303,38 +353,31 @@ function Done({
   if (counts.cancelled > 0) {
     return (
       <p className="text-ui/normal text-ink-muted">
-        {counts.cancelled === 1
-          ? "One payment wasn't signed, so nothing was sent for it."
-          : `${counts.cancelled} payments weren't signed, so nothing was sent for them.`}{" "}
-        Sign them again above while this page is open.
+        The run stopped at a signature you cancelled, and nothing after it was
+        sent. Sign again above to continue while this page is open.
+      </p>
+    )
+  }
+  if (counts.retryable > 0 || counts.notSent > 0) {
+    return (
+      <p className="text-ui/normal text-ink-muted">
         {counts.retryable > 0 &&
-          " The others that didn't go through can be retried."}
-      </p>
-    )
-  }
-  if (counts.retryable > 0) {
-    return (
-      <p className="text-ui/normal text-ink-muted">
-        {counts.retryable === 1
-          ? "One payment didn't go through."
-          : `${counts.retryable} payments didn't go through.`}{" "}
-        The others are unaffected. Retry each one above.
-      </p>
-    )
-  }
-  if (!allRead) {
-    return (
-      <p className="text-ui/normal text-ink-muted">
-        Every payment is confirmed.
+          (counts.retryable === 1
+            ? "One payment didn't go through, and the run stopped there. "
+            : `${counts.retryable} payments didn't go through. `)}
+        {counts.retryable > 0 &&
+          "Retry them above: Cadence prepares them again. "}
+        {counts.notSent > 0 &&
+          (counts.notSent === 1
+            ? "One payment was not sent, so that person wasn't paid in this run: pay them in a new run."
+            : `${counts.notSent} payments were not sent, so those people weren't paid in this run: pay them in a new run.`)}
       </p>
     )
   }
   return (
     <p className="text-ui/normal text-ink-muted">
-      Every payment is confirmed.{" "}
-      {anyTransparent
-        ? "Some were sent as ordinary transfers, marked Transparent: those amounts are public on-chain. The rest are encrypted; you, the recipient, any auditor you invited and Cadence can read them."
-        : "Each amount is encrypted on-chain; you, the recipient, any auditor you invited and Cadence can read it."}
+      Every payment is confirmed. Each amount is encrypted on-chain; you, the
+      recipient, any auditor you invited and Cadence can read it.
     </p>
   )
 }

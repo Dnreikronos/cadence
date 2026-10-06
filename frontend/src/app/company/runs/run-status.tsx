@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils"
 import type { RowStatus } from "@/lib/runs/progress"
 
 // `StatusPill` has the three states of a payment in a list; a payment in a run also
-// has the two this browser adds while it signs, `cancelled` and `expired`.
+// has the ones this browser adds while it signs, and `not-sent`.
 const pills: Record<
   RowStatus,
   { label: string; className: string; dot: string }
@@ -11,6 +11,11 @@ const pills: Record<
     label: "Pending",
     className: "border-line text-ink-muted",
     dot: "bg-ink-muted/50",
+  },
+  "not-sent": {
+    label: "Not sent",
+    className: "border-warning-border bg-warning-bg text-warning-fg",
+    dot: "bg-warning-dot",
   },
   signing: {
     label: "Signing",

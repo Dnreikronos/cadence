@@ -10,7 +10,10 @@ import {
   inviteAuditorRequestSchema,
   preparedSchema,
   receiptSchema,
+  isSignable,
+  runConfirmRequestSchema,
   runRequestSchema,
+  runRetryRequestSchema,
   runSchema,
   transferRequestSchema,
   unitsSchema,
@@ -84,9 +87,18 @@ describe("request formats", () => {
         runRequestSchema,
         {
           company_wallet: WALLET,
-          payments: [{ person_id: GUID, amount: "1" }],
-          idempotency_key: GUID,
+          sender: WALLET,
+          aes_key: AES_KEY,
+          payments: [{ recipient: WALLET, amount: "1" }],
         },
+      ],
+      [
+        runConfirmRequestSchema,
+        { payments: [{ position: 0, request_id: REQUEST_ID, signature: SIG }] },
+      ],
+      [
+        runRetryRequestSchema,
+        { aes_key: AES_KEY, payments: [{ position: 0, amount: "1" }] },
       ],
     ] as const
     for (const [schema, value] of cases) {
@@ -96,8 +108,9 @@ describe("request formats", () => {
     expect(() =>
       runRequestSchema.parse({
         company_wallet: WALLET,
-        payments: [{ person_id: GUID, amount: "1", note: "x" }],
-        idempotency_key: GUID,
+        sender: WALLET,
+        aes_key: AES_KEY,
+        payments: [{ recipient: WALLET, amount: "1", note: "x" }],
       }),
     ).toThrow(ZodError)
     expect(() =>
@@ -176,20 +189,26 @@ describe("request formats", () => {
 
 describe("response formats", () => {
   it("accepts a UTC offset as well as Z in timestamps", () => {
-    for (const created_at of [
+    for (const invited_at of [
       "2026-09-01T12:00:00Z",
       "2026-09-01T12:00:00+00:00",
       "2026-09-01T12:00:00.123456+02:00",
     ]) {
       expect(
-        runSchema.safeParse({ run_id: GUID, created_at, payments: [] }).success,
+        auditorSchema.safeParse({
+          id: GUID,
+          email: "a@b.c",
+          status: "active",
+          invited_at,
+        }).success,
       ).toBe(true)
     }
     expect(
-      runSchema.safeParse({
-        run_id: GUID,
-        created_at: "yesterday",
-        payments: [],
+      auditorSchema.safeParse({
+        id: GUID,
+        email: "a@b.c",
+        status: "active",
+        invited_at: "yesterday",
       }).success,
     ).toBe(false)
   })
@@ -356,5 +375,83 @@ describe("auditors, access log and account status", () => {
         key,
       ).toBe(false)
     }
+  })
+})
+
+describe("runs", () => {
+  const prepared = {
+    position: 0,
+    destination: WALLET,
+    attempt: 0,
+    request_id: REQUEST_ID,
+    status: "prepared",
+    signature: null,
+    slot: null,
+    error: null,
+    transaction: "AAAA",
+    last_valid_block_height: 10,
+  }
+  const run = {
+    run_id: GUID,
+    company_wallet: WALLET,
+    sender: WALLET,
+    mint: WALLET,
+    transaction_version: 1,
+    required_signers: [WALLET],
+    status: "prepared",
+    payments: [prepared],
+  }
+
+  it("reads a run as the service answers it, with or without errors", () => {
+    expect(runSchema.parse(run).payments[0].position).toBe(0)
+    expect(
+      runSchema.parse({ ...run, errors: [{ position: 0, error: "x" }] }).errors,
+    ).toEqual([{ position: 0, error: "x" }])
+  })
+
+  it("reads a position that could not be prepared, with no transaction", () => {
+    const failed = {
+      ...prepared,
+      request_id: null,
+      status: "preparation_failed",
+      error: "proof_generation_failed",
+      transaction: undefined,
+      last_valid_block_height: undefined,
+    }
+    const parsed = runSchema.parse({ ...run, payments: [failed] })
+    expect(isSignable(parsed.payments[0])).toBe(false)
+  })
+
+  it("tolerates a status it does not know, for a run and a payment", () => {
+    const parsed = runSchema.parse({
+      ...run,
+      status: "archived",
+      payments: [{ ...prepared, status: "queued" }],
+    })
+    expect(parsed.status).toBe("archived")
+    expect(isSignable(parsed.payments[0])).toBe(false)
+  })
+
+  it("signs only a prepared position that came with its transaction", () => {
+    expect(isSignable(runSchema.parse(run).payments[0])).toBe(true)
+    const read = { ...prepared, transaction: undefined }
+    expect(
+      isSignable(runSchema.parse({ ...run, payments: [read] }).payments[0]),
+    ).toBe(false)
+  })
+
+  it("refuses a request for more than 100 payments or none", () => {
+    const request = (count: number) => ({
+      company_wallet: WALLET,
+      sender: WALLET,
+      aes_key: AES_KEY,
+      payments: Array.from({ length: count }, () => ({
+        recipient: WALLET,
+        amount: "1",
+      })),
+    })
+    expect(runRequestSchema.safeParse(request(100)).success).toBe(true)
+    expect(runRequestSchema.safeParse(request(101)).success).toBe(false)
+    expect(runRequestSchema.safeParse(request(0)).success).toBe(false)
   })
 })

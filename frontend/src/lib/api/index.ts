@@ -36,6 +36,17 @@ async function getToken() {
   return data.session?.access_token ?? null
 }
 
+// The mock service checks no user: any fixed id stands in for the session's.
+const MOCK_USER_ID = "f0000000-0000-4000-8000-000000000001"
+
+// The signed-in user's id, which the wallet link names (`walletLinkMessage`).
+export async function currentUserId() {
+  if (apiConfig.mode === "mock") return MOCK_USER_ID
+  const { browserSupabase } = await import("@/lib/supabase/browser")
+  const { data } = await browserSupabase().auth.getSession()
+  return data.session?.user.id ?? null
+}
+
 export const api = createApiClient({
   baseUrl: apiConfig.baseUrl,
   getToken,
