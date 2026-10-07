@@ -88,7 +88,8 @@ function harness(signer: Signer, submit = mockSubmit) {
       finality: mockFinality,
       confirm,
       onStep,
-      check: extra?.check,
+      // What a payment is checked against is `executor.integration.test.ts`'s.
+      check: () => {},
       signal: extra?.signal,
       onSubmitted: extra?.onSubmitted,
       now: () => time,

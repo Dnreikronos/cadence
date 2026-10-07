@@ -30,12 +30,14 @@ import {
   type Viewer,
 } from "./evidence"
 import {
+  approvedPayees,
   checkedSign,
   paymentKey,
   recheckOne,
   retryablePositions,
   retryRun,
   signablesOf,
+  type Payees,
   type RunApi,
   type RunContext,
 } from "./executor"
@@ -53,12 +55,8 @@ const runApi: RunApi = {
 // Who a position of a run pays: a person id, or the account when no one is known.
 export type PersonOf = (position: number) => string
 
-// The token accounts a run may pay, as the admin approved them: a payment prepared to
-// any other is refused before it is signed (`checkedSign`).
-export type Payees = ReadonlySet<string>
-
 // For a task that never signs (asking about a payment already sent).
-const nobody: Payees = new Set()
+const nobody: Payees = new Map()
 
 const none: readonly SentPayment[] = []
 
@@ -122,6 +120,20 @@ export function useRunSigner(viewer: Viewer) {
   // Cancelled signatures: the prepared transactions, kept in memory so the same one is
   // signed again (see `held.ts`). Not state: a change to it always comes with a dispatch.
   const [held] = useState(createHeldStore)
+  // The accounts the admin approved for each run this page signs, by position: kept with
+  // the held transactions, so signing one again checks it against the same approval.
+  const [approvals] = useState(() => new Map<string, Payees>())
+  const approve = useCallback(
+    (runId: string, payees: Payees) => {
+      const merged = approvedPayees([
+        ...(approvals.get(runId) ?? []),
+        ...payees,
+      ])
+      approvals.set(runId, merged)
+      return merged
+    },
+    [approvals],
+  )
   const working = useRef(false)
   const controller = useRef<AbortController | null>(null)
 
@@ -296,7 +308,8 @@ export function useRunSigner(viewer: Viewer) {
     checking,
     otherTab,
     // Signs a run just created, in position order, stopping at the first payment that
-    // does not finalize. `payees` are the accounts the admin approved for it.
+    // does not finalize. `payees` are the accounts the admin approved for it, by
+    // position (`approvedPayees`).
     start: (
       created: Run,
       personOf: PersonOf,
@@ -309,7 +322,7 @@ export function useRunSigner(viewer: Viewer) {
       return exclusive(
         created.run_id,
         personOf,
-        payees,
+        approve(created.run_id, payees),
         (context) => continueRun(context, held),
         lease,
       )
@@ -318,9 +331,10 @@ export function useRunSigner(viewer: Viewer) {
     holds: (runId: string, position: number) =>
       held.has(paymentKey(runId, position)),
     // Signs the held transactions again from a cancelled one, without preparing new
-    // ones. Past its blockhash, it and the ones after it are let go of: not paid.
-    signAgain: (runId: string, personOf: PersonOf, payees: Payees) =>
-      exclusive(runId, personOf, payees, (context) =>
+    // ones. Past its blockhash, it and the ones after it are let go of: not paid. They
+    // are checked against what the admin approved when they were prepared.
+    signAgain: (runId: string, personOf: PersonOf) =>
+      exclusive(runId, personOf, approvals.get(runId) ?? nobody, (context) =>
         continueRun(context, held),
       ),
     // Prepares the run's failed payments again, with the amounts the admin approved for
@@ -331,33 +345,40 @@ export function useRunSigner(viewer: Viewer) {
       personOf: PersonOf,
       payees: Payees,
     ) =>
-      exclusive(run.run_id, personOf, payees, async (context) => {
-        const positions = retryablePositions(run).filter((p) => amounts.has(p))
-        if (positions.length === 0) return
-        let aesKey: string
-        try {
-          aesKey = await deriveBalanceKey(wallet.signer, run.sender)
-        } catch (error) {
-          for (const position of positions) {
-            context.events.failed(paymentKey(run.run_id, position), error)
+      exclusive(
+        run.run_id,
+        personOf,
+        approve(run.run_id, payees),
+        async (context) => {
+          const positions = retryablePositions(run).filter((p) =>
+            amounts.has(p),
+          )
+          if (positions.length === 0) return
+          let aesKey: string
+          try {
+            aesKey = await deriveBalanceKey(wallet.signer, run.sender)
+          } catch (error) {
+            for (const position of positions) {
+              context.events.failed(paymentKey(run.run_id, position), error)
+            }
+            return
           }
-          return
-        }
-        const rebuilt = await retryRun(context, run, {
-          aes_key: aesKey,
-          payments: positions.map((position) => ({
-            position,
-            amount: amounts.get(position) ?? "",
-          })),
-        })
-        if (!rebuilt) return
-        for (const prepared of rebuilt) {
-          const key = paymentKey(run.run_id, prepared.position)
-          held.hold(key, prepared)
-          dispatch({ type: "reset", id: key })
-        }
-        await continueRun(context, held)
-      }),
+          const rebuilt = await retryRun(context, run, {
+            aes_key: aesKey,
+            payments: positions.map((position) => ({
+              position,
+              amount: amounts.get(position) ?? "",
+            })),
+          })
+          if (!rebuilt) return
+          for (const prepared of rebuilt) {
+            const key = paymentKey(run.run_id, prepared.position)
+            held.hold(key, prepared)
+            dispatch({ type: "reset", id: key })
+          }
+          await continueRun(context, held)
+        },
+      ),
     recheck: (
       runId: string,
       payment: { position: number; request_id: string },

@@ -92,7 +92,8 @@ function realSign(options: { stopAfterSubmit?: AbortController } = {}) {
       finality: mockFinality,
       confirm,
       onStep,
-      check: extra?.check,
+      // What a payment is checked against is `executor.integration.test.ts`'s.
+      check: () => {},
       signal: extra?.signal,
       onSubmitted: (signature) => {
         extra?.onSubmitted?.(signature)

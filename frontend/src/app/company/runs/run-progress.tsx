@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useRun } from "@/lib/queries/payroll"
 import type { Run } from "@/lib/api/schemas"
 import { sumUnits } from "@/lib/money"
-import { paymentKey } from "@/lib/runs/executor"
+import { approvedPayees, paymentKey } from "@/lib/runs/executor"
 import { runMessage } from "@/lib/runs/messages"
 import { initialsOf, peopleByAccount, unknownPerson } from "@/lib/runs/people"
 import type { PayrollPerson } from "@/lib/runs/plan"
@@ -49,13 +49,6 @@ export function RunProgress({
   const restore = useRestoreFocus(() => sectionRef.current)
   const data = run.data ?? created
   const personAt = peopleByAccount(people)
-  // The accounts a payment signed again may go to: the people's own, as this app read
-  // them. A retry narrows it to the people the admin approved in its dialog.
-  const payees = new Set(
-    (people ?? []).flatMap((person) =>
-      person.tokenAccount ? [person.tokenAccount] : [],
-    ),
-  )
 
   if (!data) {
     if (run.isError) {
@@ -147,7 +140,7 @@ export function RunProgress({
                   icon={<PenLine className="size-3.5" />}
                   label={`Sign again: the payment to ${label}`}
                   disabled={!canSign}
-                  onClick={() => void signer.signAgain(runId, personOf, payees)}
+                  onClick={() => void signer.signAgain(runId, personOf)}
                 >
                   Sign again
                 </RowButton>
@@ -239,10 +232,12 @@ export function RunProgress({
               ]),
             ),
             personOf,
-            new Set(
-              retryPeople.flatMap(({ person }) =>
-                person.tokenAccount ? [person.tokenAccount] : [],
-              ),
+            // Each position to the person the admin approves for it in this dialog.
+            approvedPayees(
+              retryPeople.map(({ position, person }) => [
+                position,
+                person.tokenAccount,
+              ]),
             ),
           )
         }}

@@ -32,41 +32,75 @@ import {
 // transaction. The one exception is the network itself rejecting the transaction
 // (`transaction_failed`): it ran and did not land.
 
+type Extra = {
+  signal?: AbortSignal
+  onSubmitted?: (signature: string) => void
+}
+
 type SignAndConfirm = (
-  prepared: Pick<Signable, "transaction" | "required_signers" | "destination">,
+  prepared: Pick<
+    Signable,
+    "transaction" | "required_signers" | "destination" | "position"
+  >,
   confirm: (signature: string) => Promise<Receipt>,
   onStep?: (step: SignStep) => void,
-  extra?: {
-    signal?: AbortSignal
-    onSubmitted?: (signature: string) => void
-    check?: (transaction: InspectedTransaction) => void
-  },
+  extra?: Extra,
 ) => Promise<Receipt>
 
-// What a run's payments may do: move money from the company's account to the accounts
-// the admin approved, signed by the company's wallet. `sender` is the company's token
-// account as this app derives it, never as the service names it.
+// The wallet's sign call, which takes the pre-sign check.
+type SignChecked = (
+  prepared: Parameters<SignAndConfirm>[0],
+  confirm: (signature: string) => Promise<Receipt>,
+  onStep: ((step: SignStep) => void) | undefined,
+  extra: Extra & { check: (transaction: InspectedTransaction) => void },
+) => Promise<Receipt>
+
+// The accounts a run may pay, by position, as the admin approved them. Each account is
+// approved for one position only, so no one is paid twice in a run.
+export type Payees = ReadonlyMap<number, string>
+
+// `[position, account]` pairs as the admin approved them, a later pair for a position
+// replacing an earlier one. An account approved for two positions approves nothing:
+// every payment of the run is then refused, unsent.
+export function approvedPayees(
+  entries: Iterable<readonly [number, string | null | undefined]>,
+): Payees {
+  const payees = new Map<number, string>()
+  for (const [position, account] of entries) {
+    if (account) payees.set(position, account)
+  }
+  return new Set(payees.values()).size === payees.size ? payees : new Map()
+}
+
+// What a run's payments may do: move money from the company's account to the account the
+// admin approved for each position, signed by the company's wallet. `sender` is the
+// company's token account as this app derives it, never as the service names it.
 export type RunAllowlist = {
   wallet: string
   sender: string
-  payees: ReadonlySet<string>
+  payees: Payees
 }
 
 // Signing with the pre-sign check for a payment: the transaction must be one confidential
-// transfer from the company's account to the position's account, and that account must
-// be one the admin approved. The allowlist is resolved when a payment is signed, so one
+// transfer from the company's account to the account the admin approved for that
+// position. The service's own `destination` must name that same account, so the screen
+// shows where the money goes. The allowlist is resolved when a payment is signed, so one
 // that cannot be (the sender in real mode) fails that payment, unsent.
 export function checkedSign(
-  sign: SignAndConfirm,
+  sign: SignChecked,
   allowlist: () => Promise<RunAllowlist>,
 ): SignAndConfirm {
   return async (prepared, confirm, onStep, extra) => {
     const { wallet, sender, payees } = await allowlist()
-    const { destination } = prepared
+    const destination = payees.get(prepared.position)
     return sign(prepared, confirm, onStep, {
       ...extra,
       check: (transaction) => {
-        if (!payees.has(destination)) {
+        if (
+          !destination ||
+          prepared.destination !== destination ||
+          new Set(payees.values()).size !== payees.size
+        ) {
           throw new UnexpectedTransactionError("destination")
         }
         checkConfidentialTransfer(transaction, {
