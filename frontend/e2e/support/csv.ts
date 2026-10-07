@@ -58,19 +58,15 @@ export async function readDownload(download: Download) {
   }
 }
 
-// A payments export, strictly: the header line is exactly the documented columns, the
-// file has the rows expected and nothing else, and every row has one cell per column, no
-// more and no fewer (a stray column would be data nobody agreed to export).
-//
-// One deliberate deviation, kept loose until the contract settles: the amount. The
-// contract (docs/dev/API_CONTRACT.md, "CSV export", still a draft) says a decimal USDC
-// string with exactly six decimals, `4200.000000`; the mock answers `4200`, trimming the
-// zeros (src/lib/api/mocks/handlers.ts, `csv()`). The lead decided not to change the mock
-// yet, so the amount is only checked to be a decimal USDC amount, never base units: the
-// callers compare its numeric value. Tighten the pattern to `\d+\.\d{6}` when the mock
-// follows the contract.
+// A payments export, strictly, in the contract's format (docs/dev/API_CONTRACT.md, "CSV
+// export"): every line ends in CRLF, the header line is exactly the documented columns,
+// the file has the rows expected and nothing else, every row has one cell per column, no
+// more and no fewer (a stray column would be data nobody agreed to export), and every
+// amount is decimal USDC with exactly six decimals, `4200.000000`, never base units.
 export function expectPaymentsCsv(text: string, expectedRows: number) {
-  const lines = text.split(/\r?\n/).filter((line) => line !== "")
+  expect(text, "every line ends in CRLF").toMatch(/\r\n$/)
+  expect(text.replaceAll("\r\n", ""), "no bare CR or LF").not.toMatch(/[\r\n]/)
+  const lines = text.split("\r\n").filter((line) => line !== "")
   expect(lines[0], "the first line is the header").toBe(csvColumns.join(","))
   expect(lines, "one line per payment, after the header").toHaveLength(
     expectedRows + 1,
@@ -86,7 +82,7 @@ export function expectPaymentsCsv(text: string, expectedRows: number) {
   for (const [date, counterparty, amount, status] of rows.slice(1)) {
     expect(date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(counterparty).not.toBe("")
-    expect(amount).toMatch(/^\d{1,10}(\.\d{1,6})?$/)
+    expect(amount).toMatch(/^\d{1,10}\.\d{6}$/)
     expect(["confirmed", "pending", "failed"]).toContain(status)
   }
   return rows
