@@ -100,6 +100,16 @@ describe("prepareUnwrap", () => {
     expect(sent).toHaveLength(1)
   })
 
+  it("refuses an ask for a wallet other than the signer's before anything is signed", async () => {
+    const { signer, sent, signMessage, balanceKey, deps } = setup([prepared])
+    await expect(
+      prepareUnwrap(signer, { ...ask, wallet: ACCOUNT }, deps),
+    ).rejects.toMatchObject({ name: "UnexpectedSignerError" })
+    expect(balanceKey).not.toHaveBeenCalled()
+    expect(signMessage).not.toHaveBeenCalled()
+    expect(sent).toEqual([])
+  })
+
   it("refuses in real mode before anything is signed or sent", async () => {
     const { signer, sent, signMessage, deps } = setup([prepared])
     apiConfig.mode = "real"
