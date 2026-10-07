@@ -22,6 +22,7 @@ import { wrapAccounts } from "@/lib/solana/accounts"
 import {
   approvedPayees,
   checkedSign,
+  payOne,
   paymentKey,
   paySequence,
   recheckOne,
@@ -460,6 +461,71 @@ describe("a run's payments against the accounts the admin approved", () => {
       status: "failed",
       message: refusedTransactionMessage,
     })
+  })
+
+  it("signs nothing when two prepared payments claim the same position", async () => {
+    scenarios.set("instant")
+    const created = await createRun()
+    const { events, local } = recorder()
+    const submit = vi.fn(mockSubmit)
+    const [first] = signablesOf(created)
+
+    // The service answered position 0 twice: the same person, paid twice.
+    await paySequence(
+      { runId: created.run_id, sign: realSign(submit), api: runApi, events },
+      [first, { ...first }],
+    )
+
+    expect(submit).not.toHaveBeenCalled()
+    expect(local()[paymentKey(created.run_id, 0)]).toMatchObject({
+      status: "failed",
+      message: refusedTransactionMessage,
+    })
+  })
+
+  it("signs none of a run when one of its positions was not approved", async () => {
+    scenarios.set("instant")
+    const created = await createRun()
+    const { events, local } = recorder()
+    const submit = vi.fn(mockSubmit)
+    const [first, second] = payees.map((p) => mockTokenAccount(p.id))
+
+    await paySequence(
+      {
+        runId: created.run_id,
+        // The third position was never approved: the first two must not go either.
+        sign: realSign(
+          submit,
+          approved([
+            [0, first],
+            [1, second],
+          ]),
+        ),
+        api: runApi,
+        events,
+      },
+      signablesOf(created),
+    )
+
+    expect(submit).not.toHaveBeenCalled()
+    expect(local()[paymentKey(created.run_id, 0)]).toMatchObject({
+      status: "failed",
+      message: refusedTransactionMessage,
+    })
+  })
+
+  it("never passes the same prepared payment twice through one signer", async () => {
+    scenarios.set("instant")
+    const created = await createRun()
+    const { events } = recorder()
+    const submit = vi.fn(mockSubmit)
+    const sign = realSign(submit)
+    const context = { runId: created.run_id, sign, api: runApi, events }
+    const [first] = signablesOf(created)
+
+    expect(await payOne(context, first)).toBe(true)
+    expect(await payOne(context, { ...first })).toBe(false)
+    expect(submit).toHaveBeenCalledTimes(1)
   })
 
   it("approves nothing when one account is approved for two positions", () => {

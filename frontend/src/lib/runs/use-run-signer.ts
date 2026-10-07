@@ -57,7 +57,7 @@ const runApi: RunApi = {
 export type PersonOf = (position: number) => string
 
 // For a task that never signs (asking about a payment already sent).
-const nobody: Payees = new Map()
+const nobody: Payees = approvedPayees([])
 
 const none: readonly SentPayment[] = []
 

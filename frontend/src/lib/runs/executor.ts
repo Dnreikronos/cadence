@@ -37,15 +37,23 @@ type Extra = {
   onSubmitted?: (signature: string) => void
 }
 
-type SignAndConfirm = (
+type SignAndConfirm = ((
   prepared: Pick<
     Signable,
-    "transaction" | "required_signers" | "destination" | "position"
+    | "transaction"
+    | "required_signers"
+    | "destination"
+    | "position"
+    | "request_id"
   >,
   confirm: (signature: string) => Promise<Receipt>,
   onStep?: (step: SignStep) => void,
   extra?: Extra,
-) => Promise<Receipt>
+) => Promise<Receipt>) & {
+  // Throws, before anything of a sequence is signed, when its positions are not all
+  // approved (`checkedSign`).
+  admit?: (positions: readonly number[]) => Promise<void>
+}
 
 // The wallet's sign call, which takes the pre-sign check.
 type SignChecked = (
@@ -56,8 +64,11 @@ type SignChecked = (
 ) => Promise<Receipt>
 
 // The accounts a run may pay, by position, as the admin approved them. Each account is
-// approved for one position only, so no one is paid twice in a run.
-export type Payees = ReadonlyMap<number, string>
+// approved for one position only, so no one is paid twice in a run: only
+// `approvedPayees` makes one.
+export type Payees = ReadonlyMap<number, string> & {
+  readonly approved: unique symbol
+}
 
 // `[position, account]` pairs as the admin approved them, a later pair for a position
 // replacing an earlier one. An account approved for two positions approves nothing:
@@ -69,7 +80,8 @@ export function approvedPayees(
   for (const [position, account] of entries) {
     if (account) payees.set(position, account)
   }
-  return new Set(payees.values()).size === payees.size ? payees : new Map()
+  const unique = new Set(payees.values()).size === payees.size
+  return (unique ? payees : new Map()) as ReadonlyMap<number, string> as Payees
 }
 
 // What a run's payments may do: move money in the wrapped mint from the company's account
@@ -85,23 +97,29 @@ export type RunAllowlist = {
 
 // Signing with the pre-sign check for a payment: the transaction must be one confidential
 // transfer from the company's account to the account the admin approved for that
-// position. The service's own `destination` must name that same account, so the screen
-// shows where the money goes. The allowlist is resolved when a payment is signed, so one
-// that cannot be (the sender in real mode) fails that payment, unsent.
+// position, and the same prepared payment never passes twice through one signer. The service's own
+// `destination` must name that same account, so the screen shows where the money goes.
+// A sequence is admitted only when every one of its positions is approved. The allowlist
+// is resolved when a payment is signed, so one that cannot be (the sender in real mode)
+// fails that payment, unsent.
 export function checkedSign(
   sign: SignChecked,
   allowlist: () => Promise<RunAllowlist>,
 ): SignAndConfirm {
-  return async (prepared, confirm, onStep, extra) => {
+  // Prepared payments already checked, by position and request.
+  const passed = new Set<string>()
+  const checked: SignAndConfirm = async (prepared, confirm, onStep, extra) => {
     const { wallet, sender, mint, payees } = await allowlist()
-    const destination = payees.get(prepared.position)
+    const { position } = prepared
+    const destination = payees.get(position)
+    const key = `${position}:${prepared.request_id}`
     return sign(prepared, confirm, onStep, {
       ...extra,
       check: (transaction) => {
         if (
           !destination ||
           prepared.destination !== destination ||
-          new Set(payees.values()).size !== payees.size
+          passed.has(key)
         ) {
           throw new UnexpectedTransactionError("destination")
         }
@@ -111,9 +129,17 @@ export function checkedSign(
           destination,
           mint,
         })
+        passed.add(key)
       },
     })
   }
+  checked.admit = async (positions) => {
+    const { payees } = await allowlist()
+    if (positions.some((position) => !payees.has(position))) {
+      throw new UnexpectedTransactionError("destination")
+    }
+  }
+  return checked
 }
 
 export type RunApi = {
@@ -261,6 +287,21 @@ export async function paySequence(
   payments: readonly Signable[],
 ): Promise<number | null> {
   const ordered = [...payments].sort((a, b) => a.position - b.position)
+  // The service names each payment's position: one named twice, or one the admin did not
+  // approve, stops the whole sequence before anything is signed.
+  const positions = ordered.map((prepared) => prepared.position)
+  try {
+    if (new Set(positions).size !== positions.length) {
+      throw new UnexpectedTransactionError("destination")
+    }
+    await context.sign.admit?.(positions)
+  } catch (error) {
+    if (ordered.length === 0 || context.signal?.aborted) {
+      return ordered[0]?.position ?? null
+    }
+    context.events.failed(paymentKey(context.runId, positions[0]), error)
+    return positions[0]
+  }
   for (const prepared of ordered) {
     if (context.signal?.aborted) return prepared.position
     if (!(await payOne(context, prepared))) return prepared.position
