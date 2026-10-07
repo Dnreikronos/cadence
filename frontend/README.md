@@ -118,6 +118,7 @@ const prepared = await api.wrap.prepare({
 const receipt = await signAndConfirm(prepared, {
   signer, // the user's wallet
   submit, // sends the signed bytes to Solana, returns the signature
+  finality, // reads the signature's status from the network
   confirm: (signature) =>
     api.wrap.confirm({ request_id: prepared.request_id, signature }),
 })
@@ -138,6 +139,35 @@ signer's, and polls confirm for up to 60 s, with `onSubmitted` to keep the signa
 if the page is left. The conventions are in the contract; the rule for what a screen
 does after a transaction may have been sent is
 [below](#when-a-transaction-may-have-been-sent).
+
+**The pre-sign check.** Before anything is signed, `signAndConfirm` decodes the
+prepared bytes with `@solana/kit` (`lib/solana/inspect.ts`; versions 0 and 1, no lookup
+tables) and refuses with `UnexpectedTransactionError` a transaction that the wallet does
+not pay for and sign alone, that calls a program outside the allowlist
+(`lib/solana/programs.ts`: System, Compute Budget, Token-2022, the ZK ElGamal proof
+program, Associated Token and Cadence's token-wrap), or that asks one of them for
+something no flow needs: a System call other than funding a proof context, a Token-2022
+instruction other than the confidential transfer extension's steps or a reallocation
+the wallet pays for (never a plain transfer, approve, new authority or close), or a
+proof context closed to anyone but the wallet. A flow adds its own rule with `check`. A
+payroll payment (`checkedSign` in `lib/runs/executor.ts`) must be exactly one
+confidential transfer from the company's token account, as this app derives it, to the
+position's account, which must be one the admin approved (the accounts shown in the
+confirm dialog, or the people retried); the only accounts it may write are those two,
+the wallet and the proof contexts it creates. The check was run against a real payment
+from the devnet acceptance of #55 (`lib/solana/devnet-fixture.ts`). Wrap, unwrap,
+configure and apply pending get only the common check: their destinations are not
+checked yet (token-wrap's derived accounts would have to be derived here).
+
+**The network's own read.** A receipt is the service's word. Once confirm returns one,
+`signAndConfirm` asks the wallet's `finality` (`getSignatureStatuses` with the whole
+history, `lib/solana/finality.ts`) about the signature it submitted, within the same
+60 s, and returns the receipt only once the network shows it finalized without an
+error. Not seen in time is a `ConfirmTimeoutError`; finalized with an error is a
+`FinalityMismatchError` (a `ConfirmTimeoutError` too), so every screen keeps the payment
+as sent and never sends it again. Asking again about a payment sent earlier (the
+run's "Check again", the deposit and withdrawal look-ups) still takes the service's
+word.
 
 `NEXT_PUBLIC_API_MODE` picks the service. `mock` answers from an in-browser
 [MSW](https://mswjs.io) handler for every route, including the failures that
@@ -160,7 +190,10 @@ shadows a Next route. In the browser, `window.cadenceMock` controls it:
 - `set("slow", "partial-failure")`, `clear()` and `active()` flip the failure
   scenarios, and `scenarios` lists them: `instant`, `slow`, `unauthenticated`,
   `rate-limited`, `service-down`, `setup-required`, `tx-failed`, `partial-failure`,
-  `credit-mismatch` and `rpc-down` (the chain read behind the public USDC balance).
+  `credit-mismatch`, `rpc-down` (the chain read behind the public USDC balance),
+  `sign-cancelled`, `chain-unconfirmed` (the network read never sees a confirmed
+  transaction finalized) and `foreign-destination` (a run's payments are prepared to an
+  account no one approved, and the pre-sign check refuses them).
   `?mock=slow,partial-failure` in the page URL turns scenarios on, and is read once,
   when the worker starts (at the first API call).
 - `setRole("admin" | "recipient" | "auditor" | null)` makes routes enforce a role
@@ -201,15 +234,16 @@ go to the mock service, which only knows those ids; in real mode they are the Su
 ## Wallet
 
 Screens sign through `useWallet()` (`src/lib/wallet`): `{ status, address, signer,
-submit }`, plus `loading` while the mock wallet loads and a `reason` when it is
+submit, finality }`, plus `loading` while the mock wallet loads and a `reason` when it is
 unavailable. The signed-in shell mounts `WalletProvider` with the viewer's role. Mock
 mode gives the admin and recipient a mock wallet and the auditor none; those mocks are
 imported dynamically, so a real-mode build has none of them. Real mode is
 `unavailable` and throws naming #78 and #80, until they land, so in real mode nothing
 can be signed yet. The `Signer` has `signTransaction` and an optional `signMessage`
 (used only for the key-derivation message). `useSignAndConfirm()` gives
-`await run(prepared, confirm, onStep, extra)`, where `extra` takes `signal` and
-`onSubmitted`.
+`await run(prepared, confirm, onStep, extra)`, where `extra` takes `signal`,
+`onSubmitted` and the flow's pre-sign `check`. `finality` reads the mock network in mock
+mode (`mockFinality`); the embedded wallet is to use `fetchFinality`.
 
 ## Money and queries
 

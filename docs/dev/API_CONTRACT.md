@@ -299,6 +299,14 @@ All prepare routes return the same core fields, plus route-specific ones:
   #66): `signAndConfirm` throws `UnexpectedSignerError` before anything is signed
   when `required_signers` is empty or holds any key other than the signer's address.
   Any `transaction_version` other than `0` or `1` is a contract error.
+- The web app **decodes the bytes before signing** and refuses (`UnexpectedTransactionError`,
+  nothing signed) a transaction the wallet does not pay for and sign alone, one that calls
+  a program outside its allowlist, or one that asks those programs for something no flow
+  needs (a plain token transfer, a new authority, a close to another account). A payroll
+  payment must be one confidential transfer from the company's token account to the
+  account the admin approved for that position. The rules are in the
+  [web app's README](../../frontend/README.md#api-client-and-mocks); the service must keep building
+  transactions inside them, and a new instruction or program is a contract change.
 - Returning bytes does not move funds. Signing is the authorization.
 
 **The Signer.** The web app needs two things from the user's wallet, and nothing
@@ -1265,7 +1273,10 @@ and each one is a place where a screen has only been exercised against the mock.
   route is open to every caller. The wrap, transfer, accounts and keys routes enforce
   none.
 - **Chain data.** `request_id` is a counter in hex, not a SHA-256; the transaction is
-  96 meaningless bytes; the mock signer and the mock signature are never verified, so
+  real wire bytes the pre-sign check reads (a run payment and `/transfer` shaped like
+  the service's, the other routes one confidential instruction on the wallet's own
+  account), with filler for proofs; the "network" is a map of the signatures the mock
+  saw finalized or failed; the mock signer and the mock signature are never verified, so
   `transaction_mismatch` and a wrong wallet signature cannot occur. The recipient's
   and company's wallets are fixed addresses, and the company's plain USDC balance is
   a mock of a chain read (it can fail on its own, with the `rpc-down` scenario).
@@ -1395,6 +1406,10 @@ the problem, why it is real, and the suggested change. The backend owner decides
    _Suggested change._ Settle co-sign timing and spend policy first. Before signing,
    the client should at least decode the message and verify the fee payer, the
    programs, the source, the destination and the mint.
+   _Status (web app)._ Done for the fee payer, the programs and their instructions on
+   every route, and for the source and destination of a payroll payment. The mint is
+   not checked: the source account fixes it. Wrap, unwrap, configure and apply pending
+   have no destination check yet.
 
 9. **The auditor model does not match the tenancy schema.**
    _Problem._ `/audit/:company_id` and the company picker in #88 assume an auditor

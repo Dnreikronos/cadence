@@ -174,13 +174,15 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
       `default` policy for MSW's worker URL in mock builds). Every page renders per
       request so it carries the nonce. Styles keep `unsafe-inline`. See the frontend
       README, "Session cookie and security headers".
-- [ ] **Pre-sign transaction decoder and a program/destination allowlist.** The client
-      signs whatever the service prepares: `lib/api/sign.ts` only checks `required_signers`.
-      Decode the v1 message in the browser, check its programs and destinations against an
-      allowlist (the token program, the confidential-transfer program, the company's and
-      recipient's accounts), show the destinations in the confirm dialog, and add Turnkey
-      policies that say the same. After submitting, verify that the transaction is
-      finalized through an RPC read, not on the service's word alone.
+- [ ] **Pre-sign transaction decoder and a program/destination allowlist.** Mostly done
+      on `frontend/pre-sign-decoder`: every prepared transaction is decoded and checked
+      against a program and instruction allowlist before it is signed, a payroll payment
+      against the company's account and the approved recipient's, the confirm dialog shows
+      each account, and a receipt counts only once `getSignatureStatuses` says finalized
+      (see the README's API client). Left: the Turnkey policies that say the same (#78),
+      the real wallet's `finality` (it is `fetchFinality`, waiting on #78), destination
+      checks for wrap, unwrap, configure and apply pending, and the network read on a
+      "check again" of a payment sent earlier.
 - [ ] **A same-origin BFF with an httpOnly cookie** instead of the script-readable
       Supabase cookie. `@supabase/ssr` writes `httpOnly: false` because the browser client
       reads the session (`getSession()` in `lib/api/index.ts`) to send the bearer token;
