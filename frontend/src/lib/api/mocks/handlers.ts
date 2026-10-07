@@ -1,5 +1,6 @@
 import { http, HttpResponse, delay } from "msw"
 import { z } from "zod"
+import { formatUsdcFixed } from "@/lib/deposit/schema"
 import { base64FromBytes } from "../base64"
 import { MOCK_ORIGIN } from "../config"
 import * as s from "../schemas"
@@ -271,20 +272,13 @@ function cell(value: string) {
   return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe
 }
 
-// Decimal USDC with exactly six decimals, "4200.000000", by integer math.
-function csvAmount(units: bigint) {
-  const whole = units / 1_000_000n
-  const fraction = String(units % 1_000_000n).padStart(6, "0")
-  return `${whole}.${fraction}`
-}
-
 // Every line, the last one too, ends in CRLF.
 function csv(rows: MockPayment[], name: (p: MockPayment) => string) {
   const lines = rows.map((p) =>
     [
       p.paidAt.slice(0, 10),
       name(p),
-      csvAmount(p.amount),
+      formatUsdcFixed(p.amount),
       p.status,
       p.signature ?? "",
     ]

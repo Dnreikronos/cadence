@@ -3,6 +3,7 @@ import {
   DECIMAL_HINT,
   baseUnitsToUsdc,
   formatBaseUnits,
+  formatUsdcFixed,
   isCommaDecimal,
   maxBaseUnits,
   parseAmount,
@@ -168,6 +169,35 @@ describe("formatBaseUnits", () => {
         ok: true,
         units,
       })
+    }
+  })
+
+  it.each([
+    [-1n, "-0.000001"],
+    [-500_000n, "-0.5"],
+    [-usdc(12_500), "-12500"],
+  ])("keeps the sign of %s, %j", (units, expected) => {
+    expect(formatBaseUnits(units)).toBe(expected)
+  })
+})
+
+describe("formatUsdcFixed", () => {
+  it.each([
+    [0n, "0.000000"],
+    [1n, "0.000001"],
+    [500_000n, "0.500000"],
+    [usdc(4_200), "4200.000000"],
+    [12_345_670n, "12.345670"],
+    [maxBaseUnits, "281474976.710655"],
+    [-1n, "-0.000001"],
+    [-usdc(4_200) - 500_000n, "-4200.500000"],
+  ])("formats %s as %j", (units, expected) => {
+    expect(formatUsdcFixed(units)).toBe(expected)
+  })
+
+  it("round-trips through parseUnits", () => {
+    for (const units of [0n, 1n, 999_999n, 1_000_001n, maxBaseUnits]) {
+      expect(parseUnits(formatUsdcFixed(units))).toEqual({ ok: true, units })
     }
   })
 })
