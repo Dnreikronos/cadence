@@ -740,7 +740,8 @@ fields for a withdrawal from the confidential balance followed by the unwrap.
 The implemented backend contract is [UNWRAP_API.md](UNWRAP_API.md). The client
 sends the transient AES key with every prepare and the wallet link signature on a
 `409 wallet_link_required`, from the same seams as a run (`lib/runs/keys.ts`): the
-mock answers them, real mode refuses them before anything is signed or sent.
+mock answers them, real mode refuses them before anything is signed or sent. Both are
+the signer's, so an ask for any other `wallet` is refused before anything is signed.
 
 ```json
 {
@@ -1212,6 +1213,12 @@ and each one is a place where a screen has only been exercised against the mock.
   the token accounts are derived from the owner, not read from a chain, and a payment
   the company's available balance cannot cover fails as `transaction_failed`.
   `GET /company/people/accounts` is proposed, not implemented.
+- **Unwrap.** The mock answers a malformed `aes_key` with `invalid_balance_key` and a
+  malformed `wallet_signature` on an unlinked wallet with `wallet_access_denied`, as
+  the service does, but it never verifies the link signature: any well-formed one
+  links the wallet. It checks the amount before the key, so a body wrong in both is
+  `invalid_amount` (the service says `invalid_balance_key`). A malformed `wallet` is
+  `invalid_request`, not `invalid_wallet`, and one off the curve is accepted.
 - **CSV.** The mock follows the format above (six-decimal amounts, CRLF after every
   line including the last, the quoting and formula-neutralising rules and the four
   headers), but it ignores filters and writes no audit row.
