@@ -666,6 +666,17 @@ describe("checkAllowed", () => {
     expect(refusal(() => checkAllowed(tx, WALLET))).toBeNull()
   })
 
+  it("refuses compute budget instructions in a v1 message, whose budget is its config", () => {
+    const tx = only([
+      {
+        program: programs.computeBudget,
+        accounts: [],
+        data: Uint8Array.from([3, ...u64(100_000)]),
+      },
+    ])
+    expect(refusal(() => checkAllowed(tx, WALLET))).toBe("budget")
+  })
+
   it("refuses a v1 priority fee or unit limit above the bounds", async () => {
     const tx = await transfer()
     for (const config of [

@@ -220,7 +220,10 @@ export function checkAllowed(tx: InspectedTransaction, wallet: string) {
   }
   for (const instruction of tx.instructions) {
     if (!knownPrograms.has(instruction.program)) refuse("program")
+    // A version 1 message states its budget in its config, bounded below: it carries
+    // no compute budget instructions (the service sets none, `v1.rs`).
     if (instruction.program === programs.computeBudget) {
+      if (tx.version === 1) refuse("budget")
       checkBudgetInstruction(instruction)
     }
   }
@@ -307,7 +310,7 @@ const flows: Record<
   },
   unwrap: {
     version: 1,
-    kinds: ["budget", "createAccount", "withdraw", "verify", "unwrap"],
+    kinds: ["createAccount", "withdraw", "verify", "unwrap"],
     once: ["withdraw", "unwrap"],
     proofs: [
       verifyProof.ciphertextCommitmentEquality,
