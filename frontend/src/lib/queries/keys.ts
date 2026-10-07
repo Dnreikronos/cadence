@@ -14,6 +14,7 @@ const auditors = ["auditors"] as const
 const accessLog = ["access-log"] as const
 const status = ["status"] as const
 const receipts = ["receipts"] as const
+const health = ["health"] as const
 
 // Every query key in the app, so a mutation can invalidate exactly what it changed:
 // `queryKeys.payments.all` reaches every payments list, `.company(query)` one of them.
@@ -81,4 +82,6 @@ export const queryKeys = {
     list: (query: PageQuery = {}) => [...receipts, "list", query] as const,
     detail: (paymentId: string) => [...receipts, "detail", paymentId] as const,
   },
+  // Whether the service is up. It holds nothing private, so it is not per viewer.
+  health: { all: health },
 }
