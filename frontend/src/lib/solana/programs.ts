@@ -5,6 +5,7 @@
 export const programs = {
   system: "11111111111111111111111111111111",
   computeBudget: "ComputeBudget111111111111111111111111111111",
+  token: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
   token2022: "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
   // The ZK ElGamal proof program: it verifies the confidential transfer's proofs.
   zkProof: "ZkE1Gama1Proof11111111111111111111111111111",
