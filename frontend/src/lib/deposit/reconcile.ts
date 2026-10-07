@@ -1,6 +1,10 @@
 import type { ApiClient } from "@/lib/api/client"
 import { ApiError } from "@/lib/api/errors"
-import { pastBlockhash, readBlockHeight } from "@/lib/solana/block-height"
+import {
+  pastBlockhash,
+  readBlockHeight,
+  type ReadBlockHeight,
+} from "@/lib/solana/block-height"
 import type { Submission } from "@/lib/submissions"
 
 // What became of a wrap that was sent and not seen through.
@@ -23,7 +27,7 @@ type Input = {
   signal?: AbortSignal
   // The finalized block height (lib/solana/block-height.ts): the chain in real mode,
   // the mock chain in mock mode.
-  blockHeight?: (signal?: AbortSignal) => Promise<number>
+  blockHeight?: ReadBlockHeight
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   pollMs?: number
 }

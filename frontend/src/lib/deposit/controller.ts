@@ -1,6 +1,7 @@
 import type { ApiClient } from "@/lib/api/client"
 import type { Acquired, Lease } from "@/lib/flow-lock"
 import { releaseUnderLock, type ReleaseOutcome } from "@/lib/release"
+import type { ReadBlockHeight } from "@/lib/solana/block-height"
 import type { Submission } from "@/lib/submissions"
 import {
   canRetry,
@@ -94,7 +95,7 @@ export type Deps = {
   // that cannot get it sends nothing.
   lock?: () => Promise<Acquired>
   now?: () => number
-  blockHeight?: Parameters<typeof reconcileWrap>[0]["blockHeight"]
+  blockHeight?: ReadBlockHeight
   sleep?: Parameters<typeof reconcileWrap>[0]["sleep"]
 }
 

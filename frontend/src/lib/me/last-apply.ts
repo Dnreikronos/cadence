@@ -1,5 +1,6 @@
 import type { ApiClient } from "@/lib/api/client"
 import { reconcileWrap, type Reconciled } from "@/lib/deposit/reconcile"
+import type { ReadBlockHeight } from "@/lib/solana/block-height"
 import type { Submission } from "@/lib/submissions"
 
 export type LastApplyStore = {
@@ -17,7 +18,7 @@ type Input = {
   // Balances may have changed, whatever the answer was.
   refresh: () => void
   signal?: AbortSignal
-  blockHeight?: Parameters<typeof reconcileWrap>[0]["blockHeight"]
+  blockHeight?: ReadBlockHeight
   sleep?: Parameters<typeof reconcileWrap>[0]["sleep"]
   pollMs?: number
 }

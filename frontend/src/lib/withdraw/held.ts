@@ -12,6 +12,7 @@ import {
 } from "@/lib/submissions"
 import { releaseUnderLock, releaseUnreadableUnderLock } from "@/lib/release"
 import type { Acquired } from "@/lib/flow-lock"
+import type { ReadBlockHeight } from "@/lib/solana/block-height"
 import { requireDurable, type ApiMode } from "@/lib/storage-guard"
 import type { Held } from "./flow"
 
@@ -155,7 +156,7 @@ type CheckInput = {
   // Only these are looked up (default: every record). The others are left as they are.
   include?: (record: HeldRecord) => boolean
   signal?: AbortSignal
-  blockHeight?: Parameters<typeof reconcileWrap>[0]["blockHeight"]
+  blockHeight?: ReadBlockHeight
   sleep?: Parameters<typeof reconcileWrap>[0]["sleep"]
   pollMs?: number
 }
