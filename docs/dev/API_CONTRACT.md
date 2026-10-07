@@ -306,11 +306,13 @@ All prepare routes return the same core fields, plus route-specific ones:
   route builds. Every account is checked against one the browser derives or the person
   approved, never against the response: a payroll payment is one confidential transfer
   from the company's token account to the account the admin approved for that position, in
-  the wrapped mint; a wrap and an unwrap move the amount asked for between the wallet's own
+  the wrapped mint, and a run whose payments repeat a position, or name one not approved,
+  is refused whole; a wrap and an unwrap move the amount asked for between the wallet's own
   USDC and confidential associated accounts through token-wrap's derived escrow; configure
   and apply pending act on the wallet's own confidential associated account only. Proof
-  contexts must be created in the same transaction, funded with at most their rent, owned
-  by the wallet's authority and closed back to the wallet. The rules are in the
+  contexts must be created in the same transaction, funded with at most their rent, verified
+  into with the wallet as the context authority and closed back to the wallet. A version 1
+  transaction states its budget in its config only, with no compute budget instructions. The rules are in the
   [web app's README](../../frontend/README.md#api-client-and-mocks), with what they cannot
   check (confidential amounts, proof contents). The service must keep building
   transactions inside them, and a new instruction, account or program is a contract change.
@@ -1284,8 +1286,8 @@ and each one is a place where a screen has only been exercised against the mock.
 - **Chain data.** `request_id` is a counter in hex, not a SHA-256; the transaction is
   real wire bytes the pre-sign check reads (a run payment, `/transfer`, `/wrap` and
   `/unwrap` shaped like the service's, with the wallet's derived accounts and the amount
-  asked for; configure and apply pending as the extension's own steps on the wallet's
-  confidential account), with filler for proofs; the "network" is a map of the signatures the mock
+  asked for; configure as creating, reallocating and configuring the wallet's confidential
+  account, and apply pending as the extension's apply on it), with filler for proofs; the "network" is a map of the signatures the mock
   saw finalized or failed; the mock signer and the mock signature are never verified, so
   `transaction_mismatch` and a wrong wallet signature cannot occur. The recipient's
   and company's wallets are fixed addresses, and the company's plain USDC balance is

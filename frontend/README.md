@@ -146,18 +146,23 @@ lookup table is refused outright) and checks them against what the person asked 
 Every sign call names its flow, and nothing is signed without one. `checkAllowed` holds
 for all of them: the wallet pays and is the only signer, every program is one of
 `lib/solana/programs.ts` (System, Compute Budget, Token-2022, the ZK ElGamal proof program,
-Associated Token and Cadence's token-wrap), and the fee stays bounded (a unit limit up to
-the runtime's 1.4M, a unit price up to 100,000 micro-lamports or a v1 priority fee up to
-0.00014 SOL, no heap request). Then `checkFlow` reads every instruction as the service
+Associated Token and Cadence's token-wrap), and the fee stays bounded: a version 0
+message's compute budget instructions set a unit limit up to the runtime's 1.4M and a
+unit price up to 100,000 micro-lamports; a version 1 message carries none, and its config
+sets a unit limit up to 1.4M and a priority fee up to 0.00014 SOL; neither asks for heap. Then `checkFlow` reads every instruction as the service
 builds it, with every account it names derived in the browser (`lib/solana/accounts.ts`)
 or approved by the person, never taken from the service's answer:
 
 - A payroll payment (`checkedSign` in `lib/runs/executor.ts`): exactly one confidential
   transfer from the company's token account to the account the admin approved for that
-  position (each account approved for one position only), in the wrapped mint. Its three
-  proof contexts are created in the same transaction, funded with no more than their
-  rent-exempt minimum, verified with the wallet as their only authority, and closed back to
-  the wallet. Checked against a real payment from the devnet acceptance of #55
+  position, in the wrapped mint. `approvedPayees` approves each account for one position
+  only, and a run whose prepared payments repeat a position, or name one the admin did not
+  approve, is refused whole before anything is signed. Its three proof contexts are created
+  in the same transaction, funded with no more than their rent-exempt minimum, verified
+  into with the wallet as the context authority (the one key that can close them), and
+  closed back to the wallet; a proof verified into any other account is refused. The
+  approvals live in the page's memory with the held transactions, so "Sign again" after a
+  reload has nothing to sign, as before. Checked against a real payment from the devnet acceptance of #55
   (`lib/solana/devnet-fixture.ts`).
 - A deposit's wrap (`wrap.rs`): token-wrap's `Wrap` from the wallet's USDC account into
   its own confidential account, and the deposit, both for the amount entered; optionally
@@ -165,8 +170,11 @@ or approved by the person, never taken from the service's answer:
   withdrawal from that account and `Unwrap` to the wallet's own USDC account, for the
   amount entered. The escrow, mint authority and wrapped mint are token-wrap's derived
   addresses.
-- Activation's configure and an apply pending: only the confidential extension's own
-  steps, on the wallet's own confidential account.
+- Activation's configure: creating the wallet's own confidential associated account
+  (`CreateIdempotent`, paid by the wallet), reallocating it for the confidential extension
+  and configuring it, with its pubkey validity proof. An apply pending: the extension's
+  apply on that account. Both may carry bounded compute budget instructions in version 0;
+  nothing in either touches another account.
 
 The confidential transfer is the only instruction that moves value to an account the
 wallet does not own, and only in a payment. A refusal is an `UnexpectedTransactionError`
