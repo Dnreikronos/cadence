@@ -579,7 +579,7 @@ describe("CSV", () => {
     const original = diego.name
     diego.name = name
     try {
-      return (await (await api.exports.company()).text()).split("\n")
+      return (await (await api.exports.company()).text()).split("\r\n")
     } finally {
       diego.name = original
     }
@@ -590,8 +590,8 @@ describe("CSV", () => {
     // The header is unchanged.
     expect(text[0]).toBe("date,counterparty,amount,status,signature")
     // The cell is one quoted field: quotes doubled, the newline kept inside.
-    expect(text.join("\n")).toContain(
-      '2026-09-01,"Diego, ""Dee"" =HYPERLINK(""x"")\nMartins",6300,confirmed,',
+    expect(text.join("\r\n")).toContain(
+      '2026-09-01,"Diego, ""Dee"" =HYPERLINK(""x"")\nMartins",6300.000000,confirmed,',
     )
   })
 
@@ -607,19 +607,53 @@ describe("CSV", () => {
     ["Ana-Maria = Silva", "Ana-Maria = Silva"],
   ])("neutralises a formula and quotes %j", async (name, cell) => {
     const lines = await exported(name)
-    expect(lines.join("\n")).toContain(`2026-09-01,${cell},6300,confirmed,`)
+    expect(lines.join("\r\n")).toContain(
+      `2026-09-01,${cell},6300.000000,confirmed,`,
+    )
   })
 
   it("keeps the CSV one row per payment with five fields on every plain row", async () => {
     const lines = await exported("Plain Name")
-    expect(lines).toHaveLength(1 + db.payments.length)
-    for (const line of lines) expect(line.split(",")).toHaveLength(5)
+    // Every line ends in CRLF, the last one too.
+    expect(lines.at(-1)).toBe("")
+    const rows = lines.slice(0, -1)
+    expect(rows).toHaveLength(1 + db.payments.length)
+    for (const row of rows) {
+      expect(row).not.toMatch(/[\r\n]/)
+      expect(row.split(",")).toHaveLength(5)
+    }
+  })
+
+  it("writes every amount as decimal USDC with exactly six decimals", async () => {
+    db.payments[0].amount = 1n
+    const rows = (await exported("Plain Name")).slice(1, -1)
+    const amounts = rows.map((row) => row.split(",")[2])
+    for (const amount of amounts) expect(amount).toMatch(/^\d+\.\d{6}$/)
+    expect(amounts).toContain("0.000001")
+    expect(amounts).toContain("6300.000000")
+  })
+
+  it.each([
+    "/company/export.csv",
+    "/me/export.csv",
+    `/audit/${COMPANY_ID}/export.csv`,
+  ])("sends the contract's headers and CRLF lines on %s", async (path) => {
+    const response = await send("GET", path)
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toBe("text/csv; charset=utf-8")
+    expect(response.headers.get("content-disposition")).toBe("attachment")
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff")
+    expect(response.headers.get("cache-control")).toBe("no-store")
+    const text = await response.text()
+    expect(text).toMatch(/^date,counterparty,amount,status,signature\r\n/)
+    expect(text).toMatch(/\r\n$/)
+    expect(text.replaceAll("\r\n", "")).not.toMatch(/[\r\n]/)
   })
 
   it("exports an auditor's view of the one company they may read", async () => {
     db.role = "auditor"
     const text = await (await api.exports.audit(COMPANY_ID)).text()
-    expect(text.split("\n")[0]).toBe(
+    expect(text.split("\r\n")[0]).toBe(
       "date,counterparty,amount,status,signature",
     )
   })

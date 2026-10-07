@@ -325,7 +325,8 @@ describe("exportPaymentsMutation", () => {
     const [blob, filename] = save.mock.calls[0]
     expect(filename).toBe("cadence-payments-2026-10-04.csv")
     expect(notify).toHaveBeenCalledWith("Saved cadence-payments-2026-10-04.csv")
-    const lines = (await (blob as Blob).text()).split("\n")
+    // Every line ends in CRLF, so the last split is empty.
+    const lines = (await (blob as Blob).text()).split("\r\n").slice(0, -1)
     expect(lines[0]).toBe("date,counterparty,amount,status,signature")
     // Bruno's two payments and nobody else's.
     expect(lines).toHaveLength(3)

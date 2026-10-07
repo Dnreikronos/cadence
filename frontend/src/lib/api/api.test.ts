@@ -550,10 +550,10 @@ describe("reads and exports", () => {
   it("downloads a CSV as a Blob through the authenticated client", async () => {
     const blob = await api.exports.company()
     const text = await blob.text()
-    expect(text.split("\n")[0]).toBe(
+    expect(text.split("\r\n")[0]).toBe(
       "date,counterparty,amount,status,signature",
     )
-    expect(text).toContain("Bruno Costa,4200,confirmed")
+    expect(text).toContain("Bruno Costa,4200.000000,confirmed")
   })
 
   it("sends an invite and answers the health check without a token", async () => {
