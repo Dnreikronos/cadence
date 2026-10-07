@@ -15,6 +15,8 @@ export type Scenario =
   | "prepare-failed"
   | "credit-mismatch"
   | "rpc-down"
+  | "chain-unconfirmed"
+  | "foreign-destination"
 
 declare global {
   interface Window {
