@@ -1,6 +1,10 @@
 import type { ApiClient } from "@/lib/api/client"
 import { ApiError, messageFor } from "@/lib/api/errors"
-import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import {
+  ConfirmTimeoutError,
+  UnexpectedSignerError,
+  UnexpectedTransactionError,
+} from "@/lib/api/sign"
 import { SentApplyError } from "@/lib/me/apply-pending"
 import {
   StorageUnavailableError,
@@ -205,6 +209,9 @@ export function failureMessage(error: unknown): string {
   }
   if (cause instanceof UnexpectedSignerError) {
     return "The transaction asked for a signature from another wallet, so it wasn't signed."
+  }
+  if (cause instanceof UnexpectedTransactionError) {
+    return "The transaction Cadence prepared doesn't match this deposit, so it wasn't signed."
   }
   return messageFor(cause)
 }

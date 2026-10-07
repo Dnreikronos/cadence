@@ -11,7 +11,7 @@ import { createApiClient } from "@/lib/api/client"
 import { MOCK_ORIGIN } from "@/lib/api/config"
 import type { Run } from "@/lib/api/schemas"
 import { signAndConfirm, type Signer } from "@/lib/api/sign"
-import { mockTokenAccount } from "@/lib/api/mocks/chain"
+import { mockFinality, mockTokenAccount } from "@/lib/api/mocks/chain"
 import { COMPANY_WALLET, db, resetDb, seedPeople } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
@@ -85,8 +85,10 @@ function harness(signer: Signer, submit = mockSubmit) {
     signAndConfirm(prepared, {
       signer,
       submit,
+      finality: mockFinality,
       confirm,
       onStep,
+      check: extra?.check,
       signal: extra?.signal,
       onSubmitted: extra?.onSubmitted,
       now: () => time,

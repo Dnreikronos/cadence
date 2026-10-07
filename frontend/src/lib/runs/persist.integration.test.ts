@@ -3,7 +3,11 @@ import { createApiClient } from "@/lib/api/client"
 import { MOCK_ORIGIN } from "@/lib/api/config"
 import type { Run } from "@/lib/api/schemas"
 import { signAndConfirm } from "@/lib/api/sign"
-import { mockBlockHeight, mockTokenAccount } from "@/lib/api/mocks/chain"
+import {
+  mockBlockHeight,
+  mockFinality,
+  mockTokenAccount,
+} from "@/lib/api/mocks/chain"
 import { COMPANY_WALLET, db, resetDb, seedPeople } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
@@ -85,8 +89,10 @@ function realSign(options: { stopAfterSubmit?: AbortController } = {}) {
     signAndConfirm(prepared, {
       signer: mockSigner(COMPANY_WALLET),
       submit: mockSubmit,
+      finality: mockFinality,
       confirm,
       onStep,
+      check: extra?.check,
       signal: extra?.signal,
       onSubmitted: (signature) => {
         extra?.onSubmitted?.(signature)

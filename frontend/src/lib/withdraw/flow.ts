@@ -13,6 +13,7 @@ import type {
 import {
   ConfirmTimeoutError,
   UnexpectedSignerError,
+  UnexpectedTransactionError,
   type SignStep,
 } from "@/lib/api/sign"
 import {
@@ -221,6 +222,14 @@ export function failureOf(error: unknown): Failure {
     return {
       ...base,
       message: "The withdrawal asked for a signature from a different wallet.",
+      retryable: false,
+    }
+  }
+  if (error instanceof UnexpectedTransactionError) {
+    return {
+      ...base,
+      message:
+        "The withdrawal Cadence prepared doesn't match what you asked for, so it wasn't signed.",
       retryable: false,
     }
   }

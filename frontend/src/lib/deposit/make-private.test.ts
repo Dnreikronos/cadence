@@ -2,10 +2,15 @@ import { describe, expect, it, vi } from "vitest"
 import type { ApiClient } from "@/lib/api/client"
 import { base64FromBytes } from "@/lib/api/base64"
 import { ApiError, ContractError } from "@/lib/api/errors"
+import { mockAccountTransaction } from "@/lib/api/mocks/chain"
 import { COMPANY_WALLET } from "@/lib/api/mocks/db"
 import { mockSigner } from "@/lib/api/mocks/signer"
 import type { Receipt } from "@/lib/api/schemas"
-import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import {
+  ConfirmTimeoutError,
+  UnexpectedSignerError,
+  UnexpectedTransactionError,
+} from "@/lib/api/sign"
 import { SentApplyError } from "@/lib/me/apply-pending"
 import { bindSignAndConfirm } from "@/lib/wallet/sign-and-confirm"
 import { WalletUnavailableError, type Wallet } from "@/lib/wallet/types"
@@ -23,7 +28,10 @@ const SIG = "5SigMockSignature1111111111111111111111111111"
 
 const prepared = (id: string) => ({
   request_id: id.repeat(64).slice(0, 64),
-  transaction: base64FromBytes(Uint8Array.of(1, 2, 3)),
+  // Bytes the pre-sign check reads as the wallet's own wrap.
+  transaction: base64FromBytes(
+    mockAccountTransaction({ kind: "wrap", wallet: COMPANY_WALLET, n: 1 }),
+  ),
   transaction_version: 0 as const,
   required_signers: [COMPANY_WALLET],
   recent_blockhash: "blockhash",
@@ -64,6 +72,7 @@ function walletWith(overrides: Partial<Wallet> = {}) {
     address: COMPANY_WALLET,
     signer: mockSigner(COMPANY_WALLET),
     submit: vi.fn(async () => SIG),
+    finality: vi.fn(async () => "finalized" as const),
     ...overrides,
   }
   return wallet
@@ -608,6 +617,9 @@ describe("failureMessage", () => {
     expect(failureMessage(new UnexpectedSignerError())).toMatch(
       /another wallet/,
     )
+    expect(
+      failureMessage(new UnexpectedTransactionError("instruction")),
+    ).toMatch(/doesn't match this deposit/)
   })
 
   it("uses the contract's copy for an API error and never a raw message", () => {

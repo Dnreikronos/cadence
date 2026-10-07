@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { ApiError, ContractError } from "@/lib/api/errors"
-import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import {
+  ConfirmTimeoutError,
+  UnexpectedSignerError,
+  UnexpectedTransactionError,
+} from "@/lib/api/sign"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
   PaymentNotOnChainError,
@@ -136,6 +140,7 @@ describe("describeFailure", () => {
       new ApiError(409, "transaction_failed"),
       new WalletUnavailableError("no wallet"),
       new UnexpectedSignerError(),
+      new UnexpectedTransactionError("destination"),
       new ResponseMismatchError(),
       new ApiError(500, "internal_error"),
       new ContractError("/runs", "drift"),

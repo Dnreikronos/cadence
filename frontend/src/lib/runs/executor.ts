@@ -7,6 +7,7 @@ import type {
 } from "@/lib/api/schemas"
 import { isSignable } from "@/lib/api/schemas"
 import { ConfirmTimeoutError, type SignStep } from "@/lib/api/sign"
+import type { InspectedTransaction } from "@/lib/solana/inspect"
 import {
   ResponseMismatchError,
   SentPaymentError,
@@ -28,10 +29,14 @@ import {
 // (`transaction_failed`): it ran and did not land.
 
 type SignAndConfirm = (
-  prepared: Pick<Signable, "transaction" | "required_signers">,
+  prepared: Pick<Signable, "transaction" | "required_signers" | "destination">,
   confirm: (signature: string) => Promise<Receipt>,
   onStep?: (step: SignStep) => void,
-  extra?: { signal?: AbortSignal; onSubmitted?: (signature: string) => void },
+  extra?: {
+    signal?: AbortSignal
+    onSubmitted?: (signature: string) => void
+    check?: (transaction: InspectedTransaction) => void
+  },
 ) => Promise<Receipt>
 
 export type RunApi = {

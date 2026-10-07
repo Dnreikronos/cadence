@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ApiError } from "./errors"
 import { base64FromBytes } from "./base64"
+import { mockAccountTransaction } from "./mocks/chain"
 import type { Receipt } from "./schemas"
 import {
   ConfirmTimeoutError,
+  FinalityMismatchError,
   UnexpectedSignerError,
+  UnexpectedTransactionError,
   signAndConfirm,
   type Signer,
 } from "./sign"
@@ -18,7 +21,9 @@ const receipt: Receipt = {
   status: "finalized",
 }
 const prepared = {
-  transaction: base64FromBytes(Uint8Array.of(1, 2, 3)),
+  transaction: base64FromBytes(
+    mockAccountTransaction({ kind: "apply-pending", wallet: ADDRESS, n: 1 }),
+  ),
   required_signers: [ADDRESS],
 }
 
@@ -27,6 +32,8 @@ const signer: Signer = {
   signTransaction: async (bytes) => Uint8Array.from([...bytes, 1]),
 }
 const submit = async () => SIGNATURE
+// The network's own read agrees with the service.
+const finality = async () => "finalized" as const
 const notFinalized = () => new ApiError(409, "transaction_not_finalized")
 
 // A clock that only moves when the code under test sleeps (or a call "takes
@@ -69,6 +76,7 @@ describe("signAndConfirm: waiting", () => {
       signAndConfirm(prepared, {
         signer,
         submit,
+        finality,
         sleep: c.sleep,
         now: c.now,
         confirm: async () => {
@@ -95,6 +103,7 @@ describe("signAndConfirm: waiting", () => {
       signAndConfirm(prepared, {
         signer,
         submit,
+        finality,
         sleep: c.sleep,
         now: c.now,
         timeoutMs: 20_000,
@@ -116,6 +125,7 @@ describe("signAndConfirm: waiting", () => {
       signAndConfirm(prepared, {
         signer,
         submit,
+        finality,
         sleep: c.sleep,
         now: c.now,
         timeoutMs: 1_000,
@@ -133,6 +143,7 @@ describe("signAndConfirm: waiting", () => {
     await signAndConfirm(prepared, {
       signer,
       submit,
+      finality,
       onStep: (step) => events.push(step),
       onSubmitted: (signature) => events.push(`submitted ${signature}`),
       confirm: async () => {
@@ -157,6 +168,7 @@ describe("signAndConfirm: which errors are retried", () => {
     const result = await signAndConfirm(prepared, {
       signer,
       submit,
+      finality,
       sleep: c.sleep,
       now: c.now,
       confirm: async () => {
@@ -197,6 +209,7 @@ describe("signAndConfirm: which errors are retried", () => {
       signAndConfirm(prepared, {
         signer,
         submit,
+        finality,
         sleep: c.sleep,
         now: c.now,
         timeoutMs: 10_000,
@@ -223,6 +236,7 @@ describe("signAndConfirm: which errors are retried", () => {
       signAndConfirm(prepared, {
         signer,
         submit,
+        finality,
         sleep: c.sleep,
         now: c.now,
         confirm: async () => {
@@ -246,6 +260,7 @@ describe("signAndConfirm: signers", () => {
         {
           signer: { address: ADDRESS, signTransaction },
           submit,
+          finality,
           confirm: vi.fn(),
         },
       ),
@@ -262,6 +277,7 @@ describe("signAndConfirm: signers", () => {
         {
           signer: { address: ADDRESS, signTransaction },
           submit,
+          finality,
           confirm: vi.fn(),
         },
       ),
@@ -281,6 +297,7 @@ describe("signAndConfirm: abort", () => {
       signAndConfirm(prepared, {
         signer: { address: ADDRESS, signTransaction },
         submit,
+        finality,
         onStep,
         confirm,
         signal: AbortSignal.abort(reason),
@@ -302,6 +319,7 @@ describe("signAndConfirm: abort", () => {
       signAndConfirm(prepared, {
         signer,
         submit,
+        finality,
         onStep,
         now: c.now,
         signal: controller.signal,
@@ -334,6 +352,7 @@ describe("signAndConfirm: abort", () => {
       signAndConfirm(prepared, {
         signer,
         submit,
+        finality,
         signal: controller.signal,
         confirm: async () => {
           confirms++
@@ -356,6 +375,7 @@ describe("signAndConfirm: abort", () => {
     const done = signAndConfirm(prepared, {
       signer,
       submit,
+      finality,
       confirm: async () => {
         if (++confirms < 3) throw notFinalized()
         return receipt
@@ -368,5 +388,164 @@ describe("signAndConfirm: abort", () => {
     await vi.advanceTimersByTimeAsync(3_000)
     expect(await done).toEqual(receipt)
     expect(confirms).toBe(3)
+  })
+})
+
+describe("signAndConfirm: the pre-sign check", () => {
+  async function refused(
+    transaction: Uint8Array,
+    check?: Parameters<typeof signAndConfirm>[1]["check"],
+  ) {
+    const signTransaction = vi.fn(async (bytes: Uint8Array) => bytes)
+    const submit = vi.fn(async () => SIGNATURE)
+    const onStep = vi.fn()
+    const error = await caught(
+      signAndConfirm(
+        {
+          transaction: base64FromBytes(transaction),
+          required_signers: [ADDRESS],
+        },
+        {
+          signer: { address: ADDRESS, signTransaction },
+          submit,
+          finality,
+          onStep,
+          check,
+          confirm: vi.fn(),
+        },
+      ),
+    )
+    expect(signTransaction).not.toHaveBeenCalled()
+    expect(submit).not.toHaveBeenCalled()
+    expect(onStep).not.toHaveBeenCalled()
+    return error
+  }
+
+  it("never signs bytes that are not a transaction", async () => {
+    const error = await refused(Uint8Array.of(1, 2, 3))
+    expect(error).toBeInstanceOf(UnexpectedTransactionError)
+    expect((error as UnexpectedTransactionError).reason).toBe("undecodable")
+  })
+
+  it("never signs a transaction another wallet pays for", async () => {
+    const error = await refused(
+      mockAccountTransaction({
+        kind: "apply-pending",
+        wallet: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
+        n: 2,
+      }),
+    )
+    expect((error as UnexpectedTransactionError).reason).toBe("signer")
+  })
+
+  it("runs the flow's own check on the decoded transaction", async () => {
+    const check = vi.fn(() => {
+      throw new UnexpectedTransactionError("destination")
+    })
+    const error = await refused(
+      mockAccountTransaction({ kind: "apply-pending", wallet: ADDRESS, n: 3 }),
+      check,
+    )
+    expect((error as UnexpectedTransactionError).reason).toBe("destination")
+    expect(check).toHaveBeenCalledWith(
+      expect.objectContaining({ feePayer: ADDRESS, version: 1 }),
+    )
+  })
+})
+
+describe("signAndConfirm: the network's own read", () => {
+  it("waits for the network to show the receipt's transaction finalized", async () => {
+    const c = clock()
+    const answers = ["pending", "pending", "finalized"] as const
+    const reads: string[] = []
+    const confirm = vi.fn(async () => receipt)
+    const result = await signAndConfirm(prepared, {
+      signer,
+      submit,
+      sleep: c.sleep,
+      now: c.now,
+      confirm,
+      finality: async (signature) => {
+        reads.push(signature)
+        return answers[reads.length - 1]
+      },
+    })
+    expect(result).toEqual(receipt)
+    // The service is asked once; only the network read is repeated.
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(reads).toEqual([SIGNATURE, SIGNATURE, SIGNATURE])
+    expect(c.slept).toEqual([2_000, 3_000])
+  })
+
+  it("keeps reading when the read itself fails", async () => {
+    const c = clock()
+    let reads = 0
+    const result = await signAndConfirm(prepared, {
+      signer,
+      submit,
+      sleep: c.sleep,
+      now: c.now,
+      confirm: async () => receipt,
+      finality: async () => {
+        if (++reads === 1) throw new TypeError("Failed to fetch")
+        return "finalized"
+      },
+    })
+    expect(result).toEqual(receipt)
+    expect(reads).toBe(2)
+  })
+
+  it("times out with the signature when the network never shows it", async () => {
+    const c = clock()
+    const error = await caught(
+      signAndConfirm(prepared, {
+        signer,
+        submit,
+        sleep: c.sleep,
+        now: c.now,
+        timeoutMs: 10_000,
+        confirm: async () => receipt,
+        finality: async () => "pending",
+      }),
+    )
+    expect(error).toBeInstanceOf(ConfirmTimeoutError)
+    expect(error).not.toBeInstanceOf(FinalityMismatchError)
+    expect((error as ConfirmTimeoutError).signature).toBe(SIGNATURE)
+  })
+
+  it("does not take the service's word when the network says it failed", async () => {
+    const c = clock()
+    const error = await caught(
+      signAndConfirm(prepared, {
+        signer,
+        submit,
+        sleep: c.sleep,
+        now: c.now,
+        confirm: async () => receipt,
+        finality: async () => "failed",
+      }),
+    )
+    expect(error).toBeInstanceOf(FinalityMismatchError)
+    // Still a sent payment whose outcome is unknown to the screens: never sent again.
+    expect(error).toBeInstanceOf(ConfirmTimeoutError)
+    expect((error as FinalityMismatchError).signature).toBe(SIGNATURE)
+    expect(c.slept).toEqual([])
+  })
+
+  it("reads the signature it submitted, not the one the receipt names", async () => {
+    const reads: string[] = []
+    await caught(
+      signAndConfirm(prepared, {
+        signer,
+        submit,
+        timeoutMs: 0,
+        confirm: async () => ({ ...receipt, signature: "another" }),
+        finality: async (signature) => {
+          reads.push(signature)
+          return "pending"
+        },
+      }),
+    )
+    expect(reads).toEqual([SIGNATURE])
   })
 })

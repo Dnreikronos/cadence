@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { base64FromBytes } from "@/lib/api/base64"
 import { ApiError } from "@/lib/api/errors"
+import { mockAccountTransaction } from "@/lib/api/mocks/chain"
 import { COMPANY_WALLET } from "@/lib/api/mocks/db"
 import { mockSigner } from "@/lib/api/mocks/signer"
 import type { Receipt } from "@/lib/api/schemas"
@@ -31,7 +32,10 @@ const receipt = (id: string): Receipt => ({
 })
 const prepared = (id: string) => ({
   request_id: id.repeat(64).slice(0, 64),
-  transaction: base64FromBytes(Uint8Array.of(1, 2, 3)),
+  // Bytes the pre-sign check reads as the wallet's own wrap.
+  transaction: base64FromBytes(
+    mockAccountTransaction({ kind: "wrap", wallet: COMPANY_WALLET, n: 1 }),
+  ),
   transaction_version: 0 as const,
   required_signers: [COMPANY_WALLET],
   recent_blockhash: "blockhash",
@@ -109,6 +113,7 @@ function setup(
     address: COMPANY_WALLET,
     signer: mockSigner(COMPANY_WALLET),
     submit: vi.fn(async () => SIG),
+    finality: vi.fn(async () => "finalized" as const),
     ...options.wallet,
   }
   const refresh = vi.fn()

@@ -10,6 +10,7 @@ import {
 vi.mock("@/lib/api/mode", () => ({ apiConfig: { mode: "mock", baseUrl: "" } }))
 
 import { createApiClient } from "@/lib/api/client"
+import { mockFinality } from "@/lib/api/mocks/chain"
 import { ME_WALLET, db, resetDb } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
@@ -44,6 +45,7 @@ const deps: WithdrawDeps = {
     signAndConfirm(prepared, {
       signer: mockSigner(ME_WALLET),
       submit: async () => "TestSignature".padEnd(64, "1"),
+      finality: mockFinality,
       confirm,
       onStep,
       onSubmitted,

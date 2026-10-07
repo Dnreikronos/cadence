@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
 import { base64FromBytes } from "@/lib/api/base64"
+import {
+  mockAccountTransaction,
+  recordOnMockChain,
+} from "@/lib/api/mocks/chain"
 import { COMPANY_WALLET, ME_WALLET } from "@/lib/api/mocks/db"
 import type { Receipt } from "@/lib/api/schemas"
 import type { SignStep } from "@/lib/api/sign"
@@ -19,9 +23,18 @@ const receipt: Receipt = {
   status: "finalized",
 }
 const prepared = (signer: string) => ({
-  transaction: base64FromBytes(Uint8Array.of(1, 2, 3)),
+  transaction: base64FromBytes(
+    mockAccountTransaction({ kind: "apply-pending", wallet: signer, n: 1 }),
+  ),
   required_signers: [signer],
 })
+
+// A confirm that lands the transaction on the mock network, as the mock service does.
+const landing = () =>
+  vi.fn(async (signature: string) => {
+    recordOnMockChain(signature, "finalized")
+    return receipt
+  })
 
 describe("unavailableWallet", () => {
   it("is unavailable and refuses to sign or submit, naming the reason", async () => {
@@ -76,7 +89,7 @@ describe("bindSignAndConfirm", () => {
   it("signs, submits and confirms with the wallet's signer, reporting each step", async () => {
     const run = bindSignAndConfirm(mockWalletFor("recipient"))
     const steps: SignStep[] = []
-    const confirm = vi.fn(async () => receipt)
+    const confirm = landing()
     const result = await run(prepared(ME_WALLET), confirm, (s) => steps.push(s))
     expect(result).toBe(receipt)
     expect(steps).toEqual(["signing", "submitting", "confirming"])

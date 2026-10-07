@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest"
+import { base64FromBytes } from "@/lib/api/base64"
 import { ApiError, ContractError } from "@/lib/api/errors"
+import { mockAccountTransaction } from "@/lib/api/mocks/chain"
 import type { Receipt, UnwrapPrepared } from "@/lib/api/schemas"
 import {
   ConfirmTimeoutError,
   UnexpectedSignerError,
+  UnexpectedTransactionError,
   signAndConfirm,
 } from "@/lib/api/sign"
 import { KeyInputUnavailableError } from "@/lib/runs/errors"
@@ -32,7 +35,9 @@ const receipt: Receipt = {
 }
 const prepared = (level: "none" | "near" | "exact"): UnwrapPrepared => ({
   request_id: "a".repeat(64),
-  transaction: "AQID",
+  transaction: base64FromBytes(
+    mockAccountTransaction({ kind: "unwrap", wallet, n: 1 }),
+  ),
   transaction_version: 1,
   required_signers: [wallet],
   recent_blockhash: "hash",
@@ -234,6 +239,7 @@ describe("runWithdraw", () => {
             },
           },
           submit,
+          finality: async () => "finalized",
           confirm: c,
           onStep,
           onSubmitted,
@@ -741,6 +747,10 @@ describe("failureOf", () => {
       failureOf(new WalletUnavailableError("because")).message,
     ).not.toMatch(/because/)
     expect(failureOf(new UnexpectedSignerError()).retryable).toBe(false)
+    const refused = failureOf(new UnexpectedTransactionError("program"))
+    expect(refused.message).toMatch(/doesn't match what you asked for/)
+    expect(refused.message).not.toMatch(/program/)
+    expect(refused.retryable).toBe(false)
   })
 
   it("says a withdrawal cannot be made here yet when its keys are refused, with no retry", () => {

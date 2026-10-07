@@ -1,5 +1,9 @@
 import { isApiError, messageFor } from "@/lib/api/errors"
-import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import {
+  ConfirmTimeoutError,
+  UnexpectedSignerError,
+  UnexpectedTransactionError,
+} from "@/lib/api/sign"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 
 // Step 1 in real mode: the embedded wallet route and Turnkey login are #78, which
@@ -57,6 +61,9 @@ export function activationMessage(error: unknown): string {
   }
   if (error instanceof UnexpectedSignerError) {
     return "The setup asked for a signature from a wallet that isn't yours, so it was refused. Try again."
+  }
+  if (error instanceof UnexpectedTransactionError) {
+    return "The setup Cadence prepared doesn't match what was expected, so it was refused. Try again."
   }
   if (isApiError(error)) return messageFor(error)
   return "Something went wrong. Try again."

@@ -23,7 +23,7 @@ import { scenarios, timing } from "./mocks/scenario"
 import { server } from "./mocks/server"
 import { expectNoAmount } from "./no-amount"
 import { accessActions, accessActorKinds, isSignable } from "./schemas"
-import { mockTokenAccount } from "./mocks/chain"
+import { mockFinality, mockTokenAccount } from "./mocks/chain"
 import { UnexpectedSignerError, signAndConfirm, type Signer } from "./sign"
 
 const BASE = "http://mock.cadence.test"
@@ -229,6 +229,7 @@ describe("authentication and errors", () => {
     const receipt = await signAndConfirm(prepared, {
       signer,
       submit,
+      finality: mockFinality,
       sleep: async () => scenarios.set("instant"),
       confirm: (signature) => {
         confirms++
@@ -258,6 +259,7 @@ describe("prepare, sign, confirm", () => {
     const receipt = await signAndConfirm(prepared, {
       signer,
       submit,
+      finality: mockFinality,
       sleep: noSleep,
       onStep: (step) => steps.push(step),
       confirm: (signature) => {
@@ -300,6 +302,7 @@ describe("prepare, sign, confirm", () => {
           },
         },
         submit,
+        finality: mockFinality,
         confirm: async () => {
           throw new Error("unreachable")
         },
@@ -324,6 +327,7 @@ describe("prepare, sign, confirm", () => {
       signAndConfirm(prepared, {
         signer,
         submit,
+        finality: mockFinality,
         sleep: noSleep,
         confirm: (signature) => {
           confirms++

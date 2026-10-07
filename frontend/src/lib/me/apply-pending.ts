@@ -5,6 +5,7 @@ import { otherTabMessage } from "@/lib/flow-lock"
 import {
   ConfirmTimeoutError,
   UnexpectedSignerError,
+  UnexpectedTransactionError,
   type SignStep,
 } from "@/lib/api/sign"
 import {
@@ -167,6 +168,9 @@ export function applyPendingMessage(error: unknown): string {
   if (error instanceof ConfirmTimeoutError) return sentMessage
   if (error instanceof UnexpectedSignerError) {
     return "That transaction wasn't prepared for your wallet. Try again."
+  }
+  if (error instanceof UnexpectedTransactionError) {
+    return "That transaction does more than apply your balance, so it wasn't signed. Try again."
   }
   if (error instanceof ApiError) return messageFor(error)
   return "Couldn't apply your pending balance. Try again."

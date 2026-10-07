@@ -1,4 +1,5 @@
 import type { Signer } from "@/lib/api/sign"
+import type { Finality } from "@/lib/solana/finality"
 
 // What a screen gets from `useWallet()`. `unavailable` means nothing can sign here
 // (an auditor holds no wallet, and real mode waits for the embedded wallet); the
@@ -14,6 +15,8 @@ export type Wallet = {
   signer: Signer
   // Sends signed bytes to Solana and returns the transaction signature.
   submit: (signed: Uint8Array) => Promise<string>
+  // Reads what the network says of a submitted transaction (`lib/solana/finality.ts`).
+  finality: (signature: string, signal?: AbortSignal) => Promise<Finality>
 }
 
 export class WalletUnavailableError extends Error {
@@ -41,5 +44,6 @@ export function unavailableWallet(reason: string, loading = false): Wallet {
       signMessage: async () => fail(),
     },
     submit: async () => fail(),
+    finality: async () => fail(),
   }
 }

@@ -13,7 +13,7 @@ import { MOCK_ORIGIN } from "@/lib/api/config"
 import type { Run } from "@/lib/api/schemas"
 import { signatureSchema } from "@/lib/api/schemas"
 import { signAndConfirm } from "@/lib/api/sign"
-import { mockTokenAccount } from "@/lib/api/mocks/chain"
+import { mockFinality, mockTokenAccount } from "@/lib/api/mocks/chain"
 import { COMPANY_WALLET, db, resetDb, seedPeople } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
@@ -89,8 +89,10 @@ function realSign(submit: (signed: Uint8Array) => Promise<string>) {
     signAndConfirm(prepared, {
       signer: mockSigner(COMPANY_WALLET),
       submit,
+      finality: mockFinality,
       confirm,
       onStep,
+      check: extra?.check,
       signal: extra?.signal,
       onSubmitted: extra?.onSubmitted,
       now: () => time,

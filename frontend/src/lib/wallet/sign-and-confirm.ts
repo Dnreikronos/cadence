@@ -5,7 +5,7 @@ import { WalletUnavailableError, type Wallet } from "./types"
 type Prepared = Parameters<typeof signAndConfirm>[0]
 type Extra = Omit<
   Parameters<typeof signAndConfirm>[1],
-  "signer" | "submit" | "confirm" | "onStep"
+  "signer" | "submit" | "confirm" | "finality" | "onStep"
 >
 
 // `signAndConfirm` bound to a wallet, so a screen passes only what it prepared and
@@ -24,6 +24,7 @@ export function bindSignAndConfirm(wallet: Wallet) {
       ...extra,
       signer: wallet.signer,
       submit: wallet.submit,
+      finality: wallet.finality,
       confirm,
       onStep,
     })

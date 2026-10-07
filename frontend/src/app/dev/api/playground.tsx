@@ -11,7 +11,7 @@ import {
 } from "@/lib/api"
 import { COMPANY_WALLET, ME_WALLET, seedPeople } from "@/lib/api/mocks/db"
 import { mockSigner, mockSubmit } from "@/lib/api/mocks/signer"
-import { mockTokenAccount } from "@/lib/api/mocks/chain"
+import { mockFinality, mockTokenAccount } from "@/lib/api/mocks/chain"
 import type { RunConfirmRequest } from "@/lib/api/schemas"
 import { confirmPosition, signablesOf } from "@/lib/runs/executor"
 import {
@@ -83,6 +83,7 @@ export function ApiPlayground() {
       const receipt = await signAndConfirm(prepared, {
         signer: mockSigner(COMPANY_WALLET),
         submit: mockSubmit,
+        finality: mockFinality,
         onStep: (step) => write(`  ${step}`),
         confirm: (signature) =>
           api.wrap.confirm({ request_id: prepared.request_id, signature }),
@@ -114,6 +115,7 @@ export function ApiPlayground() {
           await signAndConfirm(payment, {
             signer: mockSigner(COMPANY_WALLET),
             submit: mockSubmit,
+            finality: mockFinality,
             confirm: (signature) =>
               confirmPosition(runApi, created.run_id, payment, signature),
           })
