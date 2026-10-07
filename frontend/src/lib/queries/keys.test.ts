@@ -60,6 +60,11 @@ describe("queryKeys", () => {
     )
   })
 
+  // Nothing private: every viewer on the tab shares the one health check.
+  it("keeps the health check under one key, not per viewer", () => {
+    expect(queryKeys.health.all).toEqual(["health"])
+  })
+
   it("is stable for the same input", () => {
     expect(queryKeys.payments.audit("c", { limit: 10 })).toEqual(
       queryKeys.payments.audit("c", { limit: 10 }),
