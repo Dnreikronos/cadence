@@ -34,6 +34,15 @@ describe("runMessage", () => {
     )
   })
 
+  it("words a run that cannot be created here, and a wallet with no user to link it to", () => {
+    expect(runMessage(new KeyInputUnavailableError("balance key"))).toBe(
+      "Payroll runs aren't available in this environment yet.",
+    )
+    expect(runMessage(new KeyInputUnavailableError("user"))).toBe(
+      "This wallet couldn't be linked to your account. Sign in again, then run the payroll again.",
+    )
+  })
+
   it("says a retry refused while payments can still land is for later, the same for each code", () => {
     const later = runMessage(new ApiError(409, "outstanding_payments"))
     expect(later).toMatch(/once they have expired/)
@@ -158,6 +167,14 @@ describe("describeFailure", () => {
   it("says a run cannot be made here when an input is not available, nothing sent", () => {
     expect(describeFailure(new KeyInputUnavailableError("sender"))).toEqual({
       message: "Payroll runs aren't available in this environment yet.",
+      sent: false,
+    })
+  })
+
+  it("asks to sign in again when there is no user to link the wallet to, nothing sent", () => {
+    expect(describeFailure(new KeyInputUnavailableError("user"))).toEqual({
+      message:
+        "This wallet couldn't be linked to your account. Sign in again, then run the payroll again.",
       sent: false,
     })
   })
