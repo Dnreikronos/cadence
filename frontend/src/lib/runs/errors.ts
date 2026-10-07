@@ -15,8 +15,8 @@ export class SentPaymentError extends Error {
   }
 }
 
-// A payment sent earlier was looked up again and is not on the network: it was refused,
-// or it was seen missing until its blockhash ran out, so it can no longer land.
+// A payment sent earlier was looked up again and the network had refused it: it did not
+// land. Never said of one that is only missing (recover.ts).
 export class PaymentNotOnChainError extends Error {
   constructor() {
     super("The payment did not land")

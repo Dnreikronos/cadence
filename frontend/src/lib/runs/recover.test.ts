@@ -158,10 +158,12 @@ describe("reconcilePayment", () => {
     expect(confirm).toHaveBeenCalledTimes(3)
   })
 
-  it("rules it lost only once the chain is past its last valid block, and only if the service saw it missing", async () => {
+  it("never rules it lost on absence, even once the chain is past its last valid block", async () => {
     const confirm = vi.fn().mockRejectedValue(notFinalized())
     // Asked every 3 s (7.5 blocks): the 21st wait takes the chain past the last valid
-    // block, and the ask after that is the last.
+    // block, and the ask after that is the last. The service may simply not have caught
+    // up with the browser's height, and an executed payment can be missing from RPC
+    // history: it stays unknown, with its signature to check again.
     const { height, blockHeight, sleep } = chain()
     expect(
       await reconcilePayment(saved(1), confirm, undefined, {
@@ -169,7 +171,7 @@ describe("reconcilePayment", () => {
         sleep,
         pollMs: 3_000,
       }),
-    ).toBe("failed")
+    ).toBe("unknown")
     expect(confirm).toHaveBeenCalledTimes(22)
     expect(height()).toBeGreaterThan(500)
 
@@ -268,6 +270,19 @@ describe("recoverOne", () => {
     )
     await recoverOne(context, saved(1), quick)
     expect(failures).toEqual([expect.any(PaymentNotOnChainError)])
+  })
+
+  it("never reports a payment missing past its blockhash as not on chain: it is sent, to check again", async () => {
+    const { context, failures } = recovery(async () => {
+      throw notFinalized()
+    })
+    await recoverOne(context, saved(1), {
+      ...chain(),
+      blockHeight: async () => 501,
+    })
+    expect(failures).toHaveLength(1)
+    expect(failures[0]).not.toBeInstanceOf(PaymentNotOnChainError)
+    expect((failures[0] as SentPaymentError).signature).toBe("sig-1")
   })
 
   it("reports a payment it could not settle as sent, keeping its signature to check again", async () => {

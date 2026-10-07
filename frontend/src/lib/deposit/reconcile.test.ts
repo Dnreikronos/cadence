@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/errors"
 import type { Receipt } from "@/lib/api/schemas"
 import type { Submission } from "@/lib/submissions"
-import { reconcileWrap } from "./reconcile"
+import { maxUnreadableHeights, reconcileWrap } from "./reconcile"
 
 const SIG = "5SigMockSignature1111111111111111111111111111"
 const receipt: Receipt = {
@@ -137,7 +137,7 @@ describe("reconcileWrap", () => {
     expect(order).toEqual(["height", "ask"])
   })
 
-  it("never calls it expired while the block height cannot be read", async () => {
+  it("never calls it expired while the block height cannot be read, and waits for it", async () => {
     const { confirm, sleep } = setup([notFinalized()])
     let reads = 0
     const blockHeight = vi.fn(async () => {
@@ -154,6 +154,61 @@ describe("reconcileWrap", () => {
     ).resolves.toBe("failed")
     // Kept asking for as long as the height was out of reach.
     expect(confirm).toHaveBeenCalledTimes(21)
+  })
+
+  it("stops as unknown, never failed, once the height has failed to read too many times in a row", async () => {
+    const { confirm, sleep } = setup([notFinalized()])
+    const blockHeight = vi.fn(async () => {
+      throw new TypeError("Failed to fetch")
+    })
+    await expect(
+      reconcileWrap({
+        record,
+        api: { wrap: { confirm } } as never,
+        blockHeight,
+        sleep,
+      }),
+    ).resolves.toBe("unknown")
+    expect(blockHeight).toHaveBeenCalledTimes(maxUnreadableHeights)
+    expect(confirm).toHaveBeenCalledTimes(maxUnreadableHeights)
+  })
+
+  it("counts only the failed reads in a row: one that reads starts the count again", async () => {
+    const { confirm, sleep } = setup([notFinalized()])
+    let reads = 0
+    const blockHeight = vi.fn(async () => {
+      reads += 1
+      // Every third read gets through, still before the last valid block.
+      if (reads % 3 === 0 && reads < 3 * maxUnreadableHeights) {
+        return record.last_valid_block_height - 10
+      }
+      throw new TypeError("Failed to fetch")
+    })
+    await expect(
+      reconcileWrap({
+        record,
+        api: { wrap: { confirm } } as never,
+        blockHeight,
+        sleep,
+      }),
+    ).resolves.toBe("unknown")
+    expect(blockHeight.mock.calls.length).toBeGreaterThan(
+      3 * maxUnreadableHeights,
+    )
+  })
+
+  it("is unknown, not failed, for a 'not there' past the blockhash where absence is no evidence", async () => {
+    const { confirm, height, blockHeight, sleep } = setup([notFinalized()])
+    await expect(
+      reconcileWrap({
+        record,
+        api: { wrap: { confirm } } as never,
+        blockHeight,
+        sleep,
+        missingPastIsFailed: false,
+      }),
+    ).resolves.toBe("unknown")
+    expect(height()).toBeGreaterThan(record.last_valid_block_height)
   })
 
   it("is unknown, not failed, when the service could never be reached", async () => {

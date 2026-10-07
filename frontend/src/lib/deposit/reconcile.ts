@@ -12,7 +12,8 @@ import type { Submission } from "@/lib/submissions"
 // - failed: the network dropped it, or its blockhash ran out with no way to
 //   land. Nothing was taken, so depositing again is safe.
 // - unknown: it may or may not have landed and cannot be told from here (no
-//   signature came back, or the service no longer has the record).
+//   signature came back, the service no longer has the record, or the chain's height
+//   could not be read for long enough that the screen should offer to check again).
 export type Reconciled = "confirmed" | "failed" | "unknown"
 
 type Input = {
@@ -30,7 +31,17 @@ type Input = {
   blockHeight?: ReadBlockHeight
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   pollMs?: number
+  // Whether a "not there" given once the height was seen past rules it failed. True for a
+  // wrap, an apply and a withdrawal, whose service checks the chain itself. A payroll
+  // payment passes false: a "not there" proves nothing about it (gotchas.md), so it
+  // stays unknown.
+  missingPastIsFailed?: boolean
+  // How many height reads in a row may fail before it gives up as unknown.
+  unreadableHeights?: number
 }
+
+// About two minutes of asking at the default pace, longer than a blockhash lives.
+export const maxUnreadableHeights = 40
 
 export const wait = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
@@ -55,7 +66,9 @@ export const wait = (ms: number, signal?: AbortSignal) =>
 // The transaction can no longer land once the finalized block height is past its
 // `last_valid_block_height`. The height is read before each ask, so only a "not there"
 // given after the height was seen past makes it failed: one that landed in time is
-// finalized by then, and the service says so.
+// finalized by then, and the service says so. While the height cannot be read nothing is
+// ruled failed, and after `unreadableHeights` failed reads in a row it is unknown rather
+// than asked about forever.
 export async function reconcileWrap({
   record,
   api,
@@ -63,16 +76,19 @@ export async function reconcileWrap({
   blockHeight = readBlockHeight,
   sleep = wait,
   pollMs = 3_000,
+  missingPastIsFailed = true,
+  unreadableHeights = maxUnreadableHeights,
 }: Input): Promise<Reconciled> {
+  let unread = 0
   // A height that cannot be read says nothing: the blockhash may still be live.
   const pastNow = async () => {
     try {
-      return pastBlockhash(
-        record.last_valid_block_height,
-        await blockHeight(signal),
-      )
+      const height = await blockHeight(signal)
+      unread = 0
+      return pastBlockhash(record.last_valid_block_height, height)
     } catch {
       signal?.throwIfAborted()
+      unread += 1
       return false
     }
   }
@@ -93,14 +109,20 @@ export async function reconcileWrap({
         // "Not finalized yet", a busy service and a dropped connection pass.
         if (!error.isRetryable) return "unknown"
         // Past its blockhash a signed transaction can no longer land, so one the
-        // service sees missing is gone.
-        if (error.code === "transaction_not_finalized" && past) return "failed"
+        // service sees missing is gone, where its "not there" is evidence.
+        if (
+          error.code === "transaction_not_finalized" &&
+          past &&
+          missingPastIsFailed
+        ) {
+          return "failed"
+        }
         if (error.retryAfter) pause = Math.max(pause, error.retryAfter * 1_000)
       }
     }
     // One with no signature, or that the service did not answer about, may have
     // landed in time.
-    if (past) return "unknown"
+    if (past || unread >= unreadableHeights) return "unknown"
     await sleep(pause, signal)
   }
 }

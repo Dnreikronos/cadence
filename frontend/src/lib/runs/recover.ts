@@ -31,9 +31,12 @@ type ReconcileOptions = Pick<
 >
 
 // Asks about one saved payment until the answer is final: confirmed, failed (the
-// network refused it, or it was seen missing once its last valid block height had
-// passed) or unknown (no signature, a service that could not be reached or that no
-// longer has it). Only leaving the screen throws.
+// network refused it) or unknown (no signature, a service that could not be reached or
+// that no longer has it, or one that still says it is not there once the last valid
+// block height has passed). A payment is never ruled failed on absence alone: an
+// executed one can be missing from RPC history (gotchas.md), and past its blockhash the
+// browser's finalized height may simply be ahead of the service's. Only leaving the
+// screen throws.
 export async function reconcilePayment(
   record: SentPayment,
   confirm: (signature: string) => Promise<Receipt>,
@@ -51,6 +54,7 @@ export async function reconcilePayment(
       api: { wrap: { confirm: (request) => confirm(request.signature) } },
       signal,
       ...options,
+      missingPastIsFailed: false,
     })
   } catch {
     // Not being able to ask says nothing about the payment.
