@@ -17,7 +17,9 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import type { ServiceStatus } from "@/lib/queries/health"
 import { isActive, navByRole, roleLabels } from "./nav"
+import { ServiceStatusBanner } from "./service-status-banner"
 
 // `id` is what the viewer's saved records are scoped by; the layouts and the demo give it.
 export type ShellCompany = { name: string; id?: string }
@@ -34,12 +36,14 @@ export function AppShell({
   company,
   email,
   balance,
+  serviceStatus = null,
   children,
 }: {
   role: Role
   company: ShellCompany
   email: string
   balance?: ShellBalance
+  serviceStatus?: ServiceStatus | null
   children: React.ReactNode
 }) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false)
@@ -65,6 +69,7 @@ export function AppShell({
           tabIndex={-1}
           className="min-w-0 px-4 py-6 outline-none sm:px-6 lg:px-10 lg:py-8"
         >
+          <ServiceStatusBanner status={serviceStatus} className="mb-6" />
           {children}
         </main>
       </div>

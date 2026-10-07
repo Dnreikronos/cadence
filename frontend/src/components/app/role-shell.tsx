@@ -4,13 +4,14 @@ import { useMemo } from "react"
 import { doneFromStatus, isActivated } from "@/lib/activation/machine"
 import type { Role } from "@/lib/auth/guard"
 import { useShellBalance } from "@/lib/queries/balance"
+import { useServiceStatus } from "@/lib/queries/health"
 import { useAccountStatus } from "@/lib/queries/status"
 import { WalletProvider } from "@/lib/wallet/context"
 import { AppShell, type ShellCompany } from "./app-shell"
 import { ViewerScopeProvider } from "./viewer-scope"
 
-// The signed-in shell with its client-side data: the balance in the sidebar and the
-// wallet every screen signs with. The role layouts render this with what the server resolved.
+// The signed-in shell with its client-side data: the balance in the sidebar, the
+// service status above the screen and the wallet every screen signs with. The role layouts render this with what the server resolved.
 export function RoleShell({
   role,
   company,
@@ -34,6 +35,7 @@ export function RoleShell({
     role !== "recipient" ||
     (status.data !== undefined && isActivated(doneFromStatus(status.data)))
   const balance = useShellBalance(role, viewer, activated)
+  const serviceStatus = useServiceStatus()
   return (
     <WalletProvider role={role}>
       <ViewerScopeProvider viewer={viewer}>
@@ -42,6 +44,7 @@ export function RoleShell({
           company={company}
           email={email}
           balance={activated ? balance : undefined}
+          serviceStatus={serviceStatus}
         >
           {children}
         </AppShell>
