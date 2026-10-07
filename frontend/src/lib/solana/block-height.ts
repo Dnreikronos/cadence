@@ -1,3 +1,4 @@
+import { apiConfig } from "@/lib/api/mode"
 import { createRpc } from "./rpc"
 
 // Whether a transaction can still land is the chain's call, not the clock's: it can while
@@ -25,19 +26,22 @@ export async function fetchBlockHeight({
   return Number(height)
 }
 
+// A read of the finalized block height, as every flow that judges expiry takes it: the
+// real one is `readBlockHeight`, a test passes its own chain.
+export type ReadBlockHeight = (signal?: AbortSignal) => Promise<number>
+
 // The finalized block height: the chain in real mode, the mock chain's clock-driven one
 // in mock mode (the mock service prepares against the same height). The literal check on
-// the mode lets Next inline it, as in ./balances, so the mock never reaches a real build.
-// The mode is imported only here, so the flows that default to this read can be imported
-// (and tested) without an API mode set.
-export async function readBlockHeight(signal?: AbortSignal): Promise<number> {
-  if (process.env.NEXT_PUBLIC_API_MODE !== "real") {
-    const { apiConfig } = await import("@/lib/api/mode")
-    if (apiConfig.mode === "mock") {
-      const { mockBlockHeight } = await import("@/lib/api/mocks/chain")
-      signal?.throwIfAborted()
-      return mockBlockHeight()
-    }
+// the mode lets Next inline it, as in ./balances, so a real build drops the import and the
+// mock never reaches the bundle.
+export const readBlockHeight: ReadBlockHeight = async (signal) => {
+  if (
+    process.env.NEXT_PUBLIC_API_MODE !== "real" &&
+    apiConfig.mode === "mock"
+  ) {
+    const { mockBlockHeight } = await import("@/lib/api/mocks/chain")
+    signal?.throwIfAborted()
+    return mockBlockHeight()
   }
   return fetchBlockHeight({ signal })
 }
