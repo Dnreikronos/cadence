@@ -298,6 +298,7 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
             void signer.start(
               made.run,
               (position) => made.recipients[position]?.id ?? "",
+              new Set(made.request.payments.map((p) => p.recipient)),
               lease,
             )
           },

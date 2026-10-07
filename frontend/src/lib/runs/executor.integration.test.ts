@@ -19,6 +19,7 @@ import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
 import { mockSigner, mockSubmit } from "@/lib/api/mocks/signer"
 import {
+  checkedSign,
   paymentKey,
   paySequence,
   recheckOne,
@@ -28,7 +29,11 @@ import {
   type RunContext,
   type RunEvents,
 } from "./executor"
-import { describeFailure, runMessage } from "./messages"
+import {
+  describeFailure,
+  refusedTransactionMessage,
+  runMessage,
+} from "./messages"
 import {
   canRecheck,
   canRetry,
@@ -316,5 +321,113 @@ describe("the mock wallet's signatures", () => {
       seen.add(signature)
     }
     expect(seen.size).toBe(300)
+  })
+})
+
+describe("a run's payments against the accounts the admin approved", () => {
+  const approved =
+    (accounts = payees.map((p) => mockTokenAccount(p.id))) =>
+    async () => ({
+      wallet: COMPANY_WALLET,
+      sender: mockTokenAccount(COMPANY_WALLET),
+      payees: new Set(accounts),
+    })
+
+  it("signs and confirms a run that pays exactly the approved accounts", async () => {
+    scenarios.set("instant")
+    const created = await createRun()
+    const { events, local } = recorder()
+
+    await paySequence(
+      {
+        runId: created.run_id,
+        sign: checkedSign(realSign(mockSubmit), approved()),
+        api: runApi,
+        events,
+      },
+      signablesOf(created),
+    )
+
+    const rows = await rowsOf(created, local())
+    expect(rows.map((row) => row.status)).toEqual([
+      "confirmed",
+      "confirmed",
+      "confirmed",
+    ])
+  })
+
+  it("signs nothing when the service prepared a payment to another account", async () => {
+    scenarios.set("instant", "foreign-destination")
+    const created = await createRun()
+    const before = db.company.available
+    const { events, local } = recorder()
+    const submit = vi.fn(mockSubmit)
+
+    await paySequence(
+      {
+        runId: created.run_id,
+        sign: checkedSign(realSign(submit), approved()),
+        api: runApi,
+        events,
+      },
+      signablesOf(created),
+    )
+
+    expect(submit).not.toHaveBeenCalled()
+    expect(db.company.available).toBe(before)
+    expect(local()[paymentKey(created.run_id, 0)]).toMatchObject({
+      status: "failed",
+      message: refusedTransactionMessage,
+    })
+    // The run stops at the first refusal: the others are never signed.
+    expect(local()[paymentKey(created.run_id, 1)]).toBeUndefined()
+  })
+
+  it("signs nothing for an account the admin did not approve, even if the transaction pays it", async () => {
+    scenarios.set("instant")
+    const created = await createRun()
+    const { events, local } = recorder()
+    const submit = vi.fn(mockSubmit)
+    const [first, ...rest] = payees.map((p) => mockTokenAccount(p.id))
+
+    await paySequence(
+      {
+        runId: created.run_id,
+        sign: checkedSign(realSign(submit), approved(rest)),
+        api: runApi,
+        events,
+      },
+      signablesOf(created),
+    )
+
+    expect(created.payments[0].destination).toBe(first)
+    expect(submit).not.toHaveBeenCalled()
+    expect(local()[paymentKey(created.run_id, 0)]).toMatchObject({
+      status: "failed",
+      message: refusedTransactionMessage,
+    })
+  })
+
+  it("keeps a payment the service confirmed and the network never showed as sent, to ask about again", async () => {
+    scenarios.set("instant", "chain-unconfirmed")
+    const created = await createRun()
+    const { events, local } = recorder()
+
+    await paySequence(
+      {
+        runId: created.run_id,
+        sign: checkedSign(realSign(mockSubmit), approved()),
+        api: runApi,
+        events,
+      },
+      signablesOf(created),
+    )
+
+    const row = mergeRow(local()[paymentKey(created.run_id, 0)])
+    expect(row.status).toBe("waiting")
+    expect(canRecheck(row)).toBe(true)
+    expect(canRetry(row)).toBe(false)
+    // Nothing after it was signed.
+    expect(local()[paymentKey(created.run_id, 1)]).toBeUndefined()
   })
 })

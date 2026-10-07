@@ -7,7 +7,11 @@ import type {
 } from "@/lib/api/schemas"
 import { isSignable } from "@/lib/api/schemas"
 import { ConfirmTimeoutError, type SignStep } from "@/lib/api/sign"
-import type { InspectedTransaction } from "@/lib/solana/inspect"
+import {
+  UnexpectedTransactionError,
+  checkConfidentialTransfer,
+  type InspectedTransaction,
+} from "@/lib/solana/inspect"
 import {
   ResponseMismatchError,
   SentPaymentError,
@@ -38,6 +42,42 @@ type SignAndConfirm = (
     check?: (transaction: InspectedTransaction) => void
   },
 ) => Promise<Receipt>
+
+// What a run's payments may do: move money from the company's account to the accounts
+// the admin approved, signed by the company's wallet. `sender` is the company's token
+// account as this app derives it, never as the service names it.
+export type RunAllowlist = {
+  wallet: string
+  sender: string
+  payees: ReadonlySet<string>
+}
+
+// Signing with the pre-sign check for a payment: the transaction must be one confidential
+// transfer from the company's account to the position's account, and that account must
+// be one the admin approved. The allowlist is resolved when a payment is signed, so one
+// that cannot be (the sender in real mode) fails that payment, unsent.
+export function checkedSign(
+  sign: SignAndConfirm,
+  allowlist: () => Promise<RunAllowlist>,
+): SignAndConfirm {
+  return async (prepared, confirm, onStep, extra) => {
+    const { wallet, sender, payees } = await allowlist()
+    const { destination } = prepared
+    return sign(prepared, confirm, onStep, {
+      ...extra,
+      check: (transaction) => {
+        if (!payees.has(destination)) {
+          throw new UnexpectedTransactionError("destination")
+        }
+        checkConfidentialTransfer(transaction, {
+          wallet,
+          source: sender,
+          destination,
+        })
+      },
+    })
+  }
+}
 
 export type RunApi = {
   confirm: (
