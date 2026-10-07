@@ -181,6 +181,25 @@ describe("confirm", () => {
     return prepared.request_id
   }
 
+  it("prepares every transaction against the mock chain's block height", async () => {
+    const live = (p: { last_valid_block_height: number }) =>
+      p.last_valid_block_height - mockBlockHeight()
+    const transactions = [
+      await api.wrap.prepare({ company_wallet: COMPANY_WALLET, amount: "1" }),
+      await api.unwrap.prepare({
+        wallet: ME_WALLET,
+        amount: "1",
+        acknowledge_reveal_risk: true,
+      }),
+      await api.accounts.applyPending(ME_WALLET),
+    ]
+    for (const prepared of transactions) {
+      // Live for about a minute from now, like a blockhash read now.
+      expect(live(prepared)).toBeGreaterThan(140)
+      expect(live(prepared)).toBeLessThanOrEqual(150)
+    }
+  })
+
   it("names a malformed request id and a malformed signature", async () => {
     scenarios.set("instant")
     for (const request_id of ["abc", "A".repeat(64), "g".repeat(64), ""]) {
