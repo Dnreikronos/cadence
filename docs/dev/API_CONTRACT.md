@@ -378,9 +378,11 @@ transfer_not_found`, because transfer records are looked up by `request_id` and
   signature) or the network answered `transaction_failed`; otherwise see the
   sent-failure rule below. The one reuse: a payroll payment whose signature the
   person cancelled sent nothing, so the same unsent transaction is signed again
-  ("Sign again"), only within about 90 s of being prepared and never after a failure
-  past the submit; older than that, or after a reload, it is prepared again or a new
-  run is started.
+  ("Sign again"), only while its `last_valid_block_height` is at least 75 blocks
+  (about 30 s) above the finalized block height, and never after a failure past the
+  submit. Closer than that (the finalized height trails the tip by about 32 blocks),
+  when the height cannot be read, or after a reload, it is prepared again or a new run
+  is started.
 - A transaction may have landed even if the browser lost the response.
   **Before preparing a replacement for a payment that was already submitted,**
   reconcile: confirm the earlier `request_id` first. Preparing a fresh deposit
@@ -389,13 +391,16 @@ transfer_not_found`, because transfer records are looked up by `request_id` and
   `request_id` and signature (idempotent for one signature, so it prepares nothing),
   every 3 s and at least `Retry-After`. `200` is `confirmed`. `transaction_failed` is
   `failed`. Any other non-retryable answer, including `404 wrap_not_found`, is
-  `unknown`, never `failed`. `transaction_not_finalized` is only conclusive with
-  time: once 90 s have passed since the send (a blockhash lives up to about 90 s, and
-  the finalized read can lag by about 13 s) and the service said "not finalized" at
-  least once, the transaction is read as `failed` and a new one may be prepared. A
-  record with no signature, or a service that never answered, is `unknown` after
-  90 s. The 90 s is a clock, not a block height: `last_valid_block_height` is stored
-  but not read yet, which is an assumption (question 28).
+  `unknown`, never `failed`. `transaction_not_finalized` is only conclusive with the
+  chain: before each ask the web app reads `getBlockHeight` at `finalized` commitment
+  (the RPC of `NEXT_PUBLIC_SOLANA_RPC_URL`; the mock's clock-driven height in mock
+  mode), and once that height is above the saved `last_valid_block_height` the
+  transaction can no longer land. A "not finalized" given after such a read makes it
+  `failed`, and a new one may be prepared: anything that landed in time is finalized
+  by then. A record with no signature, or a service that did not answer that last ask,
+  is `unknown` once the height is past. A height that cannot be read says nothing, and
+  the asking goes on. Whether the service's own read can trail the browser's is an
+  assumption (question 28).
 
 - **Wrap records are deleted.** The service removes unsigned wrap records whose
   blockhash has expired and that are more than 24 hours old
@@ -480,8 +485,9 @@ last_valid_block_height?, at }`, one per amount. It **does** hold the amount, wh
   what keeps the same amount from being withdrawn twice, so it is dropped as soon as the
   outcome is final. On mount, each one with a signature is re-confirmed; it is released
   when the network confirmed it, refused it (`transaction_failed`), or the service said
-  it was not on chain 90 seconds after the send, and otherwise stays held (a lookup
-  that fails, a `404`, or no signature to ask with).
+  it was not on chain once the finalized block height was past its
+  `last_valid_block_height`, and otherwise stays held (a lookup that fails, a `404`, or
+  no signature or block height to ask with).
 - Payroll keeps, for each payment that reached the submit step, `{ run_id, position,
 attempt, request_id, person_id, signature | null, last_valid_block_height, at }`
   (`person_id` is the account when no person was known). Each saved payment with a
@@ -539,7 +545,7 @@ screen then looks at what is saved now.
 
 A deposit's wrap is held the same way. When it is looked up (after a reload, or when
 another tab saved it) and the outcome cannot be told (the service has no record of it, or
-answered nothing readable, or no signature came back and 90 seconds have passed), its
+answered nothing readable, or no signature came back and its blockhash is past), its
 record is **kept**, not cleared: the screen says "We couldn't tell whether your last
 deposit went through", offers "Check again", and sends no wrap and no apply from any tab
 (every tab reads the same record and hears when it changes). Two minutes after the send it
@@ -1162,6 +1168,9 @@ handler, including each failure that changes the UI:
   the second payment on its first attempt; `prepare-failed` has the second payment fail
   to prepare on its first attempt. The block height is derived from the clock (a block
   every 400 ms, a blockhash valid for 150 blocks), so a page's fake clock moves it.
+  Every prepared transaction (wrap, transfer, unwrap, accounts, runs) is valid to that
+  height plus 150, and in mock mode the screens read the same height where real mode
+  reads `getBlockHeight`.
 - `reveal_risk` at `none`, `near` (within 1% of a payment the person received) and
   `exact`, and `reveal_risk_not_acknowledged` when the flag is missing.
 - `confidential_setup_required` (`setup-required`), `person_not_found`,
@@ -1423,8 +1432,9 @@ Each points to the [open question](#open-questions) that asks it.
   `request_id` and signature. (Questions 27 and 6.)
 - **`expired` implies the payment did not land.** The screen offers Retry for an
   `expired` payment, and the deposit and apply reconciliation call a transaction
-  failed 90 s after the send. Both treat "expired" or "90 s" as proof that a new
-  transaction cannot double-pay. The implemented `/runs` says the opposite for a
+  failed once the finalized block height is past its last valid one and the service
+  still says "not finalized". Both treat that as proof that a new transaction cannot
+  double-pay. The implemented `/runs` says the opposite for a
   missing history: an expired attempt with no finalized history stays unresolved.
   (Questions 28 and 14.)
 - **Invite re-send replaces the old row.** The people screen shows "invited" and
@@ -1559,10 +1569,11 @@ These need an answer from the backend owner before the 🟡 routes are built.
     only while its record exists (`WRAP_API.md` says unsigned wrap records are deleted)?
 28. **What `expired` and "not finalized" prove.** For runs, the implemented retry
     refuses while a prepared attempt is live and never rebuilds an expired one with
-    missing history; `expired` itself is never written (asked on #63). Left open: is
-    "the service said not finalized and 90 s have passed" a safe test that a wrap or
-    an apply did not land, or should the client compare `last_valid_block_height` with
-    the chain?
+    missing history; `expired` itself is never written (asked on #63). The client now
+    compares `last_valid_block_height` with the finalized block height it reads itself,
+    and asks the service again after seeing it past. Left open: can the service's
+    finalized read trail the browser's RPC, so that a transaction that landed in its
+    last blocks is still "not finalized" to the service on that ask?
 29. **Person invite re-send.** Does `POST /company/people/:person_id/invite` write the
     invite row the people screen reads, and does a re-send replace the earlier row (and
     kill its link) or add a second one? After a person's email changes, what happens to

@@ -213,7 +213,7 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
       another browser, a private window or cleared site data does not carry. Keep the
       evidence where the service can see it, and make the service refuse a second send for
       the same intent, instead of the client remembering to check.
-- [ ] **Block-height-based expiry** for a prepared transaction, not the 90-second clock
+- [x] **Block-height-based expiry** for a prepared transaction, not the 90-second clock
       the screens count down: a slow signer or a clock that is off should not decide
       whether a transaction can still land.
 - [ ] Get the canonical key-derivation message from the SDK (and the token account it is
