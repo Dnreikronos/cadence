@@ -308,6 +308,20 @@ describe("runs", () => {
     expect((await api.runs.create(unlinked)).payments).toHaveLength(1)
   })
 
+  it("denies a link that is not a signature, and ignores it once the wallet is linked", async () => {
+    db.linkedWallets.clear()
+    const unlinked = { ...runOf([bruno.id]), wallet_signature: undefined }
+    const bad = { ...unlinked, wallet_signature: "not a signature" }
+    const denied = await post("/runs", bad)
+    expect(denied.status).toBe(403)
+    expect(await code(denied)).toBe("wallet_access_denied")
+    expect(await code(await post("/runs", unlinked))).toBe(
+      "wallet_link_required",
+    )
+    await api.runs.create(runOf([bruno.id]))
+    expect((await post("/runs", bad)).status).toBe(200)
+  })
+
   it("refuses a sender the wallet does not own, and duplicate or self payments", async () => {
     const run = runOf([bruno.id, diego.id])
     expect(
