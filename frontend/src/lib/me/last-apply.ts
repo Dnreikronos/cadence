@@ -17,7 +17,7 @@ type Input = {
   // Balances may have changed, whatever the answer was.
   refresh: () => void
   signal?: AbortSignal
-  now?: () => number
+  blockHeight?: Parameters<typeof reconcileWrap>[0]["blockHeight"]
   sleep?: Parameters<typeof reconcileWrap>[0]["sleep"]
   pollMs?: number
 }
@@ -30,8 +30,8 @@ export function sentApply(store: LastApplyStore, wallet: string) {
 
 // Finds out what became of the last apply by confirming it again, which the service
 // answers idempotently for one signature: it never prepares anything new. The record
-// is cleared once the answer is final (after 90 s a transaction can no longer land,
-// the same rule as the deposit's wrap). A failure to ask keeps the record and throws,
+// is cleared once the answer is final (past its last valid block height a transaction
+// can no longer land, the same rule as the deposit's wrap). A failure to ask keeps the record and throws,
 // so the lock stays until the service can be reached.
 export async function checkLastApply({
   store,
@@ -39,7 +39,7 @@ export async function checkLastApply({
   accounts,
   refresh,
   signal,
-  now,
+  blockHeight,
   sleep,
   pollMs,
 }: Input): Promise<LastApply> {
@@ -50,7 +50,7 @@ export async function checkLastApply({
     // Only the confirm call is read, and it is the apply's own.
     api: { wrap: { confirm: accounts.confirmApplyPending } },
     signal,
-    now,
+    blockHeight,
     sleep,
     pollMs,
   })

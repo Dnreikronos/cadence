@@ -1,5 +1,6 @@
 import type { ApiClient } from "@/lib/api/client"
 import { ApiError } from "@/lib/api/errors"
+import { pastBlockhash, readBlockHeight } from "@/lib/solana/block-height"
 import type { Submission } from "@/lib/submissions"
 
 // What became of a wrap that was sent and not seen through.
@@ -10,18 +11,19 @@ import type { Submission } from "@/lib/submissions"
 //   signature came back, or the service no longer has the record).
 export type Reconciled = "confirmed" | "failed" | "unknown"
 
-// A blockhash lives about 150 blocks (up to ~90 s), and the chain read can lag by
-// about 13 s, so nothing is called expired before this long after it was sent.
-export const EXPIRY_MS = 90_000
-
 type Input = {
   // What the check reads of a record: withdrawals and payroll payments keep their own
   // shapes and pass just these three.
-  record: Pick<Submission, "request_id" | "signature" | "at">
+  record: Pick<
+    Submission,
+    "request_id" | "signature" | "last_valid_block_height"
+  >
   // Only the confirm call is used, so another transaction's confirm can stand in.
   api: { wrap: Pick<ApiClient["wrap"], "confirm"> }
   signal?: AbortSignal
-  now?: () => number
+  // The finalized block height (lib/solana/block-height.ts): the chain in real mode,
+  // the mock chain in mock mode.
+  blockHeight?: (signal?: AbortSignal) => Promise<number>
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   pollMs?: number
 }
@@ -45,19 +47,34 @@ export const wait = (ms: number, signal?: AbortSignal) =>
 // asking again is safe. A 404 is not an answer: WRAP_API.md says unsigned
 // records are collected after their blockhash expires and 24 hours, and that a
 // later 404 is not evidence the deposit failed, so it reads as unknown.
+//
+// The transaction can no longer land once the finalized block height is past its
+// `last_valid_block_height`. The height is read before each ask, so only a "not there"
+// given after the height was seen past makes it failed: one that landed in time is
+// finalized by then, and the service says so.
 export async function reconcileWrap({
   record,
   api,
   signal,
-  now = Date.now,
+  blockHeight = readBlockHeight,
   sleep = wait,
   pollMs = 3_000,
 }: Input): Promise<Reconciled> {
-  // Whether the service ever answered that the transaction is not on the chain.
-  // A service that could not be reached says nothing about it.
-  let notOnChain = false
+  // A height that cannot be read says nothing: the blockhash may still be live.
+  const pastNow = async () => {
+    try {
+      return pastBlockhash(
+        record.last_valid_block_height,
+        await blockHeight(signal),
+      )
+    } catch {
+      signal?.throwIfAborted()
+      return false
+    }
+  }
   for (;;) {
     signal?.throwIfAborted()
+    const past = await pastNow()
     let pause = pollMs
     if (record.signature) {
       try {
@@ -71,17 +88,15 @@ export async function reconcileWrap({
         if (error.code === "transaction_failed") return "failed"
         // "Not finalized yet", a busy service and a dropped connection pass.
         if (!error.isRetryable) return "unknown"
-        if (error.code === "transaction_not_finalized") notOnChain = true
+        // Past its blockhash a signed transaction can no longer land, so one the
+        // service sees missing is gone.
+        if (error.code === "transaction_not_finalized" && past) return "failed"
         if (error.retryAfter) pause = Math.max(pause, error.retryAfter * 1_000)
       }
     }
-    const left = record.at + EXPIRY_MS - now()
-    if (left <= 0) {
-      // Past its blockhash a signed transaction can no longer land, so one the
-      // service saw missing is gone. One with no signature, or that the service
-      // never answered about, may have landed before then.
-      return notOnChain ? "failed" : "unknown"
-    }
-    await sleep(Math.min(pause, left), signal)
+    // One with no signature, or that the service did not answer about, may have
+    // landed in time.
+    if (past) return "unknown"
+    await sleep(pause, signal)
   }
 }

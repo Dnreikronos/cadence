@@ -95,9 +95,16 @@ const noRetry: RunApi["retry"] = async () => {
 }
 const notFinalized = () => new ApiError(409, "transaction_not_finalized")
 
-function clock(start = 1_000) {
-  let time = start
-  return { now: () => time, sleep: async (ms: number) => void (time += ms) }
+// A chain that only moves when the code sleeps, a block every 400 ms, starting 150 blocks
+// (60 s) before the saved payments' last valid one.
+function chain(start = 500 - 150) {
+  let time = 0
+  const height = () => start + Math.floor(time / 400)
+  return {
+    height,
+    blockHeight: async () => height(),
+    sleep: async (ms: number) => void (time += ms),
+  }
 }
 
 describe("hydrateLocal", () => {
@@ -120,7 +127,7 @@ describe("hydrateLocal", () => {
 })
 
 describe("reconcilePayment", () => {
-  const options = () => ({ ...clock(), pollMs: 3_000 })
+  const options = () => ({ ...chain(), pollMs: 3_000 })
 
   it("asks with the saved signature, and says confirmed once it is", async () => {
     const confirm = vi.fn(async () => receipt)
@@ -151,18 +158,20 @@ describe("reconcilePayment", () => {
     expect(confirm).toHaveBeenCalledTimes(3)
   })
 
-  it("rules it lost only after 90 seconds from the send, and only if the service saw it missing", async () => {
+  it("rules it lost only once the chain is past its last valid block, and only if the service saw it missing", async () => {
     const confirm = vi.fn().mockRejectedValue(notFinalized())
-    // Sent at t=1000, asked every 3 s, the last ask at t=91000: 31 asks, 90 s in all.
-    const ticking = clock()
+    // Asked every 3 s (7.5 blocks): the 21st wait takes the chain past the last valid
+    // block, and the ask after that is the last.
+    const { height, blockHeight, sleep } = chain()
     expect(
       await reconcilePayment(saved(1), confirm, undefined, {
-        ...ticking,
+        blockHeight,
+        sleep,
         pollMs: 3_000,
       }),
     ).toBe("failed")
-    expect(confirm).toHaveBeenCalledTimes(31)
-    expect(ticking.now()).toBe(1_000 + 90_000)
+    expect(confirm).toHaveBeenCalledTimes(22)
+    expect(height()).toBeGreaterThan(500)
 
     // A service that never answers leaves it unknown.
     const down = vi
@@ -198,7 +207,7 @@ describe("reconcilePayment", () => {
     const confirm = vi.fn().mockRejectedValue(notFinalized())
     await expect(
       reconcilePayment(saved(1), confirm, stop.signal, {
-        now: () => 1_000,
+        blockHeight: async () => 350,
         sleep: async () => stop.abort(),
       }),
     ).rejects.toBeDefined()
@@ -228,7 +237,7 @@ function recovery(confirm: RunApi["confirm"]) {
   }
   return { context, log, failures, sign, retry }
 }
-const quick = { ...clock(), pollMs: 3_000 }
+const quick = { ...chain(), pollMs: 3_000 }
 
 describe("recoverOne", () => {
   it("shows the payment as waiting, then confirmed, and prepares and signs nothing", async () => {
@@ -294,7 +303,7 @@ describe("recoverOne", () => {
     const stop = new AbortController()
     const { context, log } = recovery(confirmsAs((n) => answer(n)))
     await recoverOne({ ...context, signal: stop.signal }, saved(1), {
-      now: () => 1_000,
+      blockHeight: async () => 350,
       sleep: async () => stop.abort(),
     })
     expect(log).toEqual([`waiting ${key(1)}`])

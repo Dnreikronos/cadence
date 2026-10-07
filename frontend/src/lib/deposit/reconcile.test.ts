@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import { ApiError } from "@/lib/api/errors"
 import type { Receipt } from "@/lib/api/schemas"
 import type { Submission } from "@/lib/submissions"
-import { EXPIRY_MS, reconcileWrap } from "./reconcile"
+import { reconcileWrap } from "./reconcile"
 
 const SIG = "5SigMockSignature1111111111111111111111111111"
 const receipt: Receipt = {
@@ -20,26 +20,38 @@ const record: Submission = {
   at: 1_000,
 }
 
-// A clock that only moves when the code sleeps.
+// A chain that only moves when the code sleeps: a block every 400 ms, starting 50 blocks
+// before the last valid one (20 s of life left).
+function chain(start = record.last_valid_block_height - 50) {
+  let elapsed = 0
+  const height = () => start + Math.floor(elapsed / 400)
+  return {
+    height,
+    blockHeight: vi.fn(async () => height()),
+    sleep: vi.fn(async (ms: number) => {
+      elapsed += ms
+    }),
+  }
+}
+
 function setup(answers: (ApiError | Receipt)[], submission = record) {
-  let t = submission.at
   const queue = [...answers]
   const confirm = vi.fn(async () => {
     const next = queue.length > 1 ? queue.shift()! : queue[0]
     if (next instanceof ApiError) throw next
     return next
   })
-  const sleep = vi.fn(async (ms: number) => {
-    t += ms
-  })
+  const { height, blockHeight, sleep } = chain()
   return {
     confirm,
     sleep,
+    height,
+    blockHeight,
     run: () =>
       reconcileWrap({
         record: submission,
         api: { wrap: { confirm } } as never,
-        now: () => t,
+        blockHeight,
         sleep,
       }),
   }
@@ -74,33 +86,94 @@ describe("reconcileWrap", () => {
     expect(sleep).not.toHaveBeenCalled()
   })
 
-  it("is failed once the blockhash has run out and the service kept saying it was not there", async () => {
-    const { confirm, run } = setup([notFinalized()])
+  it("is failed once the finalized height is past its last valid block and the service still says it is not there", async () => {
+    const { confirm, height, run } = setup([notFinalized()])
     await expect(run()).resolves.toBe("failed")
-    // Not before 90 s: the chain read lags, so it waits the whole window out.
-    expect(confirm.mock.calls.length).toBeGreaterThan(10)
+    expect(height()).toBeGreaterThan(record.last_valid_block_height)
+    // Asked again after the height was seen past, not only before.
+    expect(confirm.mock.calls.length).toBeGreaterThan(5)
   })
 
-  it("does not call it expired before 90 seconds have passed", async () => {
-    let t = record.at
+  it("does not call it expired while the finalized height is still at its last valid block", async () => {
+    const { height, blockHeight, sleep } = chain()
     const confirm = vi.fn(async () => {
-      if (t < record.at + EXPIRY_MS - 1) throw notFinalized()
+      // Lands in its last valid block, and is finalized a little after.
+      if (height() <= record.last_valid_block_height + 1) throw notFinalized()
       return receipt
     })
+    blockHeight.mockImplementation(async () =>
+      // The finalized height trails: it reaches the last valid block only late.
+      Math.min(height(), record.last_valid_block_height),
+    )
     const result = await reconcileWrap({
       record,
       api: { wrap: { confirm } } as never,
-      now: () => t,
-      sleep: async (ms) => {
-        t += ms
-      },
+      blockHeight,
+      sleep,
     })
     expect(result).toBe("confirmed")
+  })
+
+  it("only counts a 'not there' that came after the height was seen past", async () => {
+    // Past already when it is read, but the first answer was asked before that read
+    // could have seen it: the order is read, then ask.
+    const order: string[] = []
+    const confirm = vi.fn(async () => {
+      order.push("ask")
+      throw notFinalized()
+    })
+    const blockHeight = vi.fn(async () => {
+      order.push("height")
+      return record.last_valid_block_height + 1
+    })
+    await expect(
+      reconcileWrap({
+        record,
+        api: { wrap: { confirm } } as never,
+        blockHeight,
+        sleep: async () => {},
+      }),
+    ).resolves.toBe("failed")
+    expect(order).toEqual(["height", "ask"])
+  })
+
+  it("never calls it expired while the block height cannot be read", async () => {
+    const { confirm, sleep } = setup([notFinalized()])
+    let reads = 0
+    const blockHeight = vi.fn(async () => {
+      if (++reads <= 20) throw new TypeError("Failed to fetch")
+      return record.last_valid_block_height + 1
+    })
+    await expect(
+      reconcileWrap({
+        record,
+        api: { wrap: { confirm } } as never,
+        blockHeight,
+        sleep,
+      }),
+    ).resolves.toBe("failed")
+    // Kept asking for as long as the height was out of reach.
+    expect(confirm).toHaveBeenCalledTimes(21)
   })
 
   it("is unknown, not failed, when the service could never be reached", async () => {
     const { run } = setup([new ApiError(0, "network_error")])
     await expect(run()).resolves.toBe("unknown")
+  })
+
+  it("is unknown when the service could not be reached once the blockhash was past", async () => {
+    const { blockHeight, sleep } = chain(record.last_valid_block_height + 1)
+    const confirm = vi
+      .fn()
+      .mockRejectedValue(new ApiError(503, "rpc_unavailable"))
+    await expect(
+      reconcileWrap({
+        record,
+        api: { wrap: { confirm } } as never,
+        blockHeight,
+        sleep,
+      }),
+    ).resolves.toBe("unknown")
   })
 
   it("recovers from a busy service and a dropped connection", async () => {
@@ -127,26 +200,28 @@ describe("reconcileWrap", () => {
   })
 
   it("never asks about a wrap with no signature, and is unknown once its blockhash is gone", async () => {
-    const { confirm, sleep, run } = setup([receipt], {
+    const { confirm, height, run } = setup([receipt], {
       ...record,
       signature: null,
     })
     await expect(run()).resolves.toBe("unknown")
     expect(confirm).not.toHaveBeenCalled()
-    expect(sleep.mock.calls.reduce((sum, [ms]) => sum + ms, 0)).toBe(EXPIRY_MS)
+    // It waited for that, not for a clock.
+    expect(height()).toBeGreaterThan(record.last_valid_block_height)
   })
 
-  it("answers at once for a record that is already past the window and gets confirmed", async () => {
-    let t = record.at + EXPIRY_MS * 10
+  it("answers at once for a record that is already past its blockhash and gets confirmed", async () => {
+    const { blockHeight, sleep } = chain(record.last_valid_block_height + 1000)
     const confirm = vi.fn(async () => receipt)
     await expect(
       reconcileWrap({
         record,
         api: { wrap: { confirm } } as never,
-        now: () => t,
-        sleep: async () => void (t += 1),
+        blockHeight,
+        sleep,
       }),
     ).resolves.toBe("confirmed")
+    expect(sleep).not.toHaveBeenCalled()
   })
 
   it("stops with the abort reason when the person leaves", async () => {
@@ -157,6 +232,24 @@ describe("reconcileWrap", () => {
       reconcileWrap({
         record,
         api: { wrap: { confirm } } as never,
+        signal: abort.signal,
+      }),
+    ).rejects.toThrow("left")
+    expect(confirm).not.toHaveBeenCalled()
+  })
+
+  it("stops with the abort reason when the person leaves during the height read", async () => {
+    const abort = new AbortController()
+    const confirm = vi.fn()
+    const blockHeight = vi.fn(async () => {
+      abort.abort(new Error("left"))
+      throw abort.signal.reason
+    })
+    await expect(
+      reconcileWrap({
+        record,
+        api: { wrap: { confirm } } as never,
+        blockHeight,
         signal: abort.signal,
       }),
     ).rejects.toThrow("left")

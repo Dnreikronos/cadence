@@ -94,6 +94,7 @@ export type Deps = {
   // that cannot get it sends nothing.
   lock?: () => Promise<Acquired>
   now?: () => number
+  blockHeight?: Parameters<typeof reconcileWrap>[0]["blockHeight"]
   sleep?: Parameters<typeof reconcileWrap>[0]["sleep"]
 }
 
@@ -112,7 +113,7 @@ export class MakePrivateController {
   private earlierPending: EarlierPending = null
   private record: Submission | null = null
   // The apply that went out and was not seen through, when there is one.
-  private sentApply: (SentApply & { at: number }) | null = null
+  private sentApply: SentApply | null = null
   // Whatever is running now; a stale run never touches the state or the flag.
   private generation = 0
 
@@ -211,15 +212,11 @@ export class MakePrivateController {
       })
     try {
       const outcome = await reconcileWrap({
-        record: {
-          request_id: sent.request_id,
-          signature: sent.signature,
-          at: sent.at,
-        },
+        record: sent,
         // Only the confirm call is read, and it is the apply's own.
         api: { wrap: { confirm: deps.api.accounts.confirmApplyPending } },
         signal: abort.signal,
-        now: deps.now,
+        blockHeight: deps.blockHeight,
         sleep: deps.sleep,
       })
       if (!this.live(generation)) return
@@ -533,8 +530,6 @@ export class MakePrivateController {
       // An apply that went out is kept in memory, to ask about it again. Unlike the
       // wrap it is not persisted: a reload forgets it, and the balances tell.
       this.sentApply = failure.sent
-        ? { ...failure.sent, at: (deps.now ?? Date.now)() }
-        : null
       this.set({
         status: "failed",
         step: failure.step,
@@ -577,7 +572,7 @@ export class MakePrivateController {
         record: current,
         api: deps.api,
         signal: abort.signal,
-        now: deps.now,
+        blockHeight: deps.blockHeight,
         sleep: deps.sleep,
       })
       if (!this.live(generation)) return

@@ -29,7 +29,7 @@ export const heldRecordSchema = z.object({
   request_id: z.string().min(1).optional(),
   signature: z.string().min(1).optional(),
   last_valid_block_height: z.number().int().nonnegative().optional(),
-  // Epoch milliseconds when it was sent: the 90-second rule counts from here.
+  // Epoch milliseconds when it was sent: the wait before a release counts from here.
   at: z.number().int().nonnegative(),
 })
 export type HeldRecord = z.infer<typeof heldRecordSchema>
@@ -103,7 +103,7 @@ export function recordFor(
 
 // What `runWithdraw` calls as the transaction is sent and when its outcome is final,
 // writing to the viewer's records. The time it was sent is kept when the signature is
-// added, since the 90-second rule counts from the send.
+// added, since the two minutes before a release count from the send.
 //
 // In real mode a record that did not reach storage stops the withdrawal before the send
 // (the first call, which comes before `submit`): nothing was sent, so the in-memory copy
@@ -138,7 +138,8 @@ export function withdrawEvidence(
 // What a check of one held withdrawal found.
 // - confirmed: it landed. The record is gone.
 // - failed: the network refused it, or it was seen missing until its blockhash ran out
-//   (90 s after sending). Nothing moved, the record is gone and the amount is free.
+//   (its last valid block height passed). Nothing moved, the record is gone and the
+//   amount is free.
 // - unknown: it may or may not have landed, so the amount stays held. No signature to
 //   ask about, a service that could not be reached, or one that no longer has it.
 export type HeldCheck = { amount: string; outcome: Reconciled }
@@ -154,7 +155,7 @@ type CheckInput = {
   // Only these are looked up (default: every record). The others are left as they are.
   include?: (record: HeldRecord) => boolean
   signal?: AbortSignal
-  now?: () => number
+  blockHeight?: Parameters<typeof reconcileWrap>[0]["blockHeight"]
   sleep?: Parameters<typeof reconcileWrap>[0]["sleep"]
   pollMs?: number
 }
@@ -169,7 +170,7 @@ export async function checkHeldWithdrawals({
   refresh,
   include = () => true,
   signal,
-  now,
+  blockHeight,
   sleep,
   pollMs = checkPollMs,
 }: CheckInput): Promise<HeldCheck[]> {
@@ -179,7 +180,7 @@ export async function checkHeldWithdrawals({
   let asked = false
   for (const record of records.read().filter(include)) {
     const amount = record.amount_units
-    if (!record.request_id || !record.signature) {
+    if (!checkable(record)) {
       checks.push({ amount, outcome: "unknown" })
       continue
     }
@@ -189,14 +190,10 @@ export async function checkHeldWithdrawals({
     let outcome: Reconciled
     try {
       outcome = await reconcileWrap({
-        record: {
-          request_id: record.request_id,
-          signature: record.signature,
-          at: record.at,
-        },
+        record,
         api: { wrap: { confirm: api.unwrap.confirm } },
         signal,
-        now,
+        blockHeight,
         sleep,
         pollMs,
       })
@@ -219,9 +216,19 @@ export async function checkHeldWithdrawals({
 }
 
 // A record a check can ask about, and what tells one apart from another sent later for
-// the same amount.
-export const checkable = (record: HeldRecord) =>
-  Boolean(record.request_id && record.signature)
+// the same amount. Without its last valid block height nothing could tell when it can no
+// longer land (every record written has one; the schema only allows it to be missing).
+export const checkable = (
+  record: HeldRecord,
+): record is HeldRecord &
+  Required<
+    Pick<HeldRecord, "request_id" | "signature" | "last_valid_block_height">
+  > =>
+  Boolean(
+    record.request_id &&
+    record.signature &&
+    record.last_valid_block_height !== undefined,
+  )
 export const recordKey = (record: HeldRecord) =>
   `${record.amount_units}:${record.signature}`
 

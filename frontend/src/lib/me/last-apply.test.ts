@@ -13,7 +13,7 @@ import { ApiError } from "@/lib/api/errors"
 import { db, resetDb } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
-import { EXPIRY_MS } from "@/lib/deposit/reconcile"
+import { mockBlockHeight } from "@/lib/api/mocks/chain"
 import { mockWalletFor } from "@/lib/wallet/mock"
 import { bindSignAndConfirm } from "@/lib/wallet/sign-and-confirm"
 import { applyPending, SentApplyError } from "./apply-pending"
@@ -145,7 +145,9 @@ describe("checkLastApply", () => {
     const failure = await leaveMidApply(store, gone)
     expect(failure.signature).toBeNull()
     const confirm = vi.fn()
-    let clock = 1_000 + 10_000
+    const lastValid = store.read()!.last_valid_block_height
+    // The mock chain, on a clock that moves only when the check waits: 10 s in.
+    let clock = Date.now() + 10_000
     const sleep = vi.fn(async (ms: number) => {
       clock += ms
     })
@@ -155,15 +157,15 @@ describe("checkLastApply", () => {
       wallet: wallet.address,
       accounts: { confirmApplyPending: confirm },
       refresh: vi.fn(),
-      now: () => clock,
+      blockHeight: async () => mockBlockHeight(clock),
       sleep,
     })
 
     expect(outcome).toBe("unknown")
     expect(confirm).not.toHaveBeenCalled()
-    // It waited out the rest of the 90 seconds, not less.
-    const waited = sleep.mock.calls.reduce((sum, [ms]) => sum + ms, 0)
-    expect(waited).toBe(EXPIRY_MS - 10_000)
+    // It waited until the chain was past the apply's last valid block, not less.
+    expect(mockBlockHeight(clock)).toBeGreaterThan(lastValid)
+    expect(mockBlockHeight(clock - 3_000)).toBeLessThanOrEqual(lastValid)
     expect(store.read()).toBeNull()
   })
 

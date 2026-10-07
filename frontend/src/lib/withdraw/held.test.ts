@@ -48,6 +48,7 @@ const bruno = { company: "Solaris", email: "bruno@example.com" }
 const wallet = "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
 const REQUEST = "a".repeat(64)
 const SIG = "5SigMockSignature1111111111111111111111111111"
+const LAST_VALID = 321
 const receipt: Receipt = {
   request_id: REQUEST,
   signature: SIG,
@@ -60,14 +61,14 @@ const prepared: UnwrapPrepared = {
   transaction_version: 1,
   required_signers: [wallet],
   recent_blockhash: "hash",
-  last_valid_block_height: 321,
+  last_valid_block_height: LAST_VALID,
   reveal_risk: { level: "none", matches: [] },
 }
 const record = (overrides: Partial<HeldRecord> = {}): HeldRecord => ({
   amount_units: "1000000000",
   request_id: REQUEST,
   signature: SIG,
-  last_valid_block_height: 321,
+  last_valid_block_height: LAST_VALID,
   at: 1_000,
   ...overrides,
 })
@@ -75,11 +76,14 @@ const record = (overrides: Partial<HeldRecord> = {}): HeldRecord => ({
 const notFinalized = () => new ApiError(409, "transaction_not_finalized")
 const failed = () => new ApiError(409, "transaction_failed")
 
-// A clock that only moves when the code sleeps, so ninety seconds run instantly.
-function clock(start = 1_000) {
-  let time = start
+// A chain that only moves when the code sleeps, a block every 400 ms, so a blockhash's
+// minute runs instantly. It starts where the record's blockhash was just read.
+function chain(start = LAST_VALID - 150) {
+  let time = 0
+  const height = () => start + Math.floor(time / 400)
   return {
-    now: () => time,
+    height,
+    blockHeight: async () => height(),
     sleep: async (ms: number) => void (time += ms),
   }
 }
@@ -97,14 +101,14 @@ function check(
   extra: Partial<Parameters<typeof checkHeldWithdrawals>[0]> = {},
 ) {
   const refresh = vi.fn()
-  const { now, sleep } = clock()
+  const { blockHeight, sleep } = chain()
   return {
     refresh,
     done: checkHeldWithdrawals({
       records,
       api: { unwrap: { confirm } },
       refresh,
-      now,
+      blockHeight,
       sleep,
       pollMs: 3_000,
       ...extra,
@@ -411,23 +415,20 @@ describe("checking what became of a held withdrawal", () => {
     expect(confirm).toHaveBeenCalledTimes(3)
   })
 
-  it("declares it lost only 90 seconds after sending, and only if the service said it was not on chain", async () => {
+  it("declares it lost only once the chain is past its last valid block, and only if the service said it was not on chain", async () => {
     const records = heldRecords(ana, fakeStorage())
-    records.upsert(record({ at: 1_000 }))
+    records.upsert(record())
     const confirm = confirmer(notFinalized())
-    // Asked every 3 s from the send at t=1000 until t=91000, 90 s later, whose answer is
-    // the last: 31 asks, and not a second more or less of waiting.
-    let time = 1_000
-    const { done } = check(records, confirm, {
-      now: () => time,
-      sleep: async (ms) => void (time += ms),
-    })
+    // Asked every 3 s (7.5 blocks) from 150 blocks before the last valid one: the 21st
+    // wait takes the chain past it, and the ask after that is the last.
+    const { height, blockHeight, sleep } = chain()
+    const { done } = check(records, confirm, { blockHeight, sleep })
     expect(await done).toEqual([{ amount: "1000000000", outcome: "failed" }])
-    expect(confirm).toHaveBeenCalledTimes(31)
-    expect(time).toBe(1_000 + 90_000)
+    expect(confirm).toHaveBeenCalledTimes(22)
+    expect(height()).toBeGreaterThan(LAST_VALID)
     expect(records.read()).toEqual([])
 
-    // The service never answered: after 90 s it is still unknown, not lost.
+    // The service never answered: past its blockhash it is still unknown, not lost.
     const silent = heldRecords(ana, fakeStorage())
     silent.upsert(record({ at: 1_000 }))
     const down = confirmer(new ApiError(503, "service_unavailable"))
@@ -439,11 +440,24 @@ describe("checking what became of a held withdrawal", () => {
 
   it("does not wait again for one sent long ago: it is asked once and ruled on", async () => {
     const records = heldRecords(ana, fakeStorage())
-    records.upsert(record({ at: 1_000 }))
+    records.upsert(record())
     const confirm = confirmer(notFinalized())
-    const { done } = check(records, confirm, { now: () => 1_000 + 600_000 })
+    const { done } = check(records, confirm, {
+      blockHeight: async () => LAST_VALID + 1_500,
+    })
     expect(await done).toEqual([{ amount: "1000000000", outcome: "failed" }])
     expect(confirm).toHaveBeenCalledTimes(1)
+  })
+
+  it("asks nothing about a record with no last valid block height, and keeps it held", async () => {
+    const records = heldRecords(ana, fakeStorage())
+    records.upsert(record({ last_valid_block_height: undefined }))
+    const confirm = confirmer(notFinalized())
+    const { done } = check(records, confirm)
+    expect(await done).toEqual([{ amount: "1000000000", outcome: "unknown" }])
+    expect(confirm).not.toHaveBeenCalled()
+    expect(records.read()).toHaveLength(1)
+    expect(checkableKey(records.read())).toBe("")
   })
 
   it("asks nothing about a record with no signature, and keeps it held", async () => {

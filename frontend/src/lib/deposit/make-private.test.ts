@@ -444,6 +444,7 @@ describe("runMakePrivate", () => {
 
       expect(error.sent).toEqual({
         request_id: prepared("b").request_id,
+        last_valid_block_height: prepared("b").last_valid_block_height,
         signature: null,
       })
       expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
@@ -461,6 +462,7 @@ describe("runMakePrivate", () => {
 
       expect(error.sent).toEqual({
         request_id: prepared("b").request_id,
+        last_valid_block_height: prepared("b").last_valid_block_height,
         signature: SIG_B,
       })
       expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
@@ -515,6 +517,7 @@ describe("runMakePrivate", () => {
 
       expect(error.sent).toEqual({
         request_id: prepared("b").request_id,
+        last_valid_block_height: prepared("b").last_valid_block_height,
         signature: SIG_B,
       })
       expect(api.accounts.applyPending).toHaveBeenCalledTimes(1)
