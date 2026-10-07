@@ -53,6 +53,8 @@ function outcome(response: NextResponse) {
 afterEach(() => vi.unstubAllEnvs())
 
 beforeEach(() => {
+  // What next.config.ts inlines into every build.
+  vi.stubEnv("CSP_CONNECT_SRC", "'self' https://a.example")
   Object.assign(config, {
     broken: false,
     mode: "mock",
@@ -429,53 +431,46 @@ describe("the Content-Security-Policy", () => {
     response.headers.get("x-middleware-request-content-security-policy")
   const nonce = (value: string) => value.match(/'nonce-([^']+)'/)?.[1]
 
-  beforeEach(() => vi.stubEnv("CSP_CONNECT_SRC", "'self' https://a.example"))
+  const real = () => Object.assign(config, { mode: "real" })
+  const supabase = () => Object.assign(config, { supabaseConfigured: true })
 
   // One path per way out of the middleware, in each configuration.
-  const exits: [string, () => void, string, string | undefined][] = [
-    ["the demo, a page", () => {}, "/company", "admin"],
-    ["the demo, a redirect", () => {}, "/company", undefined],
-    [
-      "the /dev 404 rewrite",
-      () => vi.stubEnv("NODE_ENV", "production"),
-      "/dev/api",
-      undefined,
-    ],
-    [
-      "no Supabase, a public page",
-      () => Object.assign(config, { mode: "real" }),
-      "/",
-      undefined,
-    ],
-    [
-      "no Supabase, a guarded page",
-      () => Object.assign(config, { mode: "real" }),
-      "/company",
-      undefined,
-    ],
-    [
-      "Supabase, no session",
-      () => Object.assign(config, { supabaseConfigured: true }),
-      "/company",
-      undefined,
-    ],
-    [
-      "Supabase, a public page",
-      () => Object.assign(config, { supabaseConfigured: true }),
-      "/sign-in",
-      undefined,
-    ],
+  const exits: {
+    name: string
+    set: () => void
+    path: string
+    role?: string
+  }[] = [
+    {
+      name: "the demo, a page",
+      set: () => {},
+      path: "/company",
+      role: "admin",
+    },
+    { name: "the demo, a redirect", set: () => {}, path: "/company" },
+    {
+      name: "the /dev 404 rewrite",
+      set: () => vi.stubEnv("NODE_ENV", "production"),
+      path: "/dev/api",
+    },
+    { name: "no Supabase, a public page", set: real, path: "/" },
+    { name: "no Supabase, a guarded page", set: real, path: "/company" },
+    { name: "Supabase, no session", set: supabase, path: "/company" },
+    { name: "Supabase, a public page", set: supabase, path: "/sign-in" },
   ]
 
-  it.each(exits)("is sent, with a nonce, on %s", async (_, set, path, role) => {
-    set()
-    const response = await visit(path, role)
-    expect(policy(response)).toContain("connect-src 'self' https://a.example")
-    expect(nonce(policy(response))).toBeTruthy()
-    // A page that renders gets the same policy to read its nonce from.
-    if (!response.headers.get("location"))
-      expect(forwarded(response)).toBe(policy(response))
-  })
+  it.each(exits)(
+    "is sent, with a nonce, on $name",
+    async ({ set, path, role }) => {
+      set()
+      const response = await visit(path, role)
+      expect(policy(response)).toContain("connect-src 'self' https://a.example")
+      expect(nonce(policy(response))).toBeTruthy()
+      // A page that renders gets the same policy to read its nonce from.
+      if (!response.headers.get("location"))
+        expect(forwarded(response)).toBe(policy(response))
+    },
+  )
 
   it("has a new nonce on every response", async () => {
     const nonces = new Set<string | undefined>()
@@ -496,5 +491,10 @@ describe("the Content-Security-Policy", () => {
   it("only restricts framing under `next dev`", async () => {
     vi.stubEnv("NODE_ENV", "development")
     expect(policy(await visit("/"))).toBe("frame-ancestors 'none'")
+  })
+
+  it("fails every response when the build did not set its sources", async () => {
+    vi.stubEnv("CSP_CONNECT_SRC", "")
+    await expect(visit("/")).rejects.toThrow("CSP_CONNECT_SRC")
   })
 })

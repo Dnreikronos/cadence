@@ -7,31 +7,34 @@ import { DEMO_COOKIE, parseDemoRole } from "@/lib/demo/viewer"
 import { isSupabaseConfigured } from "@/lib/supabase/env"
 import { membershipOf } from "@/lib/supabase/membership"
 import { createMiddlewareClient } from "@/lib/supabase/middleware"
-import { mintNonce, policyFor } from "@/lib/security-headers"
+import { policyFor, readCspEnv } from "@/lib/security-headers"
 
 // Every response carries a Content-Security-Policy with a nonce of its own. Next reads
 // the nonce from the request's `content-security-policy` header and stamps it on the
 // scripts it renders, so the header is set on the request first, and every response
 // below that renders a page forwards the request's headers (`{ request }`).
 export async function middleware(request: NextRequest) {
+  const dev = isDevPath(request.nextUrl.pathname)
   const policy = policyFor({
-    // From next.config.ts, inlined at build.
-    connect: (process.env.CSP_CONNECT_SRC ?? "'self'").split(" "),
-    dev: isDevPath(request.nextUrl.pathname),
+    // From next.config.ts, inlined at build (only when referenced literally).
+    ...readCspEnv({
+      CSP_CONNECT_SRC: process.env.CSP_CONNECT_SRC,
+      CSP_MOCK_WORKER: process.env.CSP_MOCK_WORKER,
+    }),
+    dev,
     development: process.env.NODE_ENV === "development",
-    mockWorker: process.env.CSP_MOCK_WORKER === "1",
-    nonce: mintNonce(),
   })
   request.headers.set("content-security-policy", policy)
-  const response = await route(request)
+  const response = await route(request, dev)
   response.headers.set("Content-Security-Policy", policy)
   return response
 }
 
-async function route(request: NextRequest) {
+// `dev`: whether the path is a /dev page (isDevPath).
+async function route(request: NextRequest, dev: boolean) {
   // The /dev pages need no session, so they are shut here before anything else runs:
   // a 404 for the app's own not-found page, whatever the path's spelling.
-  if (isDevPath(request.nextUrl.pathname) && devToolsOff()) {
+  if (dev && devToolsOff()) {
     return NextResponse.rewrite(new URL("/dev-tools-are-off", request.url), {
       status: 404,
       request,

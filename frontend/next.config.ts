@@ -3,15 +3,20 @@ import { PHASE_PRODUCTION_BUILD, PHASE_PRODUCTION_SERVER } from "next/constants"
 import { readApiConfig } from "./src/lib/api/config"
 import { readSiteUrl } from "./src/lib/auth/site-url"
 import { readCluster } from "./src/lib/solana/cluster-config"
-import { connectSources, headerRules } from "./src/lib/security-headers"
+import {
+  connectSources,
+  cspEnv,
+  type CspSources,
+  headerRules,
+} from "./src/lib/security-headers"
 import { isSupabaseConfigured } from "./src/lib/supabase/env"
 
 // What the CSP depends on is computed when the config loads, from the same NEXT_PUBLIC_*
 // values the bundle inlines, so the policy always names the origins the build was made to
 // call (and allows the mock's worker only in a mock build). It reaches the middleware,
-// which sends the policy with a per-request nonce, through `env`: inlined at build like
-// the NEXT_PUBLIC_* values themselves.
-function cspSources(production: boolean) {
+// which sends the policy with a per-request nonce, through `env` (cspEnv): inlined at
+// build like the NEXT_PUBLIC_* values themselves, and as public.
+function cspSources(production: boolean): CspSources {
   const nodeEnv = production ? "production" : process.env.NODE_ENV
   const cluster = readCluster({
     cluster: process.env.NEXT_PUBLIC_SOLANA_CLUSTER,
@@ -46,12 +51,8 @@ export default function config(phase: string): NextConfig {
   }
   const production =
     phase === PHASE_PRODUCTION_BUILD || phase === PHASE_PRODUCTION_SERVER
-  const csp = cspSources(production)
   return {
-    env: {
-      CSP_CONNECT_SRC: csp.connect.join(" "),
-      CSP_MOCK_WORKER: csp.mockWorker ? "1" : "",
-    },
+    env: cspEnv(cspSources(production)),
     // The framework's name and version are of use to nobody but a scanner.
     poweredByHeader: false,
     // (`next start` serves the headers `next build` wrote to the routes manifest.)

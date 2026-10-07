@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest"
 import {
   connectSources,
   contentSecurityPolicy,
+  cspEnv,
   headerRules,
   mintNonce,
   policyFor,
+  readCspEnv,
   type HeaderOptions,
 } from "./security-headers"
 
@@ -197,6 +199,13 @@ describe("policyFor", () => {
     ).toBe("nextjs#bundler default")
   })
 
+  it("mints a nonce of its own when none is given", () => {
+    const minted = policyFor({ connect, dev: false, development: false })
+    expect(directive(minted, "script-src")).toMatch(
+      /^'self' 'nonce-[A-Za-z0-9+/]{22}==' 'strict-dynamic'$/,
+    )
+  })
+
   it("restricts only framing under `next dev`, whose refresh runtime needs eval", () => {
     expect(at(false, true)).toBe("frame-ancestors 'none'")
     expect(at(true, true)).toBe("frame-ancestors 'self'")
@@ -255,5 +264,22 @@ describe("connectSources", () => {
       rpcUrl: "https://x.example/rpc",
     })
     expect(sources.filter((s) => s === "https://x.example")).toHaveLength(1)
+  })
+})
+
+describe("cspEnv and readCspEnv", () => {
+  it("carry the sources from next.config.ts to the middleware unchanged", () => {
+    const connect = connectSources(real)
+    for (const mockWorker of [false, true]) {
+      expect(readCspEnv(cspEnv({ connect, mockWorker }))).toEqual({
+        connect,
+        mockWorker,
+      })
+    }
+  })
+
+  it("refuse a build that did not set the connect sources", () => {
+    for (const CSP_CONNECT_SRC of [undefined, ""])
+      expect(() => readCspEnv({ CSP_CONNECT_SRC })).toThrow("CSP_CONNECT_SRC")
   })
 })

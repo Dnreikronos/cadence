@@ -1,4 +1,5 @@
-// Response headers set in next.config.ts. Pure functions so a test can read the rules.
+// The security headers: the static ones next.config.ts sets, and the per-request policy
+// the middleware sends. Pure functions so a test can read the rules.
 
 type Origins = {
   // The base URL readApiConfig settled on: the proof service, or the mock origin.
@@ -41,6 +42,37 @@ export function connectSources({
   ]
 }
 
+// What the policy depends on, settled once by next.config.ts from the build's
+// NEXT_PUBLIC_* values: `connect-src` (connectSources) and whether the build runs MSW.
+export type CspSources = { connect: string[]; mockWorker: boolean }
+
+// next.config.ts hands the sources to the middleware through `env`, which inlines them
+// into every bundle, the client's too: public origins only, never a secret.
+export function cspEnv({ connect, mockWorker }: CspSources) {
+  return {
+    CSP_CONNECT_SRC: connect.join(" "),
+    CSP_MOCK_WORKER: mockWorker ? "1" : "",
+  }
+}
+
+// The middleware's side of cspEnv. next.config.ts always sets CSP_CONNECT_SRC, so a
+// missing one is a broken build: it throws (every response fails, and says why) rather
+// than serve a policy that guesses.
+export function readCspEnv(env: {
+  CSP_CONNECT_SRC?: string
+  CSP_MOCK_WORKER?: string
+}): CspSources {
+  if (!env.CSP_CONNECT_SRC) {
+    throw new Error(
+      "CSP_CONNECT_SRC is missing: next.config.ts sets it at build",
+    )
+  }
+  return {
+    connect: env.CSP_CONNECT_SRC.split(" "),
+    mockWorker: env.CSP_MOCK_WORKER === "1",
+  }
+}
+
 // The policy is minted per request by the middleware (src/middleware.ts): Next reads the
 // nonce from the request's own `content-security-policy` header and stamps it on its
 // bootstrap and flight scripts, and `strict-dynamic` passes the trust on to the chunks
@@ -55,6 +87,8 @@ export function connectSources({
 // and the only policy allowed to make them is the one Next's chunk loader creates. A
 // mock-mode build also allows a `default` policy: MSW registers its service worker with
 // a plain string, and src/lib/api/mocks/trusted-types.ts lets that one URL through.
+// Next's other policy, `nextjs`, is made only by the pages router's loaders, and the app
+// has no pages router (and no `next/script`), so it is not listed.
 //
 // No `unsafe-eval`: zod is told not to probe for it (src/lib/zod-config.ts).
 export function contentSecurityPolicy({
@@ -110,12 +144,18 @@ export function policyFor({
   development: boolean
   // Whether the build runs the API mock (MSW) in the browser.
   mockWorker?: boolean
-  nonce: string
+  // A fresh one (mintNonce) when left out; a test passes its own.
+  nonce?: string
 }) {
   const frameAncestors = dev ? "'self'" : "'none'"
   return development
     ? `frame-ancestors ${frameAncestors}`
-    : contentSecurityPolicy({ connect, frameAncestors, mockWorker, nonce })
+    : contentSecurityPolicy({
+        connect,
+        frameAncestors,
+        mockWorker,
+        nonce: nonce ?? mintNonce(),
+      })
 }
 
 export type HeaderOptions = {
