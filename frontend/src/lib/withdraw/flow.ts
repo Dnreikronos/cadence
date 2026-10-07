@@ -11,11 +11,12 @@ import type {
   UnwrapPrepared,
 } from "@/lib/api/schemas"
 import {
-  ConfirmTimeoutError,
+  SentUnsettledError,
   UnexpectedSignerError,
-  UnexpectedTransactionError,
   type SignStep,
 } from "@/lib/api/sign"
+import { flowCheck, type TransactionCheck } from "@/lib/solana/flow-check"
+import { refusalMessage } from "@/lib/solana/inspect"
 import {
   StorageUnavailableError,
   storageBlockedMessage,
@@ -30,13 +31,17 @@ import type { UnwrapAsk } from "./prepare"
 export type WithdrawDeps = {
   // Adds the keys (`prepareUnwrap`).
   prepare: (ask: UnwrapAsk) => Promise<UnwrapPrepared>
-  // Sign, submit and poll `confirm` until the network finalizes. `onSubmitted`
-  // gets the signature the moment the transaction is on the network.
+  // Check, sign, submit and poll `confirm` until the network finalizes. `check` is the
+  // pre-sign check; `onSubmitted` gets the signature the moment the transaction is on
+  // the network.
   signAndConfirm: (
     prepared: UnwrapPrepared,
     confirm: (signature: string) => Promise<Receipt>,
     onStep: (step: SignStep) => void,
-    onSubmitted: (signature: string) => void,
+    extra: {
+      check: TransactionCheck
+      onSubmitted: (signature: string) => void
+    },
   ) => Promise<Receipt>
   confirm: (request: ConfirmRequest) => Promise<Receipt>
 }
@@ -127,13 +132,21 @@ export async function runWithdraw(
         phase = step
         input.onStep?.(step)
       },
-      (sig) => {
-        signature = sig
-        input.onSent?.({
-          request_id: prepared.request_id,
-          last_valid_block_height: prepared.last_valid_block_height,
-          signature: sig,
-        })
+      {
+        // The unwrap of this amount, from the wallet's confidential account to its own
+        // USDC account: the request has no destination.
+        check: flowCheck(input.wallet, {
+          flow: "unwrap",
+          amount: input.amount,
+        }),
+        onSubmitted: (sig) => {
+          signature = sig
+          input.onSent?.({
+            request_id: prepared.request_id,
+            last_valid_block_height: prepared.last_valid_block_height,
+            signature: sig,
+          })
+        },
       },
     )
     input.onResolved?.()
@@ -147,7 +160,7 @@ export async function runWithdraw(
       throw new SentWithdrawalError(
         error,
         signature ??
-          (error instanceof ConfirmTimeoutError ? error.signature : null),
+          (error instanceof SentUnsettledError ? error.signature : null),
       )
     }
     throw error
@@ -193,7 +206,7 @@ export function failureOf(error: unknown): Failure {
   const base = { refreshBalance: false, sent: false, signature: null }
   if (
     error instanceof SentWithdrawalError ||
-    error instanceof ConfirmTimeoutError
+    error instanceof SentUnsettledError
   ) {
     return {
       ...base,
@@ -225,14 +238,8 @@ export function failureOf(error: unknown): Failure {
       retryable: false,
     }
   }
-  if (error instanceof UnexpectedTransactionError) {
-    return {
-      ...base,
-      message:
-        "The withdrawal Cadence prepared doesn't match what you asked for, so it wasn't signed.",
-      retryable: false,
-    }
-  }
+  const refused = refusalMessage(error, "withdrawal")
+  if (refused) return { ...base, message: refused, retryable: false }
   if (error instanceof StorageUnavailableError) {
     return { ...base, message: storageBlockedMessage, retryable: true }
   }

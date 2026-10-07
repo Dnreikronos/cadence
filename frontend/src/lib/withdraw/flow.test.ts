@@ -6,10 +6,10 @@ import type { Receipt, UnwrapPrepared } from "@/lib/api/schemas"
 import {
   ConfirmTimeoutError,
   UnexpectedSignerError,
-  UnexpectedTransactionError,
   signAndConfirm,
 } from "@/lib/api/sign"
 import { KeyInputUnavailableError } from "@/lib/runs/errors"
+import { UnexpectedTransactionError } from "@/lib/solana/inspect"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
   SentWithdrawalError,
@@ -33,11 +33,16 @@ const receipt: Receipt = {
   slot: 1,
   status: "finalized",
 }
+const unwrapBytes = await mockAccountTransaction({
+  kind: "unwrap",
+  wallet,
+  n: 1,
+  amount: BigInt(4_200_000_000),
+})
 const prepared = (level: "none" | "near" | "exact"): UnwrapPrepared => ({
   request_id: "a".repeat(64),
-  transaction: base64FromBytes(
-    mockAccountTransaction({ kind: "unwrap", wallet, n: 1 }),
-  ),
+  // The wallet's own unwrap of `input.amount`, as the pre-sign check reads it.
+  transaction: base64FromBytes(unwrapBytes),
   transaction_version: 1,
   required_signers: [wallet],
   recent_blockhash: "hash",
@@ -49,7 +54,7 @@ const needsAck = () => new ApiError(409, "reveal_risk_not_acknowledged")
 function deps(overrides: Partial<WithdrawDeps> = {}): WithdrawDeps {
   return {
     prepare: vi.fn(async () => prepared("none")),
-    signAndConfirm: vi.fn(async (_p, confirm, _onStep, onSubmitted) => {
+    signAndConfirm: vi.fn(async (_p, confirm, _onStep, { onSubmitted }) => {
       onSubmitted("sig")
       return confirm("sig")
     }),
@@ -151,7 +156,7 @@ describe("runWithdraw", () => {
       submitted?: string,
     ) =>
       deps({
-        signAndConfirm: vi.fn(async (_p, _c, onStep, onSubmitted) => {
+        signAndConfirm: vi.fn(async (_p, _c, onStep, { onSubmitted }) => {
           for (const step of steps) onStep(step)
           if (submitted) onSubmitted(submitted)
           throw error
@@ -230,8 +235,9 @@ describe("runWithdraw", () => {
     const d: WithdrawDeps = {
       prepare: async () => prepared("none"),
       confirm,
-      signAndConfirm: (p, c, onStep, onSubmitted) =>
+      signAndConfirm: (p, c, onStep, extra) =>
         signAndConfirm(p, {
+          ...extra,
           signer: {
             address: wallet,
             signTransaction: async () => {
@@ -242,7 +248,6 @@ describe("runWithdraw", () => {
           finality: async () => "finalized",
           confirm: c,
           onStep,
-          onSubmitted,
         }),
     }
 

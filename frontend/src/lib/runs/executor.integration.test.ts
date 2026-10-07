@@ -18,6 +18,7 @@ import { COMPANY_WALLET, db, resetDb, seedPeople } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
 import { mockSigner, mockSubmit } from "@/lib/api/mocks/signer"
+import { wrapAccounts } from "@/lib/solana/accounts"
 import {
   approvedPayees,
   checkedSign,
@@ -98,6 +99,7 @@ const approved =
   async () => ({
     wallet: COMPANY_WALLET,
     sender: mockTokenAccount(COMPANY_WALLET),
+    mint: (await wrapAccounts()).wrappedMint,
     payees: approvedPayees(entries),
   })
 

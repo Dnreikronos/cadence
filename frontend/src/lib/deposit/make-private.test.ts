@@ -6,11 +6,8 @@ import { mockAccountTransaction } from "@/lib/api/mocks/chain"
 import { COMPANY_WALLET } from "@/lib/api/mocks/db"
 import { mockSigner } from "@/lib/api/mocks/signer"
 import type { Receipt } from "@/lib/api/schemas"
-import {
-  ConfirmTimeoutError,
-  UnexpectedSignerError,
-  UnexpectedTransactionError,
-} from "@/lib/api/sign"
+import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import { UnexpectedTransactionError } from "@/lib/solana/inspect"
 import { SentApplyError } from "@/lib/me/apply-pending"
 import { bindSignAndConfirm } from "@/lib/wallet/sign-and-confirm"
 import { WalletUnavailableError, type Wallet } from "@/lib/wallet/types"
@@ -26,12 +23,23 @@ import type { MakePrivateStep } from "./types"
 
 const SIG = "5SigMockSignature1111111111111111111111111111"
 
-const prepared = (id: string) => ({
+// Bytes the pre-sign check reads as the wallet's own wrap of `amount`, and its apply.
+const wrapOf = (amount: string) =>
+  mockAccountTransaction({
+    kind: "wrap",
+    wallet: COMPANY_WALLET,
+    n: 1,
+    amount: BigInt(amount),
+  })
+const applyBytes = await mockAccountTransaction({
+  kind: "apply-pending",
+  wallet: COMPANY_WALLET,
+  n: 2,
+})
+const wrapBytes = await wrapOf("2500000000")
+const prepared = (id: string, bytes = wrapBytes) => ({
   request_id: id.repeat(64).slice(0, 64),
-  // Bytes the pre-sign check reads as the wallet's own wrap.
-  transaction: base64FromBytes(
-    mockAccountTransaction({ kind: "wrap", wallet: COMPANY_WALLET, n: 1 }),
-  ),
+  transaction: base64FromBytes(bytes),
   transaction_version: 0 as const,
   required_signers: [COMPANY_WALLET],
   recent_blockhash: "blockhash",
@@ -56,7 +64,7 @@ function fakeApi() {
       confirm: vi.fn(async () => receipt("a")),
     },
     accounts: {
-      applyPending: vi.fn(async () => prepared("b")),
+      applyPending: vi.fn(async () => prepared("b", applyBytes)),
       confirmApplyPending: vi.fn(async () => receipt("b")),
     },
   }
@@ -398,7 +406,7 @@ describe("runMakePrivate", () => {
       )
 
       // The retry the screen starts from there never touches the wrap again.
-      api.accounts.applyPending.mockResolvedValue(prepared("b"))
+      api.accounts.applyPending.mockResolvedValue(prepared("b", applyBytes))
       api.wrap.prepare.mockClear()
       await run({ from: "apply" })
       expect(api.wrap.prepare).not.toHaveBeenCalled()
@@ -619,7 +627,7 @@ describe("failureMessage", () => {
     )
     expect(
       failureMessage(new UnexpectedTransactionError("instruction")),
-    ).toMatch(/doesn't match this deposit/)
+    ).toMatch(/doesn't match what you asked for/)
   })
 
   it("uses the contract's copy for an API error and never a raw message", () => {

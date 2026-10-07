@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { ApiError, ContractError } from "@/lib/api/errors"
-import {
-  ConfirmTimeoutError,
-  UnexpectedSignerError,
-  UnexpectedTransactionError,
-} from "@/lib/api/sign"
+import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import { UnexpectedTransactionError } from "@/lib/solana/inspect"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
   PaymentNotOnChainError,

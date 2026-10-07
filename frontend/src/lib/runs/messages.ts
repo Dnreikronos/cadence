@@ -1,9 +1,6 @@
 import { ApiError, isApiError, messageFor } from "@/lib/api/errors"
-import {
-  ConfirmTimeoutError,
-  UnexpectedSignerError,
-  UnexpectedTransactionError,
-} from "@/lib/api/sign"
+import { SentUnsettledError, UnexpectedSignerError } from "@/lib/api/sign"
+import { UnexpectedTransactionError } from "@/lib/solana/inspect"
 import {
   StorageUnavailableError,
   storageBlockedMessage,
@@ -107,12 +104,12 @@ export type Failure = {
 export function describeFailure(error: unknown): Failure {
   if (
     error instanceof SentPaymentError ||
-    error instanceof ConfirmTimeoutError
+    error instanceof SentUnsettledError
   ) {
     const signature =
       error instanceof SentPaymentError
         ? (error.signature ??
-          (error.original instanceof ConfirmTimeoutError
+          (error.original instanceof SentUnsettledError
             ? error.original.signature
             : null))
         : error.signature

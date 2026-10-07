@@ -13,11 +13,8 @@ import { ApiError } from "@/lib/api/errors"
 import { db, resetDb } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
-import {
-  ConfirmTimeoutError,
-  UnexpectedSignerError,
-  UnexpectedTransactionError,
-} from "@/lib/api/sign"
+import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import { UnexpectedTransactionError } from "@/lib/solana/inspect"
 import type { Submission } from "@/lib/submissions"
 import { memoryStore } from "./memory-store"
 import {

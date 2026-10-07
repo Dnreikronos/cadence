@@ -14,8 +14,9 @@ export function bindSignAndConfirm(wallet: Wallet) {
   return async (
     prepared: Prepared,
     confirm: (signature: string) => Promise<Receipt>,
-    onStep?: (step: SignStep) => void,
-    extra: Extra = {},
+    onStep: ((step: SignStep) => void) | undefined,
+    // The flow's pre-sign check, required, and what else the call needs.
+    extra: Extra,
   ): Promise<Receipt> => {
     if (wallet.status !== "ready") {
       throw new WalletUnavailableError(wallet.reason ?? "no wallet")

@@ -7,6 +7,9 @@ import {
   expect,
   it,
 } from "vitest"
+import { wrapAccounts } from "@/lib/solana/accounts"
+import { flowCheck } from "@/lib/solana/flow-check"
+import { checkConfidentialTransfer } from "@/lib/solana/inspect"
 import { ZodError } from "zod"
 import { createApiClient } from "./client"
 import { ApiError, ContractError, messageFor } from "./errors"
@@ -230,6 +233,7 @@ describe("authentication and errors", () => {
       signer,
       submit,
       finality: mockFinality,
+      check: flowCheck(COMPANY_WALLET, { flow: "wrap", amount: "1000000" }),
       sleep: async () => scenarios.set("instant"),
       confirm: (signature) => {
         confirms++
@@ -260,6 +264,7 @@ describe("prepare, sign, confirm", () => {
       signer,
       submit,
       finality: mockFinality,
+      check: flowCheck(COMPANY_WALLET, { flow: "wrap", amount: "2500000000" }),
       sleep: noSleep,
       onStep: (step) => steps.push(step),
       confirm: (signature) => {
@@ -303,6 +308,7 @@ describe("prepare, sign, confirm", () => {
         },
         submit,
         finality: mockFinality,
+        check: flowCheck(COMPANY_WALLET, { flow: "wrap", amount: "1000000" }),
         confirm: async () => {
           throw new Error("unreachable")
         },
@@ -328,6 +334,13 @@ describe("prepare, sign, confirm", () => {
         signer,
         submit,
         finality: mockFinality,
+        check: async (transaction) =>
+          checkConfidentialTransfer(transaction, {
+            wallet: COMPANY_WALLET,
+            sender: COMPANY_WALLET,
+            destination: ME_WALLET,
+            mint: (await wrapAccounts()).wrappedMint,
+          }),
         sleep: noSleep,
         confirm: (signature) => {
           confirms++

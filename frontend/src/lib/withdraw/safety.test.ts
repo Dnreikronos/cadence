@@ -75,7 +75,7 @@ const heightAt = (time: number) => 321 - 150 + Math.floor((time - 1_000) / 400)
 function flowWith(submit: () => void): WithdrawDeps {
   return {
     prepare: vi.fn(async () => prepared),
-    signAndConfirm: vi.fn(async (_p, _confirm, onStep, onSubmitted) => {
+    signAndConfirm: vi.fn(async (_p, _confirm, onStep, { onSubmitted }) => {
       for (const step of ["signing", "submitting"] as SignStep[]) onStep(step)
       submit()
       onSubmitted(SIG)

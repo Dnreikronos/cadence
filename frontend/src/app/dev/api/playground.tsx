@@ -14,6 +14,9 @@ import { mockSigner, mockSubmit } from "@/lib/api/mocks/signer"
 import { mockFinality, mockTokenAccount } from "@/lib/api/mocks/chain"
 import type { RunConfirmRequest } from "@/lib/api/schemas"
 import { confirmPosition, signablesOf } from "@/lib/runs/executor"
+import { wrapAccounts } from "@/lib/solana/accounts"
+import { flowCheck } from "@/lib/solana/flow-check"
+import { checkConfidentialTransfer } from "@/lib/solana/inspect"
 import {
   scenarioNames,
   scenarios,
@@ -85,6 +88,10 @@ export function ApiPlayground() {
         submit: mockSubmit,
         finality: mockFinality,
         onStep: (step) => write(`  ${step}`),
+        check: flowCheck(COMPANY_WALLET, {
+          flow: "wrap",
+          amount: "2500000000",
+        }),
         confirm: (signature) =>
           api.wrap.confirm({ request_id: prepared.request_id, signature }),
       })
@@ -109,6 +116,7 @@ export function ApiPlayground() {
           api.runs.confirm(runId, { payments: [item] }),
         retry: api.runs.retry,
       }
+      const { wrappedMint } = await wrapAccounts()
       // In position order, stopping at the first that does not finalize.
       for (const payment of signablesOf(created)) {
         try {
@@ -116,6 +124,14 @@ export function ApiPlayground() {
             signer: mockSigner(COMPANY_WALLET),
             submit: mockSubmit,
             finality: mockFinality,
+            // To the account asked for at this position.
+            check: (transaction) =>
+              checkConfidentialTransfer(transaction, {
+                wallet: COMPANY_WALLET,
+                sender: mockTokenAccount(COMPANY_WALLET),
+                destination: mockTokenAccount(people[payment.position].id),
+                mint: wrappedMint,
+              }),
             confirm: (signature) =>
               confirmPosition(runApi, created.run_id, payment, signature),
           })

@@ -6,11 +6,11 @@ import type {
   RunRetryRequest,
 } from "@/lib/api/schemas"
 import { isSignable } from "@/lib/api/schemas"
-import { ConfirmTimeoutError, type SignStep } from "@/lib/api/sign"
+import { SentUnsettledError, type SignStep } from "@/lib/api/sign"
+import type { TransactionCheck } from "@/lib/solana/flow-check"
 import {
   UnexpectedTransactionError,
   checkConfidentialTransfer,
-  type InspectedTransaction,
 } from "@/lib/solana/inspect"
 import {
   ResponseMismatchError,
@@ -52,7 +52,7 @@ type SignChecked = (
   prepared: Parameters<SignAndConfirm>[0],
   confirm: (signature: string) => Promise<Receipt>,
   onStep: ((step: SignStep) => void) | undefined,
-  extra: Extra & { check: (transaction: InspectedTransaction) => void },
+  extra: Extra & { check: TransactionCheck },
 ) => Promise<Receipt>
 
 // The accounts a run may pay, by position, as the admin approved them. Each account is
@@ -72,12 +72,14 @@ export function approvedPayees(
   return new Set(payees.values()).size === payees.size ? payees : new Map()
 }
 
-// What a run's payments may do: move money from the company's account to the account the
-// admin approved for each position, signed by the company's wallet. `sender` is the
-// company's token account as this app derives it, never as the service names it.
+// What a run's payments may do: move money in the wrapped mint from the company's account
+// to the account the admin approved for each position, signed by the company's wallet.
+// `sender` is the company's token account and `mint` the wrapped mint as this app derives
+// them, never as the service names them.
 export type RunAllowlist = {
   wallet: string
   sender: string
+  mint: string
   payees: Payees
 }
 
@@ -91,7 +93,7 @@ export function checkedSign(
   allowlist: () => Promise<RunAllowlist>,
 ): SignAndConfirm {
   return async (prepared, confirm, onStep, extra) => {
-    const { wallet, sender, payees } = await allowlist()
+    const { wallet, sender, mint, payees } = await allowlist()
     const destination = payees.get(prepared.position)
     return sign(prepared, confirm, onStep, {
       ...extra,
@@ -105,8 +107,9 @@ export function checkedSign(
         }
         checkConfidentialTransfer(transaction, {
           wallet,
-          source: sender,
+          sender,
           destination,
+          mint,
         })
       },
     })
@@ -242,7 +245,7 @@ export async function payOne(
         ? new SentPaymentError(
             error,
             signature ??
-              (error instanceof ConfirmTimeoutError ? error.signature : null),
+              (error instanceof SentUnsettledError ? error.signature : null),
           )
         : error,
     )

@@ -29,6 +29,7 @@ import {
   recordOnMockChain,
 } from "./chain"
 import { scenarios, timing } from "./scenario"
+import { walletAccounts, wrapAccounts } from "@/lib/solana/accounts"
 
 // Mock of the proof service, written against docs/dev/API_CONTRACT.md. It answers
 // in the contract's shapes and errors with only `{ "error": code }`.
@@ -145,6 +146,7 @@ function replay(kind: string, receipt: s.Receipt, signature: string) {
 
 const hex = (n: number) => n.toString(16).padStart(64, "0")
 
+// The devnet wrapped mint, as `wrapAccounts` derives it.
 const MINT = "CGL4U4VC8arAEUDxLh7c6K4rJnZr1T6faK9QQRn2sYmb"
 
 // The prepare response around a transaction built for request `n`.
@@ -166,17 +168,18 @@ function prepared(
   }
 }
 
-// A transaction on the wallet's own account: wrap (version 0), unwrap, configure and
-// apply pending.
-function preparedFor(
+// A transaction on the wallet's own accounts: wrap (version 0), unwrap, configure and
+// apply pending, for `amount` base units when it moves any.
+async function preparedFor(
   kind: Parameters<typeof mockAccountTransaction>[0]["kind"],
   wallet: string,
+  { amount, setup }: { amount?: bigint; setup?: boolean } = {},
 ) {
   const n = nextId()
   return prepared(
     wallet,
     n,
-    mockAccountTransaction({ kind, wallet, n }),
+    await mockAccountTransaction({ kind, wallet, n, amount, setup }),
     kind === "wrap" ? 0 : 1,
   )
 }
@@ -195,7 +198,7 @@ async function preparedTransfer(
     destination: scenarios.has("foreign-destination")
       ? mockTokenAccount("someone no one approved")
       : destination,
-    mint: MINT,
+    mint: (await wrapAccounts()).wrappedMint,
     n,
   })
   return prepared(wallet, n, transaction, 1)
@@ -582,11 +585,14 @@ export const handlers = [
     if (BigInt(data.amount) > db.publicUsdc) {
       return fail(409, "insufficient_usdc")
     }
-    const p = preparedFor("wrap", data.company_wallet)
+    const p = await preparedFor("wrap", data.company_wallet, {
+      amount: BigInt(data.amount),
+      setup: Boolean(data.setup),
+    })
     remember("wrap", p, data.company_wallet, BigInt(data.amount))
     return HttpResponse.json({
       ...p,
-      destination: mockTokenAccount(data.company_wallet),
+      destination: (await walletAccounts(data.company_wallet)).confidential,
       mint: MINT,
       deposit_state: "pending_after_confirmation",
     })
@@ -749,7 +755,7 @@ export const handlers = [
     if (risk.level !== "none" && !data.acknowledge_reveal_risk) {
       return fail(409, "reveal_risk_not_acknowledged")
     }
-    const p = preparedFor("unwrap", data.wallet)
+    const p = await preparedFor("unwrap", data.wallet, { amount })
     remember("unwrap", p, data.wallet, amount)
     return HttpResponse.json({
       ...p,
@@ -772,7 +778,7 @@ export const handlers = [
     if (stopped) return stopped
     const { data, error } = await parse(request, s.walletRequestSchema)
     if (error) return error
-    const p = preparedFor("configure", data.wallet)
+    const p = await preparedFor("configure", data.wallet)
     remember("accounts/configure", p, data.wallet)
     return HttpResponse.json(p)
   }),
@@ -784,7 +790,7 @@ export const handlers = [
     if (stopped) return stopped
     const { data, error } = await parse(request, s.walletRequestSchema)
     if (error) return error
-    const p = preparedFor("apply-pending", data.wallet)
+    const p = await preparedFor("apply-pending", data.wallet)
     remember("accounts/apply-pending", p, data.wallet)
     return HttpResponse.json(p)
   }),

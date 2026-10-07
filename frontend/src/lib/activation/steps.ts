@@ -2,6 +2,7 @@ import { base58FromBytes } from "@/lib/api/base58"
 import { isApiError } from "@/lib/api/errors"
 import type { createApiClient } from "@/lib/api/client"
 import { ConfirmTimeoutError } from "@/lib/api/sign"
+import { flowCheck } from "@/lib/solana/flow-check"
 import type { bindSignAndConfirm } from "@/lib/wallet/sign-and-confirm"
 import { WalletUnavailableError, type Wallet } from "@/lib/wallet/types"
 import {
@@ -118,6 +119,8 @@ export function createRunners({
             undefined,
             {
               signal,
+              // Only the wallet's own confidential account, configured.
+              check: flowCheck(address, { flow: "configure" }),
               onSubmitted: (signature) =>
                 attempts.set(address, {
                   request_id: prepared.request_id,

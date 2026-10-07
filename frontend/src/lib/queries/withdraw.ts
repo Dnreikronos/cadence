@@ -290,8 +290,8 @@ export function useWithdraw(viewer: ViewerScope) {
               prepare: (request) => api.unwrap.prepare(request),
               userId: currentUserId,
             }),
-          signAndConfirm: (prepared, confirm, onStep, onSubmitted) =>
-            signAndConfirm(prepared, confirm, onStep, { onSubmitted }),
+          signAndConfirm: (prepared, confirm, onStep, extra) =>
+            signAndConfirm(prepared, confirm, onStep, extra),
           confirm: (request) => api.unwrap.confirm(request),
         },
         {

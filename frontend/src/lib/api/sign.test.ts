@@ -3,12 +3,15 @@ import { ApiError } from "./errors"
 import { base64FromBytes } from "./base64"
 import { mockAccountTransaction } from "./mocks/chain"
 import type { Receipt } from "./schemas"
+import { flowCheck } from "@/lib/solana/flow-check"
+import { walletAccounts } from "@/lib/solana/accounts"
+import { UnexpectedTransactionError, checkFlow } from "@/lib/solana/inspect"
 import {
   ConfirmTimeoutError,
   FinalityMismatchError,
+  SentUnsettledError,
   UnexpectedSignerError,
-  UnexpectedTransactionError,
-  signAndConfirm,
+  signAndConfirm as signAndConfirmChecked,
   type Signer,
 } from "./sign"
 
@@ -20,12 +23,30 @@ const receipt: Receipt = {
   slot: 1,
   status: "finalized",
 }
+const applyOf = (wallet: string, n: number) =>
+  mockAccountTransaction({ kind: "apply-pending", wallet, n })
 const prepared = {
-  transaction: base64FromBytes(
-    mockAccountTransaction({ kind: "apply-pending", wallet: ADDRESS, n: 1 }),
-  ),
+  transaction: base64FromBytes(await applyOf(ADDRESS, 1)),
   required_signers: [ADDRESS],
 }
+
+type Options = Parameters<typeof signAndConfirmChecked>[1]
+
+// The apply's own pre-sign check, with the accounts derived up front so it answers at
+// once, as fake timers need.
+const accounts = await walletAccounts(ADDRESS)
+const applyCheck: Options["check"] = (transaction) =>
+  checkFlow(transaction, { flow: "apply", accounts })
+
+// `signAndConfirm` with the apply's check unless a test names another.
+const signAndConfirm = (
+  p: Parameters<typeof signAndConfirmChecked>[0],
+  options: Omit<Options, "check"> & { check?: Options["check"] },
+) =>
+  signAndConfirmChecked(p, {
+    ...options,
+    check: options.check ?? applyCheck,
+  })
 
 const signer: Signer = {
   address: ADDRESS,
@@ -429,11 +450,7 @@ describe("signAndConfirm: the pre-sign check", () => {
 
   it("never signs a transaction another wallet pays for", async () => {
     const error = await refused(
-      mockAccountTransaction({
-        kind: "apply-pending",
-        wallet: "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin",
-        n: 2,
-      }),
+      await applyOf("9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin", 2),
     )
     expect((error as UnexpectedTransactionError).reason).toBe("signer")
   })
@@ -442,14 +459,19 @@ describe("signAndConfirm: the pre-sign check", () => {
     const check = vi.fn(() => {
       throw new UnexpectedTransactionError("destination")
     })
-    const error = await refused(
-      mockAccountTransaction({ kind: "apply-pending", wallet: ADDRESS, n: 3 }),
-      check,
-    )
+    const error = await refused(await applyOf(ADDRESS, 3), check)
     expect((error as UnexpectedTransactionError).reason).toBe("destination")
     expect(check).toHaveBeenCalledWith(
       expect.objectContaining({ feePayer: ADDRESS, version: 1 }),
     )
+  })
+
+  it("waits for a check that derives accounts before it answers", async () => {
+    const error = await refused(
+      await applyOf(ADDRESS, 4),
+      flowCheck(ADDRESS, { flow: "wrap", amount: "1" }),
+    )
+    expect(error).toBeInstanceOf(UnexpectedTransactionError)
   })
 })
 
@@ -527,7 +549,8 @@ describe("signAndConfirm: the network's own read", () => {
     )
     expect(error).toBeInstanceOf(FinalityMismatchError)
     // Still a sent payment whose outcome is unknown to the screens: never sent again.
-    expect(error).toBeInstanceOf(ConfirmTimeoutError)
+    expect(error).toBeInstanceOf(SentUnsettledError)
+    expect(error).not.toBeInstanceOf(ConfirmTimeoutError)
     expect((error as FinalityMismatchError).signature).toBe(SIGNATURE)
     expect(c.slept).toEqual([])
   })

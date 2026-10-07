@@ -17,12 +17,21 @@ import {
   setTransactionMessageLoadedAccountsDataSizeLimit,
   type Instruction,
 } from "@solana/kit"
+import { walletAccounts, type WalletAccounts } from "@/lib/solana/accounts"
 import {
   CLOSE_CONTEXT_STATE,
+  CONFIDENTIAL_TRANSFER_ACCOUNT_EXTENSION,
   CONFIDENTIAL_TRANSFER_EXTENSION,
   CREATE_ACCOUNT_WITH_SEED,
+  CREATE_IDEMPOTENT,
+  INSTRUCTIONS_SYSVAR,
+  REALLOCATE,
   confidential,
+  confidentialDataLength,
   programs,
+  proofContextSpace,
+  tokenWrap,
+  verifyProof,
 } from "@/lib/solana/programs"
 import type { Finality } from "@/lib/solana/finality"
 import { base58FromBytes } from "../base58"
@@ -163,9 +172,19 @@ const filler = (length: number, seed: number) =>
 const encodeAddress = (value: string) =>
   getAddressEncoder().encode(address(value))
 
+const u64 = (value: bigint | number) => getU64Encoder().encode(value)
+
+// Devnet's rent per byte, lower than the default the pre-sign check bounds it by.
+const contextRent = (space: number) => (128 + space) * 5_080
+
 // System `CreateAccountWithSeed`: the wallet funds a proof context account owned by
-// the ZK proof program.
-function createContext(wallet: string, context: string, seed: string) {
+// the ZK proof program, with its rent and at its size.
+function createContext(
+  wallet: string,
+  context: string,
+  seed: string,
+  space: number,
+) {
   const text = new TextEncoder().encode(seed)
   return {
     program: programs.system,
@@ -176,10 +195,10 @@ function createContext(wallet: string, context: string, seed: string) {
     data: Uint8Array.from([
       ...getU32Encoder().encode(CREATE_ACCOUNT_WITH_SEED),
       ...encodeAddress(wallet),
-      ...getU64Encoder().encode(text.length),
+      ...u64(text.length),
       ...text,
-      ...getU64Encoder().encode(2_000_000),
-      ...getU64Encoder().encode(256),
+      ...u64(contextRent(space)),
+      ...u64(space),
       ...encodeAddress(programs.zkProof),
     ]),
   }
@@ -201,7 +220,11 @@ export async function mockTransferTransaction({
   mint: string
   n: number
 }) {
-  const verifyTags = [3, 12, 7]
+  const verifyTags = [
+    verifyProof.ciphertextCommitmentEquality,
+    verifyProof.batchedGroupedCiphertext3HandlesValidity,
+    verifyProof.batchedRangeProofU128,
+  ]
   const contexts = await Promise.all(
     verifyTags.map(async (_, i) => {
       const seed = base58FromBytes(stretch(`context:${n}:${i}`))
@@ -221,7 +244,7 @@ export async function mockTransferTransaction({
     n,
     instructions: [
       ...contexts.flatMap(({ context, seed }, i) => [
-        createContext(wallet, context, seed),
+        createContext(wallet, context, seed, proofContextSpace[verifyTags[i]]),
         {
           program: programs.zkProof,
           accounts: [
@@ -243,7 +266,7 @@ export async function mockTransferTransaction({
         data: Uint8Array.from([
           CONFIDENTIAL_TRANSFER_EXTENSION,
           confidential.transfer,
-          ...filler(96, n),
+          ...filler(confidentialDataLength[confidential.transfer] - 2, n),
         ]),
       },
       ...contexts.map(({ context }) => ({
@@ -259,50 +282,182 @@ export async function mockTransferTransaction({
   })
 }
 
-// One Token-2022 confidential instruction on the wallet's own account, for the routes
-// that move nothing to anyone else (configure, apply pending), plus what wrap and
-// unwrap add around it. Shaped enough for the pre-sign check, not like the service's.
-export function mockAccountTransaction({
+// ---- The wallet's own accounts: wrap, unwrap, configure, apply pending -----------
+
+// `CreateIdempotent` of the wallet's associated account, paid by the wallet.
+const createAccount = (
+  wallet: string,
+  account: string,
+  mint: string,
+  tokenProgram: string,
+): MockInstruction => ({
+  program: programs.associatedToken,
+  accounts: [
+    [wallet, true, true],
+    [account, true, false],
+    [wallet, false, false],
+    [mint, false, false],
+    [programs.system, false, false],
+    [tokenProgram, false, false],
+  ],
+  data: Uint8Array.of(CREATE_IDEMPOTENT),
+})
+
+// A Token-2022 confidential transfer extension step: its sub-tag, then its fixed-length
+// data, which starts with the public amount when it has one.
+const confidentialStep = (
+  sub: number,
+  accounts: MockInstruction["accounts"],
+  n: number,
+  amount?: bigint,
+): MockInstruction => {
+  const head = amount === undefined ? [] : [...u64(amount)]
+  return {
+    program: programs.token2022,
+    accounts,
+    data: Uint8Array.from([
+      CONFIDENTIAL_TRANSFER_EXTENSION,
+      sub,
+      ...head,
+      ...filler(confidentialDataLength[sub] - 2 - head.length, n),
+    ]),
+  }
+}
+
+// A proof verified in the instruction itself: no context account, nothing written.
+const verifyInline = (tag: number, n: number): MockInstruction => ({
+  program: programs.zkProof,
+  accounts: [],
+  data: Uint8Array.from([tag, ...filler(64, n)]),
+})
+
+// Reallocate, configure and its pubkey validity proof: the confidential extension on
+// the wallet's own account (`wrap.rs`, when it has none yet).
+const configureSteps = (own: WalletAccounts, n: number): MockInstruction[] => [
+  createAccount(
+    own.wallet,
+    own.confidential,
+    own.wrappedMint,
+    programs.token2022,
+  ),
+  {
+    program: programs.token2022,
+    accounts: [
+      [own.confidential, true, false],
+      [own.wallet, true, true],
+      [programs.system, false, false],
+      [own.wallet, false, true],
+    ],
+    data: Uint8Array.of(REALLOCATE, CONFIDENTIAL_TRANSFER_ACCOUNT_EXTENSION, 0),
+  },
+  confidentialStep(
+    confidential.configureAccount,
+    [
+      [own.confidential, true, false],
+      [own.wrappedMint, false, false],
+      [INSTRUCTIONS_SYSVAR, false, false],
+      [own.wallet, false, true],
+    ],
+    n,
+  ),
+  verifyInline(verifyProof.pubkeyValidity, n),
+]
+
+// A transaction on the wallet's own accounts, shaped like the service's: the wrap
+// (`wrap.rs`, version 0) and unwrap (`unwrap.rs`). Configure and apply pending have no
+// service builder yet; they are the extension's own steps on the same account.
+// `setup` is a wrap that also configures the account first; `amount` is the wrap's or
+// the unwrap's, in base units.
+export async function mockAccountTransaction({
   kind,
   wallet,
   n,
+  amount = BigInt(1),
+  setup = false,
 }: {
   kind: "wrap" | "unwrap" | "configure" | "apply-pending"
   wallet: string
   n: number
+  amount?: bigint
+  setup?: boolean
 }) {
-  const account = mockTokenAccount(wallet)
-  const sub = {
-    wrap: confidential.deposit,
-    unwrap: confidential.withdraw,
-    configure: confidential.configureAccount,
-    "apply-pending": confidential.applyPendingBalance,
-  }[kind]
-  const own = {
-    program: programs.token2022,
-    accounts: [
-      [account, true, false],
-      [wallet, false, true],
-    ] as const,
-    data: Uint8Array.from([CONFIDENTIAL_TRANSFER_EXTENSION, sub]),
-  }
-  const wrapProgram = {
+  const own = await walletAccounts(wallet)
+  const tokenWrapStep = (
+    tag: number,
+    accounts: MockInstruction["accounts"],
+  ) => ({
     program: programs.tokenWrap,
-    accounts: [
-      [account, true, false],
-      [wallet, false, true],
-    ] as const,
-    data: Uint8Array.of(kind === "wrap" ? 1 : 2),
+    accounts,
+    data: Uint8Array.from([tag, ...u64(amount)]),
+  })
+  const instructions: Record<typeof kind, MockInstruction[]> = {
+    wrap: [
+      ...(setup ? configureSteps(own, n) : []),
+      tokenWrapStep(tokenWrap.wrap, [
+        [own.confidential, true, false],
+        [own.wrappedMint, true, false],
+        [own.wrapAuthority, false, false],
+        [programs.token, false, false],
+        [programs.token2022, false, false],
+        [own.usdc, true, false],
+        [own.usdcMint, false, false],
+        [own.escrow, true, false],
+        [wallet, false, true],
+      ]),
+      confidentialStep(
+        confidential.deposit,
+        [
+          [own.confidential, true, false],
+          [own.wrappedMint, false, false],
+          [wallet, false, true],
+        ],
+        n,
+        amount,
+      ),
+    ],
+    unwrap: [
+      createAccount(wallet, own.usdc, own.usdcMint, programs.token),
+      confidentialStep(
+        confidential.withdraw,
+        [
+          [own.confidential, true, false],
+          [own.wrappedMint, false, false],
+          [INSTRUCTIONS_SYSVAR, false, false],
+          [wallet, false, true],
+        ],
+        n,
+        amount,
+      ),
+      verifyInline(verifyProof.ciphertextCommitmentEquality, n),
+      verifyInline(verifyProof.batchedRangeProofU64, n + 1),
+      tokenWrapStep(tokenWrap.unwrap, [
+        [own.escrow, true, false],
+        [own.usdc, true, false],
+        [own.wrapAuthority, false, false],
+        [own.usdcMint, false, false],
+        [programs.token2022, false, false],
+        [programs.token, false, false],
+        [own.confidential, true, false],
+        [own.wrappedMint, true, false],
+        [wallet, false, true],
+      ]),
+    ],
+    configure: configureSteps(own, n),
+    "apply-pending": [
+      confidentialStep(
+        confidential.applyPendingBalance,
+        [
+          [own.confidential, true, false],
+          [wallet, false, true],
+        ],
+        n,
+      ),
+    ],
   }
   return mockTransaction({
     version: kind === "wrap" ? 0 : 1,
     wallet,
     n,
-    instructions:
-      kind === "wrap"
-        ? [wrapProgram, own]
-        : kind === "unwrap"
-          ? [own, wrapProgram]
-          : [own],
+    instructions: instructions[kind],
   })
 }

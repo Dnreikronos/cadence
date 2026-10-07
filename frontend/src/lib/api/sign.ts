@@ -1,14 +1,9 @@
 import type { Finality } from "@/lib/solana/finality"
-import {
-  checkSignedOnlyBy,
-  inspectTransaction,
-  type InspectedTransaction,
-} from "@/lib/solana/inspect"
+import type { TransactionCheck } from "@/lib/solana/flow-check"
+import { checkAllowed, inspectTransaction } from "@/lib/solana/inspect"
 import { ApiError } from "./errors"
 import { bytesFromBase64 } from "./base64"
 import type { Prepared, Receipt } from "./schemas"
-
-export { UnexpectedTransactionError } from "@/lib/solana/inspect"
 
 // The user's wallet. Today that is a Turnkey embedded wallet (#77); the web app
 // only needs these two members.
@@ -33,20 +28,30 @@ export class UnexpectedSignerError extends Error {
   }
 }
 
-export class ConfirmTimeoutError extends Error {
-  // The transaction was submitted: the caller can still look it up.
-  constructor(readonly signature: string) {
-    super("The network did not confirm in time")
+// The transaction was submitted and its outcome is not settled: the caller can still
+// look it up with the signature, and must never send another in its place. Every screen
+// reads its two causes below the same way.
+export class SentUnsettledError extends Error {
+  constructor(
+    readonly signature: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = "SentUnsettledError"
+  }
+}
+
+export class ConfirmTimeoutError extends SentUnsettledError {
+  constructor(signature: string) {
+    super(signature, "The network did not confirm in time")
     this.name = "ConfirmTimeoutError"
   }
 }
 
-// The service confirmed, and the network's own read says the transaction failed. Still
-// a timeout to every screen: sent, outcome not settled, never sent again.
-export class FinalityMismatchError extends ConfirmTimeoutError {
+// The service confirmed, and the network's own read says the transaction failed.
+export class FinalityMismatchError extends SentUnsettledError {
   constructor(signature: string) {
-    super(signature)
-    this.message = "The network does not show the confirmed transaction"
+    super(signature, "The network does not show the confirmed transaction")
     this.name = "FinalityMismatchError"
   }
 }
@@ -59,10 +64,11 @@ type Options = {
   // The browser's own read of the network (`lib/solana/finality.ts`), asked after the
   // service's receipt: the receipt is returned only once this says finalized too.
   finality: (signature: string, signal?: AbortSignal) => Promise<Finality>
-  // What the flow adds to the pre-sign check (`lib/solana/inspect.ts`), on the decoded
-  // transaction: throws `UnexpectedTransactionError` to refuse it. A payment passes
-  // `checkConfidentialTransfer` with the accounts the admin approved.
-  check?: (transaction: InspectedTransaction) => void
+  // The flow's pre-sign check (`lib/solana/inspect.ts` `checkFlow`), on the decoded
+  // transaction: throws `UnexpectedTransactionError` to refuse it. Required: nothing is
+  // signed without knowing what it is for. A payment passes `checkConfidentialTransfer`
+  // with the account the admin approved for its position; the other flows `flowCheck`.
+  check: TransactionCheck
   onStep?: (step: SignStep) => void
   // Called as soon as the transaction is on the network, so the signature is
   // never lost if confirming fails or the user leaves.
@@ -118,8 +124,8 @@ export async function signAndConfirm(
   }
   const bytes = bytesFromBase64(prepared.transaction)
   const transaction = inspectTransaction(bytes)
-  checkSignedOnlyBy(transaction, signer.address)
-  check?.(transaction)
+  checkAllowed(transaction, signer.address)
+  await check(transaction)
   signal?.throwIfAborted()
 
   onStep?.("signing")

@@ -29,6 +29,7 @@ import {
   type SentPayment,
   type Viewer,
 } from "./evidence"
+import { wrapAccounts } from "@/lib/solana/accounts"
 import {
   approvedPayees,
   checkedSign,
@@ -156,11 +157,13 @@ export function useRunSigner(viewer: Viewer) {
         })
       return {
         runId,
-        // The company's wallet, its own token account as this app derives it, and the
-        // approved accounts: what every payment's transaction is checked against.
+        // The company's wallet, its own token account and the wrapped mint as this app
+        // derives them, and the approved accounts: what every payment's transaction is
+        // checked against.
         sign: checkedSign(sign, async () => ({
           wallet: wallet.address,
           sender: await senderAccountFor(wallet.address),
+          mint: (await wrapAccounts()).wrappedMint,
           payees,
         })),
         api: runApi,

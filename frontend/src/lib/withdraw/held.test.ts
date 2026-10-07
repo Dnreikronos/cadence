@@ -208,7 +208,7 @@ describe("what runWithdraw leaves behind", () => {
   ): WithdrawDeps {
     return {
       prepare: vi.fn(async () => prepared),
-      signAndConfirm: vi.fn(async (_p, _confirm, onStep, onSubmitted) => {
+      signAndConfirm: vi.fn(async (_p, _confirm, onStep, { onSubmitted }) => {
         for (const step of ["signing", "submitting"] as SignStep[]) {
           onStep(step)
         }
