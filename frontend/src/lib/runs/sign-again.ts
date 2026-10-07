@@ -51,15 +51,16 @@ export type { RunApi }
 // Signs what this page holds for the run, in order, from the first one. A cancelled
 // signature keeps it and the ones after it held, to sign again. Any other stop lets go of
 // the ones after it: their proofs assumed the stopped payment landed, so they must never
-// be sent, and nothing was. A held transaction past its blockhash is let go of too, with
-// every one after it.
+// be sent, and nothing was. A held transaction past its blockhash (by the chain's height,
+// read once for the run) is let go of too, with every one after it.
 export async function continueRun(context: RunContext, held: HeldStore) {
   const pending = held.ofRun(context.runId)
+  const height = pending.length > 0 ? await held.height(context.signal) : null
   const ready = []
   for (const prepared of pending) {
     if (
-      held.lookup(paymentKey(context.runId, prepared.position)).status !==
-      "ready"
+      held.lookup(paymentKey(context.runId, prepared.position), height)
+        .status !== "ready"
     ) {
       break
     }

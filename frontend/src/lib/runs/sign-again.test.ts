@@ -23,7 +23,7 @@ import {
   type RunContext,
   type Signable,
 } from "./executor"
-import { createHeldStore, heldMaxAgeMs, keepsHeld } from "./held"
+import { createHeldStore, heldMarginBlocks, keepsHeld } from "./held"
 import { cancelledMessage, notSentMessage } from "./messages"
 import { continueRun, runEvents } from "./sign-again"
 import {
@@ -73,8 +73,8 @@ function harness(signer: Signer, submit = mockSubmit) {
     retry,
   }
   const create = vi.spyOn(api.runs, "create")
-  let clock = 0
-  const held = createHeldStore(() => clock)
+  let height = 0
+  const held = createHeldStore(async () => height)
   let local: LocalRows = {}
   const dispatch = (action: LocalAction) =>
     (local = localReducer(local, action))
@@ -104,7 +104,8 @@ function harness(signer: Signer, submit = mockSubmit) {
     retry,
     create,
     local: () => local,
-    advance: (ms: number) => (clock += ms),
+    // The finalized block height the held store reads from now on.
+    at: (finalized: number) => (height = finalized),
     // What the hook's `start` does: hold everything, then sign in order.
     start: (run: Run) => {
       for (const prepared of signablesOf(run)) {
@@ -173,7 +174,7 @@ describe("a cancelled signature in a run", () => {
     expect(canRetry(row)).toBe(false)
     expect(canRecheck(row)).toBe(false)
     expect(row.message).toBe(cancelledMessage)
-    expect(h.held.lookup(paymentKey(run.run_id, 0)).status).toBe("ready")
+    expect(h.held.lookup(paymentKey(run.run_id, 0), 0).status).toBe("ready")
     expect((await h.row(run, 1)).status).toBe("pending")
     // The service would refuse a retry: a prepared transaction can still land.
     await expect(
@@ -207,7 +208,7 @@ describe("a cancelled signature in a run", () => {
     await h.signAgain(run)
 
     expect(h.local()[paymentKey(run.run_id, 0)].status).toBe("cancelled")
-    expect(h.held.lookup(paymentKey(run.run_id, 0)).status).toBe("ready")
+    expect(h.held.lookup(paymentKey(run.run_id, 0), 0).status).toBe("ready")
     expect(h.held.ofRun(run.run_id)).toHaveLength(2)
   })
 
@@ -309,7 +310,7 @@ describe("signing again past the life of a blockhash", () => {
     await h.start(run)
     expect(signTransaction).toHaveBeenCalledTimes(1)
 
-    h.advance(heldMaxAgeMs)
+    h.at(run.payments[0].last_valid_block_height! - heldMarginBlocks + 1)
     await h.signAgain(run)
 
     // Nothing was signed or submitted again, and nothing was prepared.
@@ -324,7 +325,7 @@ describe("signing again past the life of a blockhash", () => {
     }
   })
 
-  it("still signs it again one millisecond before", async () => {
+  it("still signs it again at the last height that leaves it time to land", async () => {
     scenarios.set("instant")
     const run = await createRun()
     const { signer, state } = switchable()
@@ -332,7 +333,7 @@ describe("signing again past the life of a blockhash", () => {
     await h.start(run)
     state.refuse = false
 
-    h.advance(heldMaxAgeMs - 1)
+    h.at(run.payments[0].last_valid_block_height! - heldMarginBlocks)
     await h.signAgain(run)
 
     expect(h.local()[paymentKey(run.run_id, 0)].status).toBe("confirmed")
@@ -353,7 +354,7 @@ describe("signing again past the life of a blockhash", () => {
 
 describe("what each event does to a held transaction", () => {
   const held = (...ids: string[]) => {
-    const store = createHeldStore(() => 0)
+    const store = createHeldStore(async () => 0)
     for (const [position, id] of ids.entries()) {
       const prepared: Signable = {
         position,
