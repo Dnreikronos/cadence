@@ -380,9 +380,10 @@ transfer_not_found`, because transfer records are looked up by `request_id` and
   person cancelled sent nothing, so the same unsent transaction is signed again
   ("Sign again"), only while its `last_valid_block_height` is at least 75 blocks
   (about 30 s) above the finalized block height, and never after a failure past the
-  submit. Closer than that (the finalized height trails the tip by about 32 blocks),
-  when the height cannot be read, or after a reload, it is prepared again or a new run
-  is started.
+  submit. The height is read again before each held payment is offered, so one that
+  went stale while the ones before it were signed is let go of, not sent late. Closer
+  than that (the finalized height trails the tip by about 32 blocks), when the height
+  cannot be read, or after a reload, it is prepared again or a new run is started.
 - A transaction may have landed even if the browser lost the response.
   **Before preparing a replacement for a payment that was already submitted,**
   reconcile: confirm the earlier `request_id` first. Preparing a fresh deposit
@@ -391,16 +392,29 @@ transfer_not_found`, because transfer records are looked up by `request_id` and
   `request_id` and signature (idempotent for one signature, so it prepares nothing),
   every 3 s and at least `Retry-After`. `200` is `confirmed`. `transaction_failed` is
   `failed`. Any other non-retryable answer, including `404 wrap_not_found`, is
-  `unknown`, never `failed`. `transaction_not_finalized` is only conclusive with the
-  chain: before each ask the web app reads `getBlockHeight` at `finalized` commitment
-  (the RPC of `NEXT_PUBLIC_SOLANA_RPC_URL`; the mock's clock-driven height in mock
-  mode), and once that height is above the saved `last_valid_block_height` the
-  transaction can no longer land. A "not finalized" given after such a read makes it
-  `failed`, and a new one may be prepared: anything that landed in time is finalized
-  by then. A record with no signature, or a service that did not answer that last ask,
-  is `unknown` once the height is past. A height that cannot be read says nothing, and
-  the asking goes on. Whether the service's own read can trail the browser's is an
-  assumption (question 28).
+  `unknown`, never `failed`. `transaction_not_finalized` is read with the chain:
+  before each ask the web app reads `getBlockHeight` at `finalized` commitment (the RPC
+  of `NEXT_PUBLIC_SOLANA_RPC_URL`; the mock's clock-driven height in mock mode), and
+  once that height is above the saved `last_valid_block_height` the transaction can no
+  longer land. For a wrap, an apply and a withdrawal, a "not finalized" given after
+  such a read makes it `failed`, and a new one may be prepared. **That is not proof.**
+  The service answers "not finalized" whenever its finalized `getTransaction` finds
+  nothing (`wrap.rs`), so two cases would be misread as a failure that may then be paid
+  again: a transaction that landed in its last blocks while the service's RPC still
+  trails the browser's, and an executed one missing from RPC history (`gotchas.md`).
+  The web app accepts that residual risk for these three flows, so that a wrap can
+  still resolve as failed; whether the service's read can trail the browser's is
+  question 28. A payroll payment never takes that step (below). A record with no
+  signature, or a service that did not answer that last ask, is `unknown` once the
+  height is past. A height that cannot be read says nothing and the asking goes on,
+  but after 40 failed reads in a row (about two minutes) it stops as `unknown`, and the
+  screen offers "Check again".
+- **Reconciling a payroll payment.** The same asking, with one difference: a "not
+  finalized" past the blockhash is `unknown`, never `failed`. The implemented
+  `/runs/:id/confirm` never replaces a payment on absence alone (`runs_confirm.rs`),
+  and past the blockhash the browser's finalized height may simply be ahead of the
+  service's. Only `transaction_failed` makes a saved payment failed; anything else
+  leaves it sent, with its signature, for "Check again".
 
 - **Wrap records are deleted.** The service removes unsigned wrap records whose
   blockhash has expired and that are more than 24 hours old
@@ -486,7 +500,7 @@ last_valid_block_height?, at }`, one per amount. It **does** hold the amount, wh
   outcome is final. On mount, each one with a signature is re-confirmed; it is released
   when the network confirmed it, refused it (`transaction_failed`), or the service said
   it was not on chain once the finalized block height was past its
-  `last_valid_block_height`, and otherwise stays held (a lookup that fails, a `404`, or
+  `last_valid_block_height` (not proof: question 28), and otherwise stays held (a lookup that fails, a `404`, or
   no signature or block height to ask with).
 - Payroll keeps, for each payment that reached the submit step, `{ run_id, position,
 attempt, request_id, person_id, signature | null, last_valid_block_height, at }`
@@ -1431,11 +1445,12 @@ Each points to the [open question](#open-questions) that asks it.
   new one; and a wrap or apply that the client re-confirms later is found by the saved
   `request_id` and signature. (Questions 27 and 6.)
 - **`expired` implies the payment did not land.** The screen offers Retry for an
-  `expired` payment, and the deposit and apply reconciliation call a transaction
-  failed once the finalized block height is past its last valid one and the service
-  still says "not finalized". Both treat that as proof that a new transaction cannot
-  double-pay. The implemented `/runs` says the opposite for a
-  missing history: an expired attempt with no finalized history stays unresolved.
+  `expired` payment, and the deposit, apply and withdrawal reconciliation call a
+  transaction failed once the finalized block height is past its last valid one and the
+  service still says "not finalized". Both treat that as enough to send a new
+  transaction, which double-pays if the first landed and the service's read trailed or
+  lost it. The implemented `/runs` says the opposite for a missing history: an expired
+  attempt with no finalized history stays unresolved, and payroll recovery follows it.
   (Questions 28 and 14.)
 - **Invite re-send replaces the old row.** The people screen shows "invited" and
   "invite expired" from the person's pending invite row, and re-sends through the same
