@@ -15,9 +15,9 @@ mode off (see "Not done").
 
 Everything in "What works" and "Things that would have bitten us" was run, not read,
 unless it says "from the docs" or says otherwise. Each item in "Security review" is
-tagged with how it is known. The code is in `spikes/embedded-wallet/` (scripts and a
-throwaway Next page), and `spikes/embedded-wallet/README.md` says how to rerun it. The
-Next page (`spikes/embedded-wallet/web/`) has since been removed from `main` because
+tagged with how it is known. The scripts are in `spikes/embedded-wallet/`, and
+`spikes/embedded-wallet/README.md` says how to rerun them. The runs also used a
+throwaway Next page (`spikes/embedded-wallet/web/`), since removed from `main` because
 of its unauthenticated routes; its last version is in git history at `475646b`. The
 review findings were applied to the code after the runs described here, and the
 committed scripts were not re-run (see "Not done").
@@ -237,12 +237,13 @@ in code/docs]**, **[from general knowledge of Turnkey/Supabase, to verify]** or
    sub-organizations is [unverified]: an attacker hosting their own OIDC issuer could
    otherwise create unlimited sub-organizations and consume quota.
 
-Spike-specific: two unauthenticated dev routes and a tunnel that exposes the whole
-local Supabase gateway. The README now carries the warnings, the dev server binds to
-`127.0.0.1`, `/api/dev-session` refuses production and non-`@cadence.test` emails,
-and `/api/turnkey-login` ignores `email` and `expirationSeconds` from the body, takes
-the email from the token and fixes the session length at one hour. Those changes
-were applied after the runs described above and not re-run.
+Spike-specific: the removed Next page had two unauthenticated dev routes, and the
+spike used a tunnel that exposes the whole local Supabase gateway. Before the page was
+removed, the README carried the warnings, the dev server bound to `127.0.0.1`,
+`/api/dev-session` refused production and non-`@cadence.test` emails, and
+`/api/turnkey-login` ignored `email` and `expirationSeconds` from the body, took the
+email from the token and fixed the session length at one hour. Those changes were
+applied after the runs described above and not re-run.
 
 Found while reviewing, and worth knowing before #78: the spike's routes read the
 Turnkey credentials with `readFileSync(path.join(process.cwd(), "..", ".env"))`. Next's
