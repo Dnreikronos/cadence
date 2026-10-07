@@ -418,12 +418,16 @@ function kindOf(instruction: InspectedInstruction, context: Context): Kind {
         return refuse("instruction")
       }
       // A proof verified in the instruction writes nothing. One verified into a context
-      // must go into a context this transaction made, of the size that proof fills,
-      // with the wallet as the only authority that can close it.
+      // must be a proof the service keeps in one, go into a context this transaction
+      // made, of the size that proof fills, with the wallet as the only authority that
+      // can close it.
       if (named.length === 0) return "verify"
+      const space = proofContextSpace[data[0]]
       if (
         named.length !== 2 ||
-        created.get(named[0]) !== proofContextSpace[data[0]] ||
+        space === undefined ||
+        !created.has(named[0]) ||
+        created.get(named[0]) !== space ||
         named[1] !== wallet
       ) {
         return refuse("context")

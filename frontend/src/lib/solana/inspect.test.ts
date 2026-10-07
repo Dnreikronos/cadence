@@ -388,6 +388,25 @@ describe("proof contexts", () => {
     ).toBe("context")
   })
 
+  it.each([
+    ["configure", "configure", 4],
+    ["unwrap", "unwrap", 6],
+  ] as const)(
+    "refuses a %s proof verified into an account this transaction did not create",
+    async (kind, flow, tag) => {
+      const tx = await account(kind)
+      const at = indexOf(tx, programs.zkProof, tag)
+      const into = changed(tx, at, (ix) => ({
+        ...ix,
+        accounts: [
+          { address: OTHER, writable: true, signer: false },
+          { address: WALLET, writable: false, signer: true },
+        ],
+      }))
+      expect(refusal(() => checkFlow(into, expect_(flow)))).toBe("context")
+    },
+  )
+
   it("refuses a proof the flow does not use", async () => {
     const tx = await transfer()
     const at = indexOf(tx, programs.zkProof, 3)
