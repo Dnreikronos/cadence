@@ -74,7 +74,8 @@ function harness(signer: Signer, submit = mockSubmit) {
   }
   const create = vi.spyOn(api.runs, "create")
   let height = 0
-  const held = createHeldStore(async () => height)
+  const blockHeight = vi.fn(async () => height)
+  const held = createHeldStore()
   let local: LocalRows = {}
   const dispatch = (action: LocalAction) =>
     (local = localReducer(local, action))
@@ -93,28 +94,31 @@ function harness(signer: Signer, submit = mockSubmit) {
         time += ms
       },
     })
-  const context = (run: Run): RunContext => ({
+  const context = (run: Run, signal?: AbortSignal): RunContext => ({
     runId: run.run_id,
     sign,
     api: runApi,
     events,
+    signal,
   })
   return {
     held,
+    blockHeight,
     retry,
     create,
     local: () => local,
-    // The finalized block height the held store reads from now on.
+    // The finalized block height the run reads from now on.
     at: (finalized: number) => (height = finalized),
     // What the hook's `start` does: hold everything, then sign in order.
     start: (run: Run) => {
       for (const prepared of signablesOf(run)) {
         held.hold(paymentKey(run.run_id, prepared.position), prepared)
       }
-      return continueRun(context(run), held)
+      return continueRun(context(run), held, blockHeight)
     },
     // What the hook's `signAgain` does.
-    signAgain: (run: Run) => continueRun(context(run), held),
+    signAgain: (run: Run, signal?: AbortSignal) =>
+      continueRun(context(run, signal), held, blockHeight),
     // How a row reads against what the service says now.
     row: async (run: Run, position: number) => {
       const read = await api.runs.get(run.run_id)
@@ -339,6 +343,69 @@ describe("signing again past the life of a blockhash", () => {
     expect(h.local()[paymentKey(run.run_id, 0)].status).toBe("confirmed")
   })
 
+  it("reads the height again before each one, and lets go of one that went stale meanwhile", async () => {
+    scenarios.set("instant")
+    const run = await createRun()
+    const [first, second] = run.payments
+    const { signer, state } = switchable()
+    const h = harness(signer)
+    await h.start(run)
+    state.refuse = false
+
+    // The first still has time; by the time it is confirmed, the second has none.
+    h.blockHeight.mockReset()
+    h.blockHeight
+      .mockResolvedValueOnce(first.last_valid_block_height! - heldMarginBlocks)
+      .mockResolvedValueOnce(
+        second.last_valid_block_height! - heldMarginBlocks + 1,
+      )
+    await h.signAgain(run)
+
+    expect(h.blockHeight).toHaveBeenCalledTimes(2)
+    expect(state.signed).toHaveLength(1)
+    expect((await h.row(run, 0)).status).toBe("confirmed")
+    expect(await h.row(run, 1)).toMatchObject({
+      status: "not-sent",
+      message: notSentMessage,
+    })
+    expect(h.held.ofRun(run.run_id)).toEqual([])
+  })
+
+  it("lets go of them when the height cannot be read, since nothing says they are live", async () => {
+    scenarios.set("instant")
+    const run = await createRun()
+    const { signer, state } = switchable()
+    const h = harness(signer)
+    await h.start(run)
+    state.refuse = false
+
+    h.blockHeight.mockRejectedValueOnce(new TypeError("Failed to fetch"))
+    await h.signAgain(run)
+
+    expect(state.signed).toEqual([])
+    expect(h.held.ofRun(run.run_id)).toEqual([])
+    expect((await h.row(run, 0)).status).toBe("not-sent")
+  })
+
+  it("keeps them held when the page is left during the height read", async () => {
+    scenarios.set("instant")
+    const run = await createRun()
+    const { signer, state } = switchable()
+    const h = harness(signer)
+    await h.start(run)
+    state.refuse = false
+
+    const leave = new AbortController()
+    h.blockHeight.mockImplementationOnce(async () => {
+      leave.abort(new Error("left"))
+      throw leave.signal.reason
+    })
+    await h.signAgain(run, leave.signal)
+
+    expect(state.signed).toEqual([])
+    expect(h.held.ofRun(run.run_id).map((p) => p.position)).toEqual([0, 1])
+  })
+
   it("signs nothing for a run this page does not hold", async () => {
     const run = await createRun()
     const base = mockSigner(COMPANY_WALLET)
@@ -354,7 +421,7 @@ describe("signing again past the life of a blockhash", () => {
 
 describe("what each event does to a held transaction", () => {
   const held = (...ids: string[]) => {
-    const store = createHeldStore(async () => 0)
+    const store = createHeldStore()
     for (const [position, id] of ids.entries()) {
       const prepared: Signable = {
         position,

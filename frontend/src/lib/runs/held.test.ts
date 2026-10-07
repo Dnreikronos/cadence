@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { paymentKey, type Signable } from "./executor"
 import { createHeldStore, heldMarginBlocks, lookupHeld } from "./held"
 
@@ -58,7 +58,7 @@ describe("lookupHeld", () => {
 
 describe("the held store", () => {
   it("holds a run's transactions by position, each with its own last valid block", () => {
-    const store = createHeldStore(async () => 0)
+    const store = createHeldStore()
     store.hold(key(1), prepared(1))
     store.hold(key(2), prepared(2))
     expect(store.has(key(1))).toBe(true)
@@ -69,18 +69,8 @@ describe("the held store", () => {
     expect(store.lookup(key(1), lastReady(2))).toEqual({ status: "stale" })
   })
 
-  it("reads the finalized height, and none when the read fails", async () => {
-    const heights = vi
-      .fn<() => Promise<number>>()
-      .mockResolvedValueOnce(812)
-      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
-    const store = createHeldStore(heights)
-    await expect(store.height()).resolves.toBe(812)
-    await expect(store.height()).resolves.toBeNull()
-  })
-
   it("keeps a transaction when it is only looked at, and loses it once dropped", () => {
-    const store = createHeldStore(async () => 0)
+    const store = createHeldStore()
     store.hold(key(1), prepared(1))
     store.lookup(key(1), 0)
     store.lookup(key(1), 0)
@@ -91,7 +81,7 @@ describe("the held store", () => {
   })
 
   it("replaces a transaction that a retry prepared for the same position", () => {
-    const store = createHeldStore(async () => 0)
+    const store = createHeldStore()
     store.hold(key(1), prepared(1))
     const replacement = {
       ...prepared(1),
@@ -106,7 +96,7 @@ describe("the held store", () => {
   })
 
   it("lists one run's held transactions in position order, and no other run's", () => {
-    const store = createHeldStore(async () => 0)
+    const store = createHeldStore()
     store.hold(key(2), prepared(2))
     store.hold(key(0), prepared(0))
     store.hold(paymentKey("another-run", 1), prepared(1))

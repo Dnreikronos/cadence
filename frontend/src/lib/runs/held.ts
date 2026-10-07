@@ -1,4 +1,3 @@
-import { readBlockHeight } from "@/lib/solana/block-height"
 import { isSignatureRejection } from "./errors"
 import type { Signable } from "./executor"
 
@@ -45,9 +44,7 @@ export function lookupHeld(
 // `SentPaymentError`, so it is never a refusal, and the transaction is dropped.
 export const keepsHeld = (error: unknown) => isSignatureRejection(error)
 
-export function createHeldStore(
-  blockHeight: (signal?: AbortSignal) => Promise<number> = readBlockHeight,
-) {
+export function createHeldStore() {
   const held = new Map<string, Held>()
   return {
     // By `paymentKey`.
@@ -55,15 +52,6 @@ export function createHeldStore(
       held.set(key, { prepared })
     },
     has: (key: string) => held.has(key),
-    // The finalized block height to look them up at, read once for a whole run; null
-    // when it cannot be read, or the page was left meanwhile.
-    height: async (signal?: AbortSignal): Promise<number | null> => {
-      try {
-        return await blockHeight(signal)
-      } catch {
-        return null
-      }
-    },
     // Looks, and keeps it: a signature cancelled again leaves it held.
     lookup: (key: string, height: number | null) =>
       lookupHeld(held.get(key), height),
