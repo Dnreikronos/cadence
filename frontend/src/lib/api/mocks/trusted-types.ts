@@ -7,22 +7,22 @@
 export const MOCK_WORKER_URL = "/mockServiceWorker.js"
 
 type TrustedTypes = {
+  defaultPolicy: unknown
   createPolicy(
     name: string,
     rules: { createScriptURL(url: string): string | null },
   ): unknown
 }
 
-let installed = false
-
+// A page has one `default` policy, and creating it again throws. The browser knows
+// whether it exists, so a second call (startMockWorker retrying a failed start) is a no-op.
 export function allowMockWorkerUrl() {
   const trustedTypes = (globalThis as { trustedTypes?: TrustedTypes })
     .trustedTypes
-  if (installed || !trustedTypes) return
+  if (!trustedTypes || trustedTypes.defaultPolicy) return
   const worker = new URL(MOCK_WORKER_URL, location.href).href
   trustedTypes.createPolicy("default", {
     createScriptURL: (url) =>
       new URL(url, location.href).href === worker ? url : null,
   })
-  installed = true
 }

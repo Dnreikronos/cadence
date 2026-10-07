@@ -8,8 +8,21 @@ afterEach(() => {
 })
 
 async function install() {
-  const createPolicy = vi.fn()
-  vi.stubGlobal("trustedTypes", { createPolicy })
+  // As the browser does: the created `default` policy becomes `defaultPolicy`.
+  const trustedTypes = {
+    defaultPolicy: null as unknown,
+    createPolicy: vi.fn(
+      (
+        name: string,
+        rules: { createScriptURL(url: string): string | null },
+      ) => {
+        if (trustedTypes.defaultPolicy) throw new Error("already exists")
+        trustedTypes.defaultPolicy = rules
+      },
+    ),
+  }
+  const createPolicy = trustedTypes.createPolicy
+  vi.stubGlobal("trustedTypes", trustedTypes)
   const { allowMockWorkerUrl } = await import("./trusted-types")
   allowMockWorkerUrl()
   allowMockWorkerUrl()
@@ -17,7 +30,7 @@ async function install() {
 }
 
 describe("allowMockWorkerUrl", () => {
-  it("creates the default policy once, with script URLs only", async () => {
+  it("creates the default policy once, however often it is called, with script URLs only", async () => {
     const createPolicy = await install()
     expect(createPolicy).toHaveBeenCalledTimes(1)
     const [name, rules] = createPolicy.mock.calls[0]

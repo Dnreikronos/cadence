@@ -11,12 +11,14 @@ let started: Promise<void> | undefined
 // Starts the service worker once. `?mock=slow,partial-failure` in the page URL
 // turns scenarios on, and `window.cadenceMock` changes them while the app runs.
 export function startMockWorker() {
-  allowMockWorkerUrl()
-  started ??= worker
-    .start({
-      serviceWorker: { url: MOCK_WORKER_URL },
-      onUnhandledFrame: "bypass",
-      quiet: true,
+  started ??= Promise.resolve()
+    .then(() => {
+      allowMockWorkerUrl()
+      return worker.start({
+        serviceWorker: { url: MOCK_WORKER_URL },
+        onUnhandledFrame: "bypass",
+        quiet: true,
+      })
     })
     .then(() => {
       const fromUrl = new URLSearchParams(location.search).get("mock")
