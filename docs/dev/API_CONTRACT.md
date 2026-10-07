@@ -555,8 +555,8 @@ them. A wrap found confirmed or refused is cleared as before.
 `{ "status": "ok", "build_sha": "<sha>", "rpc_reachable": true }` with `200`, or
 `status: "unavailable"` and `rpc_reachable: false` with `503` when the Solana RPC
 cannot be reached (`health.rs:12-25`). The client has `api.health()`, which returns
-the body of a `503` instead of throwing, but **no screen calls it yet**: there is no
-service-status banner.
+the body of a `503` instead of throwing. The signed-in shell polls it and shows a
+service-status notice when the service is down or answers `unavailable`.
 
 ### Wrap: public USDC to private ✅
 
