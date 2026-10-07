@@ -1209,8 +1209,9 @@ and each one is a place where a screen has only been exercised against the mock.
 
 - **Runs.** The mock cannot see a network: a retry that includes a live prepared
   position with its signature always answers `transaction_not_finalized` (the service
-  would record it if it had landed), it never verifies a signature or the wallet link,
-  the token accounts are derived from the owner, not read from a chain, and a payment
+  would record it if it had landed), it never verifies a signature or a well-formed
+  wallet link (a malformed one on an unlinked wallet is `wallet_access_denied`, as the
+  service answers, and a linked wallet's is not looked at), the token accounts are derived from the owner, not read from a chain, and a payment
   the company's available balance cannot cover fails as `transaction_failed`.
   `GET /company/people/accounts` is proposed, not implemented.
 - **Unwrap.** The mock answers a malformed `aes_key` with `invalid_balance_key` and a
