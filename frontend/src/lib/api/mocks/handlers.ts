@@ -21,8 +21,12 @@ import {
 } from "./db"
 import {
   MOCK_BLOCKHASH_LIFETIME,
+  mockAccountTransaction,
   mockBlockHeight,
+  mockBlockhash,
   mockTokenAccount,
+  mockTransferTransaction,
+  recordOnMockChain,
 } from "./chain"
 import { scenarios, timing } from "./scenario"
 
@@ -141,21 +145,60 @@ function replay(kind: string, receipt: s.Receipt, signature: string) {
 
 const hex = (n: number) => n.toString(16).padStart(64, "0")
 
-function prepared(wallet: string, version: 0 | 1 = 1) {
-  const n = nextId()
-  const transaction = base64FromBytes(
-    Uint8Array.from({ length: 96 }, (_, i) => (n * 7 + i) % 256),
-  )
+const MINT = "CGL4U4VC8arAEUDxLh7c6K4rJnZr1T6faK9QQRn2sYmb"
+
+// The prepare response around a transaction built for request `n`.
+function prepared(
+  wallet: string,
+  n: number,
+  transaction: Uint8Array,
+  version: 0 | 1,
+) {
   return {
     request_id: hex(n),
-    transaction,
+    transaction: base64FromBytes(transaction),
     transaction_version: version,
     required_signers: [wallet],
-    recent_blockhash: `MockBlockhash${n}1111111111111111111111111111`,
+    recent_blockhash: mockBlockhash(n),
     // The height the screens read in mock mode (lib/solana/block-height.ts) passes it
     // about a minute from now.
     last_valid_block_height: mockBlockHeight() + MOCK_BLOCKHASH_LIFETIME,
   }
+}
+
+// A transaction on the wallet's own account: wrap (version 0), unwrap, configure and
+// apply pending.
+function preparedFor(
+  kind: Parameters<typeof mockAccountTransaction>[0]["kind"],
+  wallet: string,
+) {
+  const n = nextId()
+  return prepared(
+    wallet,
+    n,
+    mockAccountTransaction({ kind, wallet, n }),
+    kind === "wrap" ? 0 : 1,
+  )
+}
+
+// One confidential payment. Under "foreign-destination" it pays an account no one
+// approved, which the pre-sign check must refuse.
+async function preparedTransfer(
+  wallet: string,
+  source: string,
+  destination: string,
+) {
+  const n = nextId()
+  const transaction = await mockTransferTransaction({
+    wallet,
+    source,
+    destination: scenarios.has("foreign-destination")
+      ? mockTokenAccount("someone no one approved")
+      : destination,
+    mint: MINT,
+    n,
+  })
+  return prepared(wallet, n, transaction, 1)
 }
 
 function remember(
@@ -201,12 +244,16 @@ async function confirmHandler(request: Request, kind: string) {
     return fail(404, notFoundCode[kind] ?? "request_not_found")
   }
   if (record.receipt) return replay(kind, record.receipt, data.signature)
-  if (scenarios.has("tx-failed")) return fail(409, "transaction_failed")
+  if (scenarios.has("tx-failed")) {
+    recordOnMockChain(data.signature, "failed")
+    return fail(409, "transaction_failed")
+  }
   record.polls += 1
   if (stillPending(record.polls)) return fail(409, "transaction_not_finalized")
   const rejected = applyEffect(kind, record.wallet, record.amount)
   if (rejected) return rejected
   record.receipt = receiptFor(data.request_id, data.signature)
+  recordOnMockChain(data.signature, "finalized")
   // The service compares the credit counter after the apply, so this answer can
   // come for an apply that did land: confirming the same signature again returns
   // its receipt.
@@ -374,7 +421,11 @@ const cannotPrepare = (payment: MockRunPayment) =>
 
 // A new attempt for a position: prepared with a fresh transaction, or
 // `preparation_failed` with no transaction when its account cannot be paid.
-function prepareAttempt(payment: MockRunPayment, attempt: number) {
+async function prepareAttempt(
+  run: MockRun,
+  payment: MockRunPayment,
+  attempt: number,
+) {
   Object.assign(payment, {
     attempt,
     signature: null,
@@ -392,7 +443,11 @@ function prepareAttempt(payment: MockRunPayment, attempt: number) {
         : "proof_generation_failed"
     return
   }
-  const p = prepared(COMPANY_WALLET)
+  const p = await preparedTransfer(
+    run.companyWallet,
+    run.sender,
+    payment.destination,
+  )
   payment.status = "prepared"
   payment.requestId = p.request_id
   payment.error = null
@@ -412,7 +467,7 @@ function runBody(
     run_id: run.id,
     company_wallet: run.companyWallet,
     sender: run.sender,
-    mint: "CGL4U4VC8arAEUDxLh7c6K4rJnZr1T6faK9QQRn2sYmb",
+    mint: MINT,
     transaction_version: 1,
     required_signers: [run.companyWallet],
     status: statuses.every((status) => status === "finalized")
@@ -459,6 +514,7 @@ function confirmPosition(
   if (payment.status !== "prepared") return "payment_not_prepared"
   if (payment.requestId !== item.request_id) return "payment_attempt_changed"
   if (scenarios.has("tx-failed") || rejectsFirst(payment)) {
+    recordOnMockChain(item.signature, "failed")
     payment.status = "failed"
     payment.error = "transaction_failed"
     payment.signature = item.signature
@@ -470,9 +526,11 @@ function confirmPosition(
   // The proof was built for the balance as it stood: one that no longer covers the
   // amount fails on the network.
   if (payment.amount > db.company.available) {
+    recordOnMockChain(item.signature, "failed")
     payment.status = "failed"
     payment.error = "transaction_failed"
   } else {
+    recordOnMockChain(item.signature, "finalized")
     db.company.available -= payment.amount
     payment.status = "finalized"
     if (payment.personId === ME_PERSON) db.me.pending += payment.amount
@@ -524,12 +582,12 @@ export const handlers = [
     if (BigInt(data.amount) > db.publicUsdc) {
       return fail(409, "insufficient_usdc")
     }
-    const p = prepared(data.company_wallet, 0)
+    const p = preparedFor("wrap", data.company_wallet)
     remember("wrap", p, data.company_wallet, BigInt(data.amount))
     return HttpResponse.json({
       ...p,
-      destination: "6xHqMockTokenAccount222222222222222222222222",
-      mint: "CGL4U4VC8arAEUDxLh7c6K4rJnZr1T6faK9QQRn2sYmb",
+      destination: mockTokenAccount(data.company_wallet),
+      mint: MINT,
       deposit_state: "pending_after_confirmation",
     })
   }),
@@ -543,13 +601,17 @@ export const handlers = [
     if (stopped) return stopped
     const { data, error } = await parse(request, s.transferRequestSchema)
     if (error) return error
-    const p = prepared(data.company_wallet, 1)
+    const p = await preparedTransfer(
+      data.company_wallet,
+      data.sender,
+      data.recipient,
+    )
     remember("transfer", p, data.company_wallet, BigInt(data.amount))
     return HttpResponse.json({
       ...p,
       sender: data.sender,
       destination: data.recipient,
-      mint: "CGL4U4VC8arAEUDxLh7c6K4rJnZr1T6faK9QQRn2sYmb",
+      mint: MINT,
     })
   }),
   http.post(at("/transfer/confirm"), ({ request }) =>
@@ -592,7 +654,7 @@ export const handlers = [
         polls: 0,
       })),
     }
-    for (const payment of run.payments) prepareAttempt(payment, 0)
+    for (const payment of run.payments) await prepareAttempt(run, payment, 0)
     db.runs.set(run.id, run)
     return HttpResponse.json(
       runBody(run, new Set(run.payments.map((p) => p.position))),
@@ -663,7 +725,7 @@ export const handlers = [
       const item = asked.get(payment.position)
       if (!item || payment.status === "finalized") continue
       payment.amount = BigInt(item.amount)
-      prepareAttempt(payment, payment.attempt + 1)
+      await prepareAttempt(run, payment, payment.attempt + 1)
       rebuilt.add(payment.position)
     }
     return HttpResponse.json(runBody(run, rebuilt, errors))
@@ -687,7 +749,7 @@ export const handlers = [
     if (risk.level !== "none" && !data.acknowledge_reveal_risk) {
       return fail(409, "reveal_risk_not_acknowledged")
     }
-    const p = prepared(data.wallet, 1)
+    const p = preparedFor("unwrap", data.wallet)
     remember("unwrap", p, data.wallet, amount)
     return HttpResponse.json({
       ...p,
@@ -710,7 +772,7 @@ export const handlers = [
     if (stopped) return stopped
     const { data, error } = await parse(request, s.walletRequestSchema)
     if (error) return error
-    const p = prepared(data.wallet, 1)
+    const p = preparedFor("configure", data.wallet)
     remember("accounts/configure", p, data.wallet)
     return HttpResponse.json(p)
   }),
@@ -722,7 +784,7 @@ export const handlers = [
     if (stopped) return stopped
     const { data, error } = await parse(request, s.walletRequestSchema)
     if (error) return error
-    const p = prepared(data.wallet, 1)
+    const p = preparedFor("apply-pending", data.wallet)
     remember("accounts/apply-pending", p, data.wallet)
     return HttpResponse.json(p)
   }),
