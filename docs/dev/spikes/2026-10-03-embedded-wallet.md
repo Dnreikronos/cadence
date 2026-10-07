@@ -17,6 +17,8 @@ Everything in "What works" and "Things that would have bitten us" was run, not r
 unless it says "from the docs" or says otherwise. Each item in "Security review" is
 tagged with how it is known. The code is in `spikes/embedded-wallet/` (scripts and a
 throwaway Next page), and `spikes/embedded-wallet/README.md` says how to rerun it. The
+Next page (`spikes/embedded-wallet/web/`) has since been removed from `main` because
+of its unauthenticated routes; its last version is in git history at `475646b`. The
 review findings were applied to the code after the runs described here, and the
 committed scripts were not re-run (see "Not done").
 
@@ -270,7 +272,8 @@ platform, and never from a file read by path. The build folder was deleted.
 - Deleting the old key on renewal.
 - Verifying the signature of a signed transaction against its message. Only
   `signMessage` was verified (in Node).
-- The web page ran with `reactStrictMode: false` (`web/next.config.mjs`); Next's
+- The web page ran with `reactStrictMode: false` (`web/next.config.mjs`, now only in
+  git history at `475646b`); Next's
   default is `true`. "Works under the App Router" was shown with strict mode off.
 - The committed scripts' check for the parent key was corrected after the run (it now
   runs after the login) and has not been re-run. The same goes for the other

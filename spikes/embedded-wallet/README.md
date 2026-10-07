@@ -8,10 +8,7 @@ Do not import anything from here into the product.
 > **Warning: local only.** Run this against a **throwaway Turnkey organization** and
 > a **local Supabase** (`supabase start`), never against a real organization or a
 > hosted Supabase project. The scripts create real sub-organizations and use real
-> credentials, and the web app has two unauthenticated routes (`/api/dev-session` mints
-> a login for a test email with the Supabase service role; `/api/turnkey-login` uses the
-> Turnkey parent key). **Never deploy the web app**, and never bind it to anything but
-> `127.0.0.1` (`npm run dev` does that).
+> credentials.
 
 ## What is here
 
@@ -24,9 +21,9 @@ Do not import anything from here into the product.
 - `whoami.mjs`: a read-only check that the Turnkey API key works.
 - `hook.sql`: the Custom Access Token Hook that copies `user_metadata.tknonce` into
   the access token.
-- `web/`: a small Next page that runs the same flow in a browser with
-  `@turnkey/react-wallet-kit`. Its routes stand in for #78 (`/api/turnkey-login`) and
-  for the email sign-in (`/api/dev-session`).
+- `web/` (removed from `main`; in git history at `475646b`): a small Next page that
+  ran the same flow in a browser with `@turnkey/react-wallet-kit`. Its routes stood in
+  for #78 (`/api/turnkey-login`) and for the email sign-in (`/api/dev-session`).
 
 ## Rerunning it
 
@@ -102,17 +99,11 @@ You need a Turnkey organization (a disposable devnet one), Docker, and `cloudfla
    node step4-session.mjs
    ```
 
-6. **The browser page.** In `web/`, run `npm install`, create `web/.env.local` with
-   `NEXT_PUBLIC_TURNKEY_ORGANIZATION_ID`, `NEXT_PUBLIC_SUPABASE_URL` (the tunnel URL),
-   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY`, then `npm run dev`
-   and open http://127.0.0.1:3400 (the dev server binds to `127.0.0.1` only). Press the
-   buttons in order. `next.config.mjs` sets `reactStrictMode: false`; Next's default is
-   `true`.
-
-Next copies a file that a route reads by path into its build output: the spike's
-routes read `../.env`, so a copy of it (private key included) ends up under
-`web/.next/`. That folder is git-ignored, but delete it (`rm -rf web/.next`) when you
-are done, and never copy this pattern: real code reads secrets from `process.env`.
+The browser page (`web/`) that ran the same flow under Next was removed from `main`
+because its routes are unauthenticated and use the Turnkey parent key. Its code and
+its rerun steps (this README's step 6) are in git history at `475646b`
+(`git show 475646b:spikes/embedded-wallet/README.md`). Restore it only into a local
+checkout, never commit it back, and never deploy it.
 
 Each run creates throwaway sub-organizations named `spike-<timestamp>` in the Turnkey
 organization. Delete them from the dashboard when you are done.
