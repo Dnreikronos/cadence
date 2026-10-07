@@ -11,7 +11,8 @@ import { AppShell, type ShellCompany } from "./app-shell"
 import { ViewerScopeProvider } from "./viewer-scope"
 
 // The signed-in shell with its client-side data: the balance in the sidebar, the
-// service status above the screen and the wallet every screen signs with. The role layouts render this with what the server resolved.
+// service status above the screen and the wallet every screen signs with. The role
+// layouts render this with what the server resolved.
 export function RoleShell({
   role,
   company,
