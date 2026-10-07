@@ -6,7 +6,7 @@ import {
   UnexpectedSignerError,
   signAndConfirm,
 } from "@/lib/api/sign"
-import { RunInputUnavailableError } from "@/lib/runs/errors"
+import { KeyInputUnavailableError } from "@/lib/runs/errors"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
   SentWithdrawalError,
@@ -744,7 +744,7 @@ describe("failureOf", () => {
   })
 
   it("says a withdrawal cannot be made here yet when its keys are refused, with no retry", () => {
-    expect(failureOf(new RunInputUnavailableError("balance key"))).toEqual({
+    expect(failureOf(new KeyInputUnavailableError("balance key"))).toEqual({
       message: "Withdrawals aren't available in this environment yet.",
       retryable: false,
       refreshBalance: false,

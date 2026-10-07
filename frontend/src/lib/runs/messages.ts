@@ -8,7 +8,7 @@ import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
   PaymentNotOnChainError,
   ResponseMismatchError,
-  RunInputUnavailableError,
+  KeyInputUnavailableError,
   SentPaymentError,
   isSignatureRejection,
 } from "./errors"
@@ -121,7 +121,7 @@ export function describeFailure(error: unknown): Failure {
   if (error instanceof StorageUnavailableError) {
     return { message: storageBlockedMessage, sent: false }
   }
-  if (error instanceof RunInputUnavailableError) {
+  if (error instanceof KeyInputUnavailableError) {
     return {
       message: "Payroll runs aren't available in this environment yet.",
       sent: false,

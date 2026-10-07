@@ -19,7 +19,7 @@ import {
   StorageUnavailableError,
   storageBlockedMessage,
 } from "@/lib/storage-guard"
-import { RunInputUnavailableError } from "@/lib/runs/errors"
+import { KeyInputUnavailableError } from "@/lib/runs/errors"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import type { SentEvidence } from "./held"
 import type { UnwrapAsk } from "./prepare"
@@ -227,7 +227,7 @@ export function failureOf(error: unknown): Failure {
   if (error instanceof StorageUnavailableError) {
     return { ...base, message: storageBlockedMessage, retryable: true }
   }
-  if (error instanceof RunInputUnavailableError) {
+  if (error instanceof KeyInputUnavailableError) {
     return {
       ...base,
       message: "Withdrawals aren't available in this environment yet.",

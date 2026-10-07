@@ -5,7 +5,7 @@ import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
   PaymentNotOnChainError,
   ResponseMismatchError,
-  RunInputUnavailableError,
+  KeyInputUnavailableError,
   SentPaymentError,
   isSignatureRejection,
 } from "./errors"
@@ -156,7 +156,7 @@ describe("describeFailure", () => {
   })
 
   it("says a run cannot be made here when an input is not available, nothing sent", () => {
-    expect(describeFailure(new RunInputUnavailableError("sender"))).toEqual({
+    expect(describeFailure(new KeyInputUnavailableError("sender"))).toEqual({
       message: "Payroll runs aren't available in this environment yet.",
       sent: false,
     })

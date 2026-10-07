@@ -38,7 +38,7 @@ function setup(answers: (UnwrapPrepared | Error)[]) {
   const deps = {
     prepare,
     userId: async () => USER,
-    sourceAccount: async () => ACCOUNT,
+    senderAccount: async () => ACCOUNT,
     balanceKey,
   }
   return { signer, sent, signMessage, balanceKey, deps }
@@ -96,7 +96,7 @@ describe("prepareUnwrap", () => {
     ])
     await expect(
       prepareUnwrap(signer, ask, { ...deps, userId: async () => null }),
-    ).rejects.toMatchObject({ name: "RunInputUnavailableError" })
+    ).rejects.toMatchObject({ name: "KeyInputUnavailableError" })
     expect(sent).toHaveLength(1)
   })
 
@@ -109,7 +109,7 @@ describe("prepareUnwrap", () => {
           prepare: deps.prepare,
           userId: deps.userId,
         }),
-      ).rejects.toMatchObject({ name: "RunInputUnavailableError" })
+      ).rejects.toMatchObject({ name: "KeyInputUnavailableError" })
     } finally {
       apiConfig.mode = "mock"
     }

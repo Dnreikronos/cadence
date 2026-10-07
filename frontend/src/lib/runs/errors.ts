@@ -51,11 +51,12 @@ export function isSignatureRejection(error: unknown) {
   return cancelledNames.has(error.name) || code === 4001
 }
 
-// Something a run needs that this environment cannot provide yet (see `keys.ts`). Kept
-// here, with no import of the API mode, so the run's messages can name it anywhere.
-export class RunInputUnavailableError extends Error {
+// Something a run or a withdrawal needs that this environment cannot provide yet (see
+// `keys.ts`). Kept here, with no import of the API mode, so the messages can name it
+// anywhere.
+export class KeyInputUnavailableError extends Error {
   constructor(readonly input: "sender" | "balance key" | "user") {
-    super(`The ${input} for a payroll run is not available yet`)
-    this.name = "RunInputUnavailableError"
+    super(`The ${input} is not available in this environment yet`)
+    this.name = "KeyInputUnavailableError"
   }
 }
