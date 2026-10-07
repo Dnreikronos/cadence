@@ -226,6 +226,8 @@ function seed() {
     people: new Set<string>(seedPeople.map((person) => person.id)),
     requests: new Map<string, MockRequest>(),
     runs: new Map<string, MockRun>(),
+    // What the mock network says of each signature it saw land or fail (`mockChain`).
+    chain: new Map<string, "finalized" | "failed">(),
     // Wallets that signed the link to the user: the first run or unwrap of any other is
     // refused with `wallet_link_required`. The demo company's and the demo recipient's
     // start linked, so a demo run or withdrawal does not open with a refused request;
