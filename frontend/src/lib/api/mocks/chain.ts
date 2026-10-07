@@ -24,8 +24,10 @@ import {
   confidential,
   programs,
 } from "@/lib/solana/programs"
+import type { Finality } from "@/lib/solana/finality"
 import { base58FromBytes } from "../base58"
 import { db } from "./db"
+import { scenarios } from "./scenario"
 
 // Stand-ins for the Token-2022 accounts a run pays from and to, until the service says
 // where the browser gets them (API_CONTRACT Q36). The same owner always gets the same
@@ -57,13 +59,19 @@ export const mockBlockhash = (n: number) =>
   base58FromBytes(stretch(`blockhash:${n}`))
 
 // What the mock network knows of a signature: set when the mock service sees the
-// transaction finalized or failed, read by the finality check after a confirm
-// (`lib/solana/finality.ts`). The scenario "chain-unconfirmed" keeps it empty.
-export const mockChain = {
-  record: (signature: string, outcome: "finalized" | "failed") => {
-    db.chain.set(signature, outcome)
-  },
-  read: (signature: string) => db.chain.get(signature) ?? null,
+// transaction finalized or failed.
+export function recordOnMockChain(
+  signature: string,
+  outcome: "finalized" | "failed",
+) {
+  db.chain.set(signature, outcome)
+}
+
+// The mock wallet's read of the network after a confirm, standing in for
+// `fetchFinality`. Under "chain-unconfirmed" it never sees anything land.
+export async function mockFinality(signature: string): Promise<Finality> {
+  if (scenarios.has("chain-unconfirmed")) return "pending"
+  return db.chain.get(signature) ?? "pending"
 }
 
 // ---- Transactions -------------------------------------------------------------

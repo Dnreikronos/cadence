@@ -28,6 +28,12 @@ export const scenarioNames = [
   "rpc-down",
   // The wallet refuses to sign, as when the person cancels the prompt: nothing is sent.
   "sign-cancelled",
+  // The service confirms, and the browser's own read of the network never sees the
+  // transaction finalized (`lib/solana/finality.ts`): it stays sent, not confirmed.
+  "chain-unconfirmed",
+  // A run's payments are prepared to another account than the one approved, so the
+  // pre-sign check refuses them (`lib/solana/inspect.ts`): nothing is signed.
+  "foreign-destination",
 ] as const
 export type Scenario = (typeof scenarioNames)[number]
 
