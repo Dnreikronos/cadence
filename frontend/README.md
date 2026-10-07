@@ -141,31 +141,52 @@ does after a transaction may have been sent is
 [below](#when-a-transaction-may-have-been-sent).
 
 **The pre-sign check.** Before anything is signed, `signAndConfirm` decodes the
-prepared bytes with `@solana/kit` (`lib/solana/inspect.ts`; versions 0 and 1, no lookup
-tables) and refuses with `UnexpectedTransactionError` a transaction that the wallet does
-not pay for and sign alone, that calls a program outside the allowlist
-(`lib/solana/programs.ts`: System, Compute Budget, Token-2022, the ZK ElGamal proof
-program, Associated Token and Cadence's token-wrap), or that asks one of them for
-something no flow needs: a System call other than funding a proof context, a Token-2022
-instruction other than the confidential transfer extension's steps or a reallocation
-the wallet pays for (never a plain transfer, approve, new authority or close), or a
-proof context closed to anyone but the wallet. A flow adds its own rule with `check`. A
-payroll payment (`checkedSign` in `lib/runs/executor.ts`) must be exactly one
-confidential transfer from the company's token account, as this app derives it, to the
-position's account, which must be one the admin approved (the accounts shown in the
-confirm dialog, or the people retried); the only accounts it may write are those two,
-the wallet and the proof contexts it creates. The check was run against a real payment
-from the devnet acceptance of #55 (`lib/solana/devnet-fixture.ts`). Wrap, unwrap,
-configure and apply pending get only the common check: their destinations are not
-checked yet (token-wrap's derived accounts would have to be derived here).
+prepared bytes with `@solana/kit` (`lib/solana/inspect.ts`; versions 0 and 1, and a
+lookup table is refused outright) and checks them against what the person asked for.
+Every sign call names its flow, and nothing is signed without one. `checkAllowed` holds
+for all of them: the wallet pays and is the only signer, every program is one of
+`lib/solana/programs.ts` (System, Compute Budget, Token-2022, the ZK ElGamal proof program,
+Associated Token and Cadence's token-wrap), and the fee stays bounded (a unit limit up to
+the runtime's 1.4M, a unit price up to 100,000 micro-lamports or a v1 priority fee up to
+0.00014 SOL, no heap request). Then `checkFlow` reads every instruction as the service
+builds it, with every account it names derived in the browser (`lib/solana/accounts.ts`)
+or approved by the person, never taken from the service's answer:
+
+- A payroll payment (`checkedSign` in `lib/runs/executor.ts`): exactly one confidential
+  transfer from the company's token account to the account the admin approved for that
+  position (each account approved for one position only), in the wrapped mint. Its three
+  proof contexts are created in the same transaction, funded with no more than their
+  rent-exempt minimum, verified with the wallet as their only authority, and closed back to
+  the wallet. Checked against a real payment from the devnet acceptance of #55
+  (`lib/solana/devnet-fixture.ts`).
+- A deposit's wrap (`wrap.rs`): token-wrap's `Wrap` from the wallet's USDC account into
+  its own confidential account, and the deposit, both for the amount entered; optionally
+  creating and configuring that account first. The withdrawal's unwrap (`unwrap.rs`): the
+  withdrawal from that account and `Unwrap` to the wallet's own USDC account, for the
+  amount entered. The escrow, mint authority and wrapped mint are token-wrap's derived
+  addresses.
+- Activation's configure and an apply pending: only the confidential extension's own
+  steps, on the wallet's own confidential account.
+
+The confidential transfer is the only instruction that moves value to an account the
+wallet does not own, and only in a payment. A refusal is an `UnexpectedTransactionError`
+and every screen says so the same way (`refusalMessage`).
+
+What it cannot check: confidential amounts are ciphertexts, so a payment's amount is the
+service's; the run's sender account is the mock's in mock mode and unknown in real mode
+until the service says where it comes from (API_CONTRACT Q36); configure and apply pending
+have no service builder yet, so their shape is the extension's, on the wallet's associated
+confidential account, and a builder that acts on another account will be refused; proof
+data is not verified here (the proof program does that); and on mainnet the derived
+addresses assume Cadence's devnet token-wrap deployment.
 
 **The network's own read.** A receipt is the service's word. Once confirm returns one,
 `signAndConfirm` asks the wallet's `finality` (`getSignatureStatuses` with the whole
 history, `lib/solana/finality.ts`) about the signature it submitted, within the same
 60 s, and returns the receipt only once the network shows it finalized without an
 error. Not seen in time is a `ConfirmTimeoutError`; finalized with an error is a
-`FinalityMismatchError` (a `ConfirmTimeoutError` too), so every screen keeps the payment
-as sent and never sends it again. Asking again about a payment sent earlier (the
+`FinalityMismatchError`. Both are a `SentUnsettledError`, which every screen reads the same
+way: the payment stays as sent and is never sent again. Asking again about a payment sent earlier (the
 run's "Check again", the deposit and withdrawal look-ups) still takes the service's
 word.
 

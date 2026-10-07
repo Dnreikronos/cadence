@@ -300,13 +300,22 @@ All prepare routes return the same core fields, plus route-specific ones:
   when `required_signers` is empty or holds any key other than the signer's address.
   Any `transaction_version` other than `0` or `1` is a contract error.
 - The web app **decodes the bytes before signing** and refuses (`UnexpectedTransactionError`,
-  nothing signed) a transaction the wallet does not pay for and sign alone, one that calls
-  a program outside its allowlist, or one that asks those programs for something no flow
-  needs (a plain token transfer, a new authority, a close to another account). A payroll
-  payment must be one confidential transfer from the company's token account to the
-  account the admin approved for that position. The rules are in the
-  [web app's README](../../frontend/README.md#api-client-and-mocks); the service must keep building
-  transactions inside them, and a new instruction or program is a contract change.
+  nothing signed) a transaction the wallet does not pay for and sign alone, one that loads
+  accounts from a lookup table, calls a program outside its allowlist or sets a fee above
+  its bounds, or one that is not, instruction by instruction, the shape this contract's
+  route builds. Every account is checked against one the browser derives or the person
+  approved, never against the response: a payroll payment is one confidential transfer
+  from the company's token account to the account the admin approved for that position, in
+  the wrapped mint; a wrap and an unwrap move the amount asked for between the wallet's own
+  USDC and confidential associated accounts through token-wrap's derived escrow; configure
+  and apply pending act on the wallet's own confidential associated account only. Proof
+  contexts must be created in the same transaction, funded with at most their rent, owned
+  by the wallet's authority and closed back to the wallet. The rules are in the
+  [web app's README](../../frontend/README.md#api-client-and-mocks), with what they cannot
+  check (confidential amounts, proof contents). The service must keep building
+  transactions inside them, and a new instruction, account or program is a contract change.
+  `/accounts/configure` and `/accounts/apply-pending` must act on the wallet's associated
+  Token-2022 account for the wrapped mint.
 - Returning bytes does not move funds. Signing is the authorization.
 
 **The Signer.** The web app needs two things from the user's wallet, and nothing
@@ -1273,9 +1282,10 @@ and each one is a place where a screen has only been exercised against the mock.
   route is open to every caller. The wrap, transfer, accounts and keys routes enforce
   none.
 - **Chain data.** `request_id` is a counter in hex, not a SHA-256; the transaction is
-  real wire bytes the pre-sign check reads (a run payment and `/transfer` shaped like
-  the service's, the other routes one confidential instruction on the wallet's own
-  account), with filler for proofs; the "network" is a map of the signatures the mock
+  real wire bytes the pre-sign check reads (a run payment, `/transfer`, `/wrap` and
+  `/unwrap` shaped like the service's, with the wallet's derived accounts and the amount
+  asked for; configure and apply pending as the extension's own steps on the wallet's
+  confidential account), with filler for proofs; the "network" is a map of the signatures the mock
   saw finalized or failed; the mock signer and the mock signature are never verified, so
   `transaction_mismatch` and a wrong wallet signature cannot occur. The recipient's
   and company's wallets are fixed addresses, and the company's plain USDC balance is
