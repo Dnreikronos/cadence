@@ -331,7 +331,7 @@ const flows: Record<
 
 // How many of a kind a transaction may hold: a payment's three proof contexts, one of
 // everything else (compute budget tags are kept distinct by `checkAllowed`).
-const most = (kind: Kind) =>
+const maxOf = (kind: Kind) =>
   ["createContext", "verify", "closeContext", "budget"].includes(kind) ? 3 : 1
 
 // A System `CreateAccountWithSeed` of a proof context: funded by the wallet with no more
@@ -394,7 +394,7 @@ function kindOf(instruction: InspectedInstruction, context: Context): Kind {
   const { wallet, expected, created } = context
   const { program, data } = instruction
   const named = addresses(instruction)
-  const own = walletAccountsOf(expected)
+  const derived = walletAccountsOf(expected)
   const amount = "amount" in expected ? expected.amount : null
   switch (program) {
     case programs.computeBudget:
@@ -441,13 +441,13 @@ function kindOf(instruction: InspectedInstruction, context: Context): Kind {
     case programs.associatedToken: {
       // The wallet's own associated account, paid by the wallet: its confidential one
       // when a wrap or a configure may need it, its USDC one when an unwrap does.
-      if (!own || data.length !== 1 || data[0] !== CREATE_IDEMPOTENT) {
+      if (!derived || data.length !== 1 || data[0] !== CREATE_IDEMPOTENT) {
         return refuse("instruction")
       }
       const [account, mint, tokenProgram] =
         expected.flow === "unwrap"
-          ? [own.usdc, own.usdcMint, programs.token]
-          : [own.confidential, own.wrappedMint, programs.token2022]
+          ? [derived.usdc, derived.usdcMint, programs.token]
+          : [derived.confidential, derived.wrappedMint, programs.token2022]
       if (
         !sameList(named, [
           wallet,
@@ -466,13 +466,18 @@ function kindOf(instruction: InspectedInstruction, context: Context): Kind {
       if (data[0] === REALLOCATE) {
         // Room for the confidential extension on the wallet's own account.
         if (
-          !own ||
+          !derived ||
           !sameList(Array.from(data), [
             REALLOCATE,
             CONFIDENTIAL_TRANSFER_ACCOUNT_EXTENSION,
             0,
           ]) ||
-          !sameList(named, [own.confidential, wallet, programs.system, wallet])
+          !sameList(named, [
+            derived.confidential,
+            wallet,
+            programs.system,
+            wallet,
+          ])
         ) {
           return refuse("instruction")
         }
@@ -484,10 +489,10 @@ function kindOf(instruction: InspectedInstruction, context: Context): Kind {
       ) {
         return refuse("instruction")
       }
-      return confidentialKind(instruction, context, own, amount)
+      return confidentialKind(instruction, context, derived, amount)
     }
     case programs.tokenWrap:
-      return wrapKind(instruction, wallet, own, amount)
+      return wrapKind(instruction, wallet, derived, amount)
     default:
       return refuse("program")
   }
@@ -498,7 +503,7 @@ function kindOf(instruction: InspectedInstruction, context: Context): Kind {
 function confidentialKind(
   instruction: InspectedInstruction,
   { wallet, expected, created }: Context,
-  own: WalletAccounts | null,
+  derived: WalletAccounts | null,
   amount: bigint | null,
 ): Kind {
   const { data } = instruction
@@ -520,26 +525,26 @@ function confidentialKind(
     }
     return "transfer"
   }
-  if (!own) return refuse("instruction")
+  if (!derived) return refuse("instruction")
   const accounts = {
     [confidential.configureAccount]: [
-      own.confidential,
-      own.wrappedMint,
+      derived.confidential,
+      derived.wrappedMint,
       INSTRUCTIONS_SYSVAR,
       wallet,
     ],
-    [confidential.deposit]: [own.confidential, own.wrappedMint, wallet],
+    [confidential.deposit]: [derived.confidential, derived.wrappedMint, wallet],
     [confidential.withdraw]: [
-      own.confidential,
-      own.wrappedMint,
+      derived.confidential,
+      derived.wrappedMint,
       INSTRUCTIONS_SYSVAR,
       wallet,
     ],
-    [confidential.applyPendingBalance]: [own.confidential, wallet],
+    [confidential.applyPendingBalance]: [derived.confidential, wallet],
   }[data[1]]
   if (!accounts) return refuse("instruction")
   // Always the wallet's own confidential account.
-  if (named[0] !== own.confidential) refuse("destination")
+  if (named[0] !== derived.confidential) refuse("destination")
   if (!sameList(named, accounts)) refuse("instruction")
   // Deposit and withdraw carry the public amount, a u64 after the two tags.
   if (
@@ -564,13 +569,13 @@ function confidentialKind(
 function wrapKind(
   instruction: InspectedInstruction,
   wallet: string,
-  own: WalletAccounts | null,
+  derived: WalletAccounts | null,
   amount: bigint | null,
 ): Kind {
   const { data } = instruction
   const named = addresses(instruction)
   if (
-    !own ||
+    !derived ||
     data.length !== 9 ||
     (data[0] !== tokenWrap.wrap && data[0] !== tokenWrap.unwrap)
   ) {
@@ -579,25 +584,25 @@ function wrapKind(
   const wrap = data[0] === tokenWrap.wrap
   const accounts = wrap
     ? [
-        own.confidential,
-        own.wrappedMint,
-        own.wrapAuthority,
+        derived.confidential,
+        derived.wrappedMint,
+        derived.wrapAuthority,
         programs.token,
         programs.token2022,
-        own.usdc,
-        own.usdcMint,
-        own.escrow,
+        derived.usdc,
+        derived.usdcMint,
+        derived.escrow,
         wallet,
       ]
     : [
-        own.escrow,
-        own.usdc,
-        own.wrapAuthority,
-        own.usdcMint,
+        derived.escrow,
+        derived.usdc,
+        derived.wrapAuthority,
+        derived.usdcMint,
         programs.token2022,
         programs.token,
-        own.confidential,
-        own.wrappedMint,
+        derived.confidential,
+        derived.wrappedMint,
         wallet,
       ]
   // The recipient: the first account of a wrap, the second of an unwrap.
@@ -628,6 +633,11 @@ function writableFor(expected: Expected, contexts: Iterable<string>) {
   return new Set([wallet, account, usdc, wrappedMint, escrow])
 }
 
+// A kind out of place, or out of count: a transfer is named, so a payment's refusal
+// says so.
+const refuseKind = (kind: Kind) =>
+  refuse(kind === "transfer" ? "transfer" : "instruction")
+
 // The check a flow's transaction passes before it is signed: `checkAllowed`, then the
 // flow's own shape, with every account and public amount checked against `expected`.
 export function checkFlow(tx: InspectedTransaction, expected: Expected) {
@@ -655,20 +665,14 @@ export function checkFlow(tx: InspectedTransaction, expected: Expected) {
   const counts = new Map<Kind, number>()
   for (const instruction of tx.instructions) {
     const kind = kindOf(instruction, context)
-    if (!rules.kinds.includes(kind)) {
-      refuse(kind === "transfer" ? "transfer" : "instruction")
-    }
+    if (!rules.kinds.includes(kind)) refuseKind(kind)
     counts.set(kind, (counts.get(kind) ?? 0) + 1)
   }
   for (const [kind, count] of counts) {
-    if (count > most(kind)) {
-      refuse(kind === "transfer" ? "transfer" : "instruction")
-    }
+    if (count > maxOf(kind)) refuseKind(kind)
   }
   for (const kind of rules.once) {
-    if (counts.get(kind) !== 1) {
-      refuse(kind === "transfer" ? "transfer" : "instruction")
-    }
+    if (counts.get(kind) !== 1) refuseKind(kind)
   }
   // Every context made here is verified once and closed back to the wallet once.
   for (const account of created.keys()) {
