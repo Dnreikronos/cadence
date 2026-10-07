@@ -651,6 +651,11 @@ export const handlers = [
     if (stopped) return stopped
     const { data, error } = await parse(request, s.unwrapRequestSchema)
     if (error) return error
+    // Linked as on a run, before the balance or the risk is looked at.
+    if (!db.linkedWallets.has(data.wallet)) {
+      if (!data.wallet_signature) return fail(409, "wallet_link_required")
+      db.linkedWallets.add(data.wallet)
+    }
     const amount = BigInt(data.amount)
     if (amount > db.me.available) return fail(409, "invalid_confidential_state")
     const risk = revealRisk(amount)

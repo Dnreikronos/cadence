@@ -75,6 +75,13 @@ describe("withdrawing against the mock service", () => {
     expect(db.me.available).toBe(before - 4_200_000_000n)
   })
 
+  it("links a wallet on its first withdrawal and goes on", async () => {
+    db.linkedWallets.clear()
+    const outcome = await withdraw("1000000000", false)
+    expect(outcome).toMatchObject({ kind: "done", level: "none" })
+    expect(db.linkedWallets.has(ME_WALLET)).toBe(true)
+  })
+
   it("reports a close match as such", async () => {
     expect(await withdraw("4190000000", true)).toMatchObject({
       kind: "done",

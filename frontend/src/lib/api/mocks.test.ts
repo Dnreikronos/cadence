@@ -591,6 +591,17 @@ describe("unwrap", () => {
     ).toBe("invalid_request")
     expect((await post("/unwrap", ask)).status).toBe(200)
   })
+
+  it("refuses the first unwrap of a wallet until it is linked, then remembers the link", async () => {
+    db.linkedWallets.clear()
+    expect(await code(await post("/unwrap", ask))).toBe("wallet_link_required")
+    // Nothing was prepared for the refused ask.
+    expect(db.me.available).toBe(8_000_000_000n)
+    expect(
+      (await post("/unwrap", { ...ask, wallet_signature: SIG })).status,
+    ).toBe(200)
+    expect((await post("/unwrap", ask)).status).toBe(200)
+  })
 })
 
 describe("CSV", () => {
