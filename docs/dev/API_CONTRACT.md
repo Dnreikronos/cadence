@@ -960,7 +960,8 @@ content. It names the file itself (`cadence-payments-<date>.csv`, and
 "Cadence records exports as reads", which assumes each export writes an audit row
 (question 25). No screen sends `from`, `to` or `run_id`: the screens' filters narrow
 the pages already loaded, in the browser, because no route has filter parameters.
-**The mock's CSV is not the format above**; see [Mock deviations](#mock-deviations).
+The mock's CSV follows the format above but ignores filters; see
+[Mock deviations](#mock-deviations).
 
 ### Invites 🟡
 
@@ -1205,11 +1206,9 @@ and each one is a place where a screen has only been exercised against the mock.
   the token accounts are derived from the owner, not read from a chain, and a payment
   the company's available balance cannot cover fails as `transaction_failed`.
   `GET /company/people/accounts` is proposed, not implemented.
-- **CSV.** The mock's amount column is the shortest decimal (`4200`, `3800.5`), not
-  six decimals (`4200.000000`); lines end in `\n`, not CRLF, with no trailing newline;
-  it sends only `Content-Type: text/csv; charset=utf-8` (no `Content-Disposition`,
-  `X-Content-Type-Options` or `Cache-Control`); and it ignores filters. The
-  formula-neutralising and quoting rules are implemented.
+- **CSV.** The mock follows the format above (six-decimal amounts, CRLF after every
+  line including the last, the quoting and formula-neutralising rules and the four
+  headers), but it ignores filters and writes no audit row.
 - **Codes that exist only in the mock.** `request_not_found` (a confirm of an unknown
   `request_id` on `/unwrap/confirm`, `/accounts/configure/confirm` and
   `/accounts/apply-pending/confirm`, where the draft names none), `already_confirmed`

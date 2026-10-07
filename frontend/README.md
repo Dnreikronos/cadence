@@ -168,8 +168,8 @@ shadows a Next route. In the browser, `window.cadenceMock` controls it:
   access log). `resetAccountStatus()` only makes the recipient one who has done none of
   the activation steps. The mock lives in the page, so a reload resets everything.
 
-The mock is not the real service: its CSV, a few error codes, its paging and its
-roles differ. Those are listed in the contract under
+The mock is not the real service: its CSV filters, a few error codes, its paging and
+its roles differ. Those are listed in the contract under
 [Mock deviations](../docs/dev/API_CONTRACT.md#mock-deviations), and nothing should be
 built on them.
 
