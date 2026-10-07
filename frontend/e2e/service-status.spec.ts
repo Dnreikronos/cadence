@@ -2,9 +2,9 @@ import { clearMock, countFetches, setMock, signInAs } from "./support/demo"
 import { expect, test } from "./support/test"
 
 // The signed-in shell polls GET /health and says so when the service is down or cannot
-// reach the network; while it is fine, it says nothing.
+// reach Solana; while it is fine, it says nothing.
 const down = "Can't reach Cadence"
-const degraded = "Cadence can't reach the network"
+const degraded = "Cadence can't reach Solana"
 
 test("the shell says when the service is down or degraded, and clears once it is back", async ({
   page,
