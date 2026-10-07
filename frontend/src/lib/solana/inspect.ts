@@ -116,8 +116,6 @@ export function inspectTransaction(bytes: Uint8Array): InspectedTransaction {
   }
 }
 
-const allowedPrograms: ReadonlySet<string> = new Set(Object.values(programs))
-
 const accountAt = (instruction: InspectedInstruction, index: number) =>
   instruction.accounts[index]?.address
 
@@ -164,6 +162,11 @@ const instructionRules: Record<
   // move tokens, and both act on accounts the wallet signs for.
   [programs.tokenWrap]: () => true,
 }
+
+// Only the programs with a rule: one without is refused, never looked up.
+const allowedPrograms: ReadonlySet<string> = new Set(
+  Object.keys(instructionRules),
+)
 
 // The check every prepared transaction passes before it is signed: the wallet is the
 // fee payer and the only signer, and every instruction is one of the known programs
