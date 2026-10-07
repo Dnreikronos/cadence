@@ -88,6 +88,13 @@ const confirmBody = z.strictObject({
   signature: z.string(),
 })
 
+// An unwrap body is checked for shape here. The balance key and the link get their own
+// codes below, as the real service answers them (`unwrap.rs`, `transfer_store.rs`).
+const unwrapBody = s.unwrapRequestSchema.extend({
+  aes_key: z.string(),
+  wallet_signature: z.string().nullish(),
+})
+
 function badConfirm(requestId: string | undefined, signature: string) {
   if (
     requestId !== undefined &&
@@ -649,11 +656,19 @@ export const handlers = [
   http.post(at("/unwrap"), async ({ request }) => {
     const stopped = await guard(request, "recipient", "transfer_rate_limited")
     if (stopped) return stopped
-    const { data, error } = await parse(request, s.unwrapRequestSchema)
+    const { data, error } = await parse(request, unwrapBody)
     if (error) return error
-    // Linked as on a run, before the balance or the risk is looked at.
+    if (!s.unwrapRequestSchema.shape.aes_key.safeParse(data.aes_key).success) {
+      return fail(400, "invalid_balance_key")
+    }
+    // Linked as on a run, before the balance or the risk is looked at. A linked wallet's
+    // signature is not looked at; one that is not a signature does not link.
     if (!db.linkedWallets.has(data.wallet)) {
-      if (!data.wallet_signature) return fail(409, "wallet_link_required")
+      if (data.wallet_signature == null)
+        return fail(409, "wallet_link_required")
+      if (!s.signatureSchema.safeParse(data.wallet_signature).success) {
+        return fail(403, "wallet_access_denied")
+      }
       db.linkedWallets.add(data.wallet)
     }
     const amount = BigInt(data.amount)

@@ -583,12 +583,12 @@ describe("unwrap", () => {
     acknowledge_reveal_risk: false,
   }
 
-  it("refuses an unwrap without the balance key, as the real service does", async () => {
+  it("refuses an unwrap without a valid balance key, as the real service does", async () => {
     const keyless = { ...ask, aes_key: undefined }
     expect(await code(await post("/unwrap", keyless))).toBe("invalid_request")
-    expect(
-      await code(await post("/unwrap", { ...ask, aes_key: "not a key" })),
-    ).toBe("invalid_request")
+    const malformed = await post("/unwrap", { ...ask, aes_key: "not a key" })
+    expect(malformed.status).toBe(400)
+    expect(await code(malformed)).toBe("invalid_balance_key")
     expect((await post("/unwrap", ask)).status).toBe(200)
   })
 
@@ -601,6 +601,19 @@ describe("unwrap", () => {
       (await post("/unwrap", { ...ask, wallet_signature: SIG })).status,
     ).toBe(200)
     expect((await post("/unwrap", ask)).status).toBe(200)
+  })
+
+  it("denies a link that is not a signature, and ignores it once the wallet is linked", async () => {
+    db.linkedWallets.clear()
+    const bad = { ...ask, wallet_signature: "not a signature" }
+    const denied = await post("/unwrap", bad)
+    expect(denied.status).toBe(403)
+    expect(await code(denied)).toBe("wallet_access_denied")
+    expect(await code(await post("/unwrap", ask))).toBe("wallet_link_required")
+    expect(
+      (await post("/unwrap", { ...ask, wallet_signature: SIG })).status,
+    ).toBe(200)
+    expect((await post("/unwrap", bad)).status).toBe(200)
   })
 })
 
