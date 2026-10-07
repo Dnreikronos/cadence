@@ -65,8 +65,10 @@ export const wait = (ms: number, signal?: AbortSignal) =>
 //
 // The transaction can no longer land once the finalized block height is past its
 // `last_valid_block_height`. The height is read before each ask, so only a "not there"
-// given after the height was seen past makes it failed: one that landed in time is
-// finalized by then, and the service says so. While the height cannot be read nothing is
+// given after the height was seen past makes it failed: one that landed in time should be
+// finalized by then. That is not proof (the service's read may trail the browser's, or
+// lose the history: API_CONTRACT.md question 28), so `missingPastIsFailed` lets a flow
+// that cannot take the risk keep it unknown. While the height cannot be read nothing is
 // ruled failed, and after `unreadableHeights` failed reads in a row it is unknown rather
 // than asked about forever.
 export async function reconcileWrap({
