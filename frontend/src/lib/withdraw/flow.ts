@@ -227,6 +227,16 @@ export function failureOf(error: unknown): Failure {
   if (error instanceof StorageUnavailableError) {
     return { ...base, message: storageBlockedMessage, retryable: true }
   }
+  // No signed-in user (or a wallet that cannot sign the link text): the wallet cannot be
+  // linked to anyone, whatever the environment.
+  if (error instanceof KeyInputUnavailableError && error.input === "user") {
+    return {
+      ...base,
+      message:
+        "This wallet couldn't be linked to your account. Sign in again, then retry.",
+      retryable: false,
+    }
+  }
   if (error instanceof KeyInputUnavailableError) {
     return {
       ...base,

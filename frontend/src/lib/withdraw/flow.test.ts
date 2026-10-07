@@ -752,4 +752,15 @@ describe("failureOf", () => {
       signature: null,
     })
   })
+
+  it("asks to sign in again when there is no user to link the wallet to", () => {
+    expect(failureOf(new KeyInputUnavailableError("user"))).toEqual({
+      message:
+        "This wallet couldn't be linked to your account. Sign in again, then retry.",
+      retryable: false,
+      refreshBalance: false,
+      sent: false,
+      signature: null,
+    })
+  })
 })
