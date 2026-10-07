@@ -555,6 +555,7 @@ describe("ledgers", () => {
       api.unwrap.prepare({
         wallet: ME_WALLET,
         amount: "5000000000",
+        aes_key: AES_KEY,
         acknowledge_reveal_risk: false,
       })
     // Both fit the 8,000 balance on their own.
@@ -571,6 +572,24 @@ describe("ledgers", () => {
       ),
     ).toMatchObject({ status: 409, code: "invalid_confidential_state" })
     expect(db.me.available).toBe(3_000_000_000n)
+  })
+})
+
+describe("unwrap", () => {
+  const ask = {
+    wallet: ME_WALLET,
+    amount: "1000000000",
+    aes_key: AES_KEY,
+    acknowledge_reveal_risk: false,
+  }
+
+  it("refuses an unwrap without the balance key, as the real service does", async () => {
+    const keyless = { ...ask, aes_key: undefined }
+    expect(await code(await post("/unwrap", keyless))).toBe("invalid_request")
+    expect(
+      await code(await post("/unwrap", { ...ask, aes_key: "not a key" })),
+    ).toBe("invalid_request")
+    expect((await post("/unwrap", ask)).status).toBe(200)
   })
 })
 

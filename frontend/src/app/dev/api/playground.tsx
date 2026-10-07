@@ -135,6 +135,7 @@ export function ApiPlayground() {
         const prepared = await api.unwrap.prepare({
           wallet: ME_WALLET,
           amount,
+          aes_key: "AAAAAAAAAAAAAAAAAAAAAA==",
           acknowledge_reveal_risk: acknowledge,
         })
         write(`  reveal risk: ${prepared.reveal_risk.level}`)
