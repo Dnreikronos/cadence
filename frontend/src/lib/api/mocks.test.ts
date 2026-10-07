@@ -575,6 +575,8 @@ describe("ledgers", () => {
 })
 
 describe("CSV", () => {
+  const header = "date,counterparty,amount,status,signature"
+
   async function exported(name: string) {
     const original = diego.name
     diego.name = name
@@ -588,7 +590,7 @@ describe("CSV", () => {
   it("quotes commas, quotes and newlines (RFC 4180)", async () => {
     const text = await exported('Diego, "Dee" =HYPERLINK("x")\nMartins')
     // The header is unchanged.
-    expect(text[0]).toBe("date,counterparty,amount,status,signature")
+    expect(text[0]).toBe(header)
     // The cell is one quoted field: quotes doubled, the newline kept inside.
     expect(text.join("\r\n")).toContain(
       '2026-09-01,"Diego, ""Dee"" =HYPERLINK(""x"")\nMartins",6300.000000,confirmed,',
@@ -638,24 +640,28 @@ describe("CSV", () => {
     "/me/export.csv",
     `/audit/${COMPANY_ID}/export.csv`,
   ])("sends the contract's headers and CRLF lines on %s", async (path) => {
-    const response = await send("GET", path)
+    const original = diego.name
+    diego.name = "Diego\nMartins"
+    const response = await send("GET", path).finally(() => {
+      diego.name = original
+    })
     expect(response.status).toBe(200)
     expect(response.headers.get("content-type")).toBe("text/csv; charset=utf-8")
     expect(response.headers.get("content-disposition")).toBe("attachment")
     expect(response.headers.get("x-content-type-options")).toBe("nosniff")
     expect(response.headers.get("cache-control")).toBe("no-store")
     const text = await response.text()
-    expect(text).toMatch(/^date,counterparty,amount,status,signature\r\n/)
-    expect(text).toMatch(/\r\n$/)
-    expect(text.replaceAll("\r\n", "")).not.toMatch(/[\r\n]/)
+    expect(text.startsWith(`${header}\r\n`)).toBe(true)
+    // A quoted cell may hold a line break; outside quotes, every line ends in CRLF.
+    const unquoted = text.replace(/"(?:[^"]|"")*"/g, '""')
+    expect(unquoted).toMatch(/\r\n$/)
+    expect(unquoted.replaceAll("\r\n", "")).not.toMatch(/[\r\n]/)
   })
 
   it("exports an auditor's view of the one company they may read", async () => {
     db.role = "auditor"
     const text = await (await api.exports.audit(COMPANY_ID)).text()
-    expect(text.split("\r\n")[0]).toBe(
-      "date,counterparty,amount,status,signature",
-    )
+    expect(text.split("\r\n")[0]).toBe(header)
   })
 })
 

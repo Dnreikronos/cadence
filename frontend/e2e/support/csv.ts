@@ -63,10 +63,17 @@ export async function readDownload(download: Download) {
 // the file has the rows expected and nothing else, every row has one cell per column, no
 // more and no fewer (a stray column would be data nobody agreed to export), and every
 // amount is decimal USDC with exactly six decimals, `4200.000000`, never base units.
+//
+// A quoted cell may hold a line break (RFC 4180), so the CRLF checks run on the text
+// with every quoted field emptied: only the record terminators are left.
 export function expectPaymentsCsv(text: string, expectedRows: number) {
-  expect(text, "every line ends in CRLF").toMatch(/\r\n$/)
-  expect(text.replaceAll("\r\n", ""), "no bare CR or LF").not.toMatch(/[\r\n]/)
-  const lines = text.split("\r\n").filter((line) => line !== "")
+  const unquoted = text.replace(/"(?:[^"]|"")*"/g, '""')
+  expect(unquoted, "every line ends in CRLF").toMatch(/\r\n$/)
+  expect(
+    unquoted.replaceAll("\r\n", ""),
+    "no bare CR or LF outside quotes",
+  ).not.toMatch(/[\r\n]/)
+  const lines = unquoted.split("\r\n").filter((line) => line !== "")
   expect(lines[0], "the first line is the header").toBe(csvColumns.join(","))
   expect(lines, "one line per payment, after the header").toHaveLength(
     expectedRows + 1,
