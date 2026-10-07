@@ -48,6 +48,7 @@ test("every response has a nonce of its own, on every script it renders", async 
   const nonces = new Set<string>()
   for (const path of [
     "/",
+    // Twice: the same page must not get the same nonce again.
     "/sign-in",
     "/sign-in",
     "/company",
