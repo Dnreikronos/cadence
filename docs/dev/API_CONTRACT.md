@@ -737,9 +737,10 @@ with `null` has not configured a private account and cannot be in a run.
 
 `POST /unwrap` then `POST /unwrap/confirm` (#56, #87). Prepare returns the usual
 fields for a withdrawal from the confidential balance followed by the unwrap.
-The implemented backend contract is [UNWRAP_API.md](UNWRAP_API.md). The
-mock-backed frontend must add the transient AES key and first-use wallet link
-signature before switching this request to live mode.
+The implemented backend contract is [UNWRAP_API.md](UNWRAP_API.md). The client
+sends the transient AES key with every prepare and the wallet link signature on a
+`409 wallet_link_required`, from the same seams as a run (`lib/runs/keys.ts`): the
+mock answers them, real mode refuses them before anything is signed or sent.
 
 ```json
 {
@@ -793,8 +794,10 @@ The response carries a **structured flag**, not a rendered message:
   ask that still answers it, and every other failure, is shown as an error. The
   `level` of the prepared transaction is shown while it is signed and on the result.
   `invalid_confidential_state` means the balance changed or the amount is too high:
-  the screen refreshes the balance. The request has no destination field, so a
-  withdrawal goes to the person's own wallet (#87 asks for "or any address").
+  the screen refreshes the balance. The balance key is derived again for each ask,
+  so a withdrawal that needs the agreement asks the wallet to sign it twice. The
+  request has no destination field, so a withdrawal goes to the person's own wallet
+  (#87 asks for "or any address").
 
 ### Accounts: configure and apply pending 🟡
 
@@ -1450,7 +1453,8 @@ Each points to the [open question](#open-questions) that asks it.
   beyond the failed payment. (Question 32.)
 - **Run inputs.** Each person's token account, the company's sender account and the
   `aes_key` reach the browser from somewhere. The client now uses the implemented
-  `/runs`, and the mock answers these three; real mode refuses them. (Question 36.)
+  `/runs`, and the mock answers these three; real mode refuses them. A withdrawal
+  needs the recipient's own account and `aes_key` the same way. (Question 36.)
 - **Key derivation.** The client can obtain the canonical key-derivation message, and
   the token account it belongs to, from somewhere. Today it builds a mock placeholder
   from the wallet address. (Question 35.)
