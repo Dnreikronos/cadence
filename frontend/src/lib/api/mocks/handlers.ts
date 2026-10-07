@@ -458,8 +458,12 @@ function confirmPosition(
 }
 
 export const handlers = [
+  // A service that is down does not answer its health check either; one that is up
+  // but cannot reach the Solana RPC answers `unavailable`, as the real one does.
   http.get(at("/health"), async () => {
-    if (scenarios.has("service-down")) {
+    if (scenarios.has("slow")) await delay(timing.slowMs)
+    if (scenarios.has("service-down")) return fail(503, "service_unavailable")
+    if (scenarios.has("rpc-down")) {
       return HttpResponse.json(
         { status: "unavailable", build_sha: "mock", rpc_reachable: false },
         { status: 503 },

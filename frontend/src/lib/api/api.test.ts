@@ -567,11 +567,20 @@ describe("reads and exports", () => {
     )
   })
 
-  it("reports an unavailable service from /health as data, not an error", async () => {
-    scenarios.set("service-down")
+  // The real service answers `unavailable` when it cannot reach the Solana RPC.
+  it("reports an unreachable RPC from /health as data, not an error", async () => {
+    scenarios.set("rpc-down")
     expect(await signedOut.health()).toMatchObject({
       status: "unavailable",
       rpc_reachable: false,
+    })
+  })
+
+  it("fails /health like every other route when the service is down", async () => {
+    scenarios.set("service-down")
+    expect(await caught(signedOut.health())).toMatchObject({
+      status: 503,
+      code: "service_unavailable",
     })
   })
 

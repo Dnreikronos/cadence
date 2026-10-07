@@ -1171,8 +1171,9 @@ handler, including each failure that changes the UI:
   available balance, `forbidden_role` once a role is chosen. **`transaction_mismatch`
   is not mocked**: no handler emits it, so no screen has been exercised against it.
 - `401` (`unauthenticated`), `429` with `Retry-After` (`rate-limited`), `503` with
-  `service_unavailable` (`service-down`; `/health` answers its own `503` body) and
-  `503` with `auth_unavailable` (`auth-down`).
+  `service_unavailable` (`service-down`, `/health` included) and `503` with
+  `auth_unavailable` (`auth-down`). `/health` answers its own `503` body, `unavailable`,
+  under `rpc-down`, as the service does when it cannot reach the RPC.
 - Slow responses (`slow`, 1.5 s), so the progress states are exercised.
 - The auditor routes with three seeded auditors (one active, one invited and one
   whose invite has expired, derived from the age of the invite), both conflicts, and
