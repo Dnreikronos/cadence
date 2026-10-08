@@ -8,31 +8,33 @@ import type { Signable } from "./executor"
 // transaction a second time: a payment whose transaction is gone was not paid, and cannot
 // be any more.
 
-// A blockhash lives 150 blocks, about 60 s at 400 ms a block, counted from when the
-// service read it, which is before the transaction was held here. There is no cheap read
-// of the current block height from the browser, so past 60 s of holding it is treated as
-// expired: letting go of one that was still live costs nothing, since it was never sent
-// and cannot land. Younger than this it may still have expired, and then the network
-// refuses it after the submit, which is handled as any failure after a submit: never
-// answered with a new transaction.
-export const heldMaxAgeMs = 60_000
+// A held transaction is signed again only while the chain leaves it time to land: its
+// `last_valid_block_height` must be at least this many blocks above the finalized height.
+// The finalized height trails the tip by about 32 blocks (13 s), and the rest (about 17 s
+// at 400 ms a block) is for the person to sign and the network to take it. Letting go of
+// one that was still live costs nothing, since it was never sent and cannot land; one sent
+// too late is refused by the network after the submit, which is handled as any failure
+// after a submit: never answered with a new transaction.
+export const heldMarginBlocks = 75
 
-export type Held = { prepared: Signable; at: number }
+export type Held = { prepared: Signable }
 
-// "ready": the transaction to sign again. "stale": its blockhash is past, so it can no
-// longer land. "gone": this page does not hold it.
+// "ready": the transaction to sign again. "stale": its blockhash is past, or too close to
+// it, so it can no longer land. "gone": this page does not hold it.
 export type HeldLookup =
   | { status: "ready"; prepared: Signable }
   | { status: "stale" }
   | { status: "gone" }
 
+// `height` is the finalized block height, or null when it could not be read: then nothing
+// says the blockhash is live, and it is let go of.
 export function lookupHeld(
   held: Held | undefined,
-  now: number,
-  maxAgeMs = heldMaxAgeMs,
+  height: number | null,
 ): HeldLookup {
   if (!held) return { status: "gone" }
-  return now - held.at >= maxAgeMs
+  return height === null ||
+    height + heldMarginBlocks > held.prepared.last_valid_block_height
     ? { status: "stale" }
     : { status: "ready", prepared: held.prepared }
 }
@@ -42,16 +44,17 @@ export function lookupHeld(
 // `SentPaymentError`, so it is never a refusal, and the transaction is dropped.
 export const keepsHeld = (error: unknown) => isSignatureRejection(error)
 
-export function createHeldStore(now: () => number = Date.now) {
+export function createHeldStore() {
   const held = new Map<string, Held>()
   return {
     // By `paymentKey`.
     hold(key: string, prepared: Signable) {
-      held.set(key, { prepared, at: now() })
+      held.set(key, { prepared })
     },
     has: (key: string) => held.has(key),
     // Looks, and keeps it: a signature cancelled again leaves it held.
-    lookup: (key: string) => lookupHeld(held.get(key), now()),
+    lookup: (key: string, height: number | null) =>
+      lookupHeld(held.get(key), height),
     // Once it was sent, confirmed, or replaced: it must never be signed again.
     drop: (key: string) => void held.delete(key),
     // Everything a run still holds, in position order: what a sequence that stopped

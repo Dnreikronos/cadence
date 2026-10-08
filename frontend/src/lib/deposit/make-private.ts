@@ -18,7 +18,11 @@ export type Resume = "wrap" | "apply" | "check"
 // An apply that went out and was not seen through: what the screen needs to ask the
 // service about it again without preparing anything. `signature` is null when `submit`
 // itself failed, so there is nothing to ask about.
-export type SentApply = { request_id: string; signature: string | null }
+export type SentApply = {
+  request_id: string
+  last_valid_block_height: number
+  signature: string | null
+}
 
 export class MakePrivateError extends Error {
   constructor(
@@ -80,7 +84,7 @@ export async function runMakePrivate({
   let submitted = false
   // The apply step follows the same rule as `/me` (`applyPending`): once it is past
   // "signing" a failure may have gone out, and is a `SentApplyError`.
-  let applyId: string | null = null
+  let applied: Omit<SentApply, "signature"> | null = null
   let applyPast = false
   let applySignature: string | null = null
   try {
@@ -120,7 +124,10 @@ export async function runMakePrivate({
     step = "applying"
     onStep(step)
     const prepared = await api.accounts.applyPending(wallet, { signal })
-    applyId = prepared.request_id
+    applied = {
+      request_id: prepared.request_id,
+      last_valid_block_height: prepared.last_valid_block_height,
+    }
     await signAndConfirm(
       prepared,
       (signature) =>
@@ -146,9 +153,9 @@ export async function runMakePrivate({
     const dropped = error instanceof ApiError && lostForGood.has(error.code)
     // A timeout carries the signature of a transaction that was submitted.
     const timedOut = error instanceof ConfirmTimeoutError
-    if (applyId && !dropped && (applyPast || timedOut)) {
+    if (applied && !dropped && (applyPast || timedOut)) {
       const sent = {
-        request_id: applyId,
+        ...applied,
         signature:
           applySignature ??
           (timedOut ? (error as ConfirmTimeoutError).signature : null),

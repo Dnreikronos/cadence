@@ -1,5 +1,9 @@
 import {
-  paySequence,
+  readBlockHeight,
+  type ReadBlockHeight,
+} from "@/lib/solana/block-height"
+import {
+  payOne,
   paymentKey,
   type RunApi,
   type RunContext,
@@ -52,27 +56,40 @@ export type { RunApi }
 // signature keeps it and the ones after it held, to sign again. Any other stop lets go of
 // the ones after it: their proofs assumed the stopped payment landed, so they must never
 // be sent, and nothing was. A held transaction past its blockhash is let go of too, with
-// every one after it.
-export async function continueRun(context: RunContext, held: HeldStore) {
-  const pending = held.ofRun(context.runId)
-  const ready = []
+// every one after it. The chain's height is read again before each one is offered: the
+// signatures before it may have taken long enough for it to go stale.
+export async function continueRun(
+  context: RunContext,
+  held: HeldStore,
+  blockHeight: ReadBlockHeight = readBlockHeight,
+) {
+  const { runId, signal } = context
+  const pending = held.ofRun(runId)
+  let stoppedAt: number | null = null
   for (const prepared of pending) {
-    if (
-      held.lookup(paymentKey(context.runId, prepared.position)).status !==
-      "ready"
-    ) {
+    if (signal?.aborted) return
+    // A height that cannot be read says nothing about the blockhash, and the transaction
+    // is let go of. Leaving the page is not that: everything stays as it was.
+    let height: number | null
+    try {
+      height = await blockHeight(signal)
+    } catch {
+      if (signal?.aborted) return
+      height = null
+    }
+    const key = paymentKey(runId, prepared.position)
+    if (held.lookup(key, height).status !== "ready") break
+    if (!(await payOne(context, prepared))) {
+      stoppedAt = prepared.position
       break
     }
-    ready.push(prepared)
   }
-  const stoppedAt = await paySequence(context, ready)
-  if (context.signal?.aborted) return
-  const cancelled =
-    stoppedAt !== null && held.has(paymentKey(context.runId, stoppedAt))
+  if (signal?.aborted) return
+  const cancelled = stoppedAt !== null && held.has(paymentKey(runId, stoppedAt))
   if (cancelled) return
   for (const prepared of pending) {
     if (stoppedAt === null || prepared.position > stoppedAt) {
-      held.drop(paymentKey(context.runId, prepared.position))
+      held.drop(paymentKey(runId, prepared.position))
     }
   }
 }

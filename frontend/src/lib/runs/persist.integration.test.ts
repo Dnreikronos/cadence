@@ -3,7 +3,7 @@ import { createApiClient } from "@/lib/api/client"
 import { MOCK_ORIGIN } from "@/lib/api/config"
 import type { Run } from "@/lib/api/schemas"
 import { signAndConfirm } from "@/lib/api/sign"
-import { mockTokenAccount } from "@/lib/api/mocks/chain"
+import { mockBlockHeight, mockTokenAccount } from "@/lib/api/mocks/chain"
 import { COMPANY_WALLET, db, resetDb, seedPeople } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
@@ -268,7 +268,7 @@ describe("a run left while its first payment was being confirmed", () => {
     const { events, local, set } = screenEvents()
     set(hydrateLocal(evidence.payments.read()))
     const [record] = evidence.payments.read()
-    let time = record.at
+    let time = Date.now()
     await recoverOne(
       {
         runId: record.run_id,
@@ -277,11 +277,12 @@ describe("a run left while its first payment was being confirmed", () => {
         events: recordEvidence(events, evidence, record.run_id, personOf),
       },
       record,
-      // A clock that moves only when the check waits: its 90 seconds run instantly.
+      // The mock chain on a clock that moves only when the check waits: the minute of
+      // the blockhash runs instantly.
       {
         sleep: async (ms) => void (time += ms),
         pollMs: 3_000,
-        now: () => time,
+        blockHeight: async () => mockBlockHeight(time),
       },
     )
     expect(local()[paymentKey(record.run_id, record.position)]).toMatchObject({

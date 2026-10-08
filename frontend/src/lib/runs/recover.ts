@@ -27,13 +27,16 @@ export function hydrateLocal(payments: readonly SentPayment[]): LocalRows {
 
 type ReconcileOptions = Pick<
   Parameters<typeof reconcileWrap>[0],
-  "now" | "sleep" | "pollMs"
+  "blockHeight" | "sleep" | "pollMs"
 >
 
 // Asks about one saved payment until the answer is final: confirmed, failed (the
-// network refused it, or it was seen missing until its blockhash ran out 90 s after it
-// was sent) or unknown (no signature, a service that could not be reached or that no
-// longer has it). Only leaving the screen throws.
+// network refused it) or unknown (no signature, a service that could not be reached or
+// that no longer has it, or one that still says it is not there once the last valid
+// block height has passed). A payment is never ruled failed on absence alone: an
+// executed one can be missing from RPC history (gotchas.md), and past its blockhash the
+// browser's finalized height may simply be ahead of the service's. Only leaving the
+// screen throws.
 export async function reconcilePayment(
   record: SentPayment,
   confirm: (signature: string) => Promise<Receipt>,
@@ -46,11 +49,12 @@ export async function reconcilePayment(
       record: {
         request_id: record.request_id,
         signature: record.signature,
-        at: record.at,
+        last_valid_block_height: record.last_valid_block_height,
       },
       api: { wrap: { confirm: (request) => confirm(request.signature) } },
       signal,
       ...options,
+      missingPastIsFailed: false,
     })
   } catch {
     // Not being able to ask says nothing about the payment.

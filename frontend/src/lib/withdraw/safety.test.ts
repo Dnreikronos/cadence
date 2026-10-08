@@ -67,6 +67,9 @@ const record = (patch: Partial<HeldRecord> = {}): HeldRecord => ({
   at: 1_000,
   ...patch,
 })
+// The chain on a test clock that starts at 1000: the blockhash was read then, and has
+// 150 blocks (60 s) of life.
+const heightAt = (time: number) => 321 - 150 + Math.floor((time - 1_000) / 400)
 
 // The flow as far as the send: `submit` is the thing that must not run when it should not.
 function flowWith(submit: () => void): WithdrawDeps {
@@ -261,7 +264,7 @@ describe("looking up several held withdrawals", () => {
       records,
       api: { unwrap: { confirm } },
       refresh: () => {},
-      now: () => time,
+      blockHeight: async () => heightAt(time),
       sleep: async (ms) => void (time += ms),
     })
     expect(overlap).toBe(1)
@@ -281,14 +284,14 @@ describe("looking up several held withdrawals", () => {
       records,
       api: { unwrap: { confirm } },
       refresh: () => {},
-      now: () => time,
+      blockHeight: async () => heightAt(time),
       sleep: async (ms) => void (time += ms),
     })
-    // The first record is asked at t=1000, 5000, ... until 90 s after it was sent (t=91000,
-    // so 23 asks, the last 2 s after the one before); the second only after that.
+    // The first record is asked at t=1000, 5000, ... until the chain is past its last
+    // valid block (t=65000, 17 asks); the second only after that.
     const gaps = at.slice(1).map((t, i) => t - at[i])
     expect(Math.max(...gaps)).toBeLessThanOrEqual(4_000)
-    expect(at.filter((t) => t <= 91_000).length).toBeGreaterThan(0)
+    expect(at.filter((t) => heightAt(t) > 321)).toHaveLength(2)
     // Never two asks at the same instant.
     expect(new Set(at).size).toBe(at.length)
   })

@@ -33,7 +33,7 @@ export const sentPaymentSchema = z.object({
   person_id: z.string().min(1),
   signature: z.string().min(1).nullable(),
   last_valid_block_height: z.number().int().nonnegative(),
-  // Epoch milliseconds when it was sent: the 90-second rule counts from here.
+  // Epoch milliseconds when it was sent: the wait before a release counts from here.
   at: z.number().int().nonnegative(),
 })
 export type SentPayment = z.infer<typeof sentPaymentSchema>

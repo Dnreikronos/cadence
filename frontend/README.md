@@ -546,6 +546,14 @@ mainnet shows a DEVNET badge. `NEXT_PUBLIC_SOLANA_RPC_URL`
 optionally replaces the cluster's public RPC. The Deposit screen reads the company
 wallet's plain USDC from the chain (its associated token account, the one a wrap
 debits) with `src/lib/solana/balances.ts`; mock mode answers that read from the mock.
+Whether a sent or held transaction can still land is decided by the finalized block
+height against its `last_valid_block_height`, never by a clock:
+`src/lib/solana/block-height.ts` reads `getBlockHeight` in real mode, and the mock
+chain's clock-driven height (the one the mock prepares against) in mock mode. Past that
+height a deposit, apply or withdrawal the service still calls "not finalized" is
+treated as failed (a known risk, question 28 in the contract); a payroll payment never
+is, and stays unconfirmed with "Check again". A height that stays unreadable ends the
+check as unknown after about two minutes, rather than asking forever.
 
 ## Deploys
 

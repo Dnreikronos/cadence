@@ -128,7 +128,9 @@ function prepared(wallet: string, version: 0 | 1 = 1) {
     transaction_version: version,
     required_signers: [wallet],
     recent_blockhash: `MockBlockhash${n}1111111111111111111111111111`,
-    last_valid_block_height: 1000 + n,
+    // The height the screens read in mock mode (lib/solana/block-height.ts) passes it
+    // about a minute from now.
+    last_valid_block_height: mockBlockHeight() + MOCK_BLOCKHASH_LIFETIME,
   }
 }
 
@@ -371,7 +373,7 @@ function prepareAttempt(payment: MockRunPayment, attempt: number) {
   payment.requestId = p.request_id
   payment.error = null
   payment.transaction = p.transaction
-  payment.lastValidBlockHeight = mockBlockHeight() + MOCK_BLOCKHASH_LIFETIME
+  payment.lastValidBlockHeight = p.last_valid_block_height
 }
 
 // The run as the service answers it. `withTransactions` lists the positions whose

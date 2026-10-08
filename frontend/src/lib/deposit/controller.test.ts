@@ -14,7 +14,6 @@ import {
   type MakePrivateState,
 } from "./controller"
 import { ConfirmTimeoutError } from "@/lib/api/sign"
-import { EXPIRY_MS } from "./reconcile"
 import { browserProfile } from "@/lib/browser-profile"
 import type { Acquired } from "@/lib/flow-lock"
 import { submissionStore } from "@/lib/submissions"
@@ -38,6 +37,8 @@ const prepared = (id: string) => ({
   recent_blockhash: "blockhash",
   last_valid_block_height: 500,
 })
+const chainHeight = (clock: number) =>
+  400 + Math.floor((clock - 1_000_000) / 400)
 
 // Resolves when released; rejects with the abort reason when the signal fires,
 // like a fetch that is cancelled.
@@ -128,6 +129,9 @@ function setup(
     pendingUnits: () =>
       options.pendingUnits === null ? undefined : (options.pendingUnits ?? "0"),
     now: () => clock,
+    // A block every 400 ms on the same clock, 100 blocks (40 s) short of the
+    // prepared transactions' last valid one.
+    blockHeight: async () => chainHeight(clock),
     sleep,
   }
   const controller = new MakePrivateController(() => deps)
@@ -420,7 +424,7 @@ describe("MakePrivateController", () => {
       expect(harness.api.wrap.confirm).toHaveBeenCalledTimes(3)
     })
 
-    it("calls a wrap that never showed up failed only after its blockhash window", async () => {
+    it("calls a wrap that never showed up failed only once the chain is past its last valid block", async () => {
       const harness = await leaveAfterSubmit()
       harness.api.wrap.confirm.mockRejectedValue(
         new ApiError(409, "transaction_not_finalized"),
@@ -432,7 +436,8 @@ describe("MakePrivateController", () => {
 
       expect(back.getState()).toEqual({ status: "resolved", outcome: "failed" })
       const waited = harness.sleep.mock.calls.reduce((sum, [ms]) => sum + ms, 0)
-      expect(waited).toBeGreaterThanOrEqual(EXPIRY_MS - 3_000)
+      expect(chainHeight(1_000_000 + waited)).toBeGreaterThan(500)
+      expect(chainHeight(1_000_000 + waited - 3_000)).toBeLessThanOrEqual(500)
     })
 
     it("keeps the lock and the record when the service cannot be asked, and checks again on request", async () => {
