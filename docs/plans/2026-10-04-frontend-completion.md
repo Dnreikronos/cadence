@@ -261,8 +261,8 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
 - **Filters are client-side.** No route has filter parameters, so the receipts and the
   auditor payments filters narrow only the pages already loaded; "Load more" can
   bring in more matches.
-- **The mock's CSV is not the contract's format.** It writes `4200`, not `4200.000000`,
-  and ends lines with `\n`, not CRLF. The other
+- **The mock's CSV export ignores filters.** It writes the contract's format
+  (`4200.000000`, CRLF) but always exports every payment; the other
   [mock deviations](../dev/API_CONTRACT.md#mock-deviations) apply too, and
   `transaction_mismatch` is never produced by the mock.
 - **Hosted Supabase (#100) is untested.** Nothing was run against a hosted project,

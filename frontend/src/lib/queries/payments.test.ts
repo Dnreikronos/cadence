@@ -91,10 +91,10 @@ describe("companyExportOptions", () => {
     const [blob, filename] = save.mock.calls[0]
     expect(filename).toMatch(/^cadence-payments-\d{4}-\d{2}-\d{2}\.csv$/)
     const text = await (blob as Blob).text()
-    expect(text.split(/\r?\n/)[0]).toBe(
-      "date,counterparty,amount,status,signature",
-    )
-    expect(text.split(/\r?\n/)).toHaveLength(1 + db.payments.length)
+    // Every line ends in CRLF, so the last split is empty.
+    const lines = text.split("\r\n").slice(0, -1)
+    expect(lines[0]).toBe("date,counterparty,amount,status,signature")
+    expect(lines).toHaveLength(1 + db.payments.length)
     expect(notify).toHaveBeenCalledWith(`Saved ${filename}`)
   })
 

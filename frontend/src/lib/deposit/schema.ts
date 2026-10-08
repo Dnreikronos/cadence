@@ -60,13 +60,29 @@ export function toBaseUnits(input: string, available: bigint): AmountResult {
   return { ok: true, units }
 }
 
+// The sign, whole USDC and all six fraction digits, by integer math on the absolute
+// value: a bare remainder of -1n would print as "0.0000-1".
+function splitBaseUnits(units: bigint) {
+  const abs = units < 0n ? -units : units
+  return {
+    sign: units < 0n ? "-" : "",
+    whole: abs / unitsPerUsdc,
+    fraction: String(abs % unitsPerUsdc).padStart(decimals, "0"),
+  }
+}
+
 // Plain decimal string with up to six fraction digits and no trailing zeros.
 export function formatBaseUnits(units: bigint): string {
-  const whole = units / unitsPerUsdc
-  const fraction = String(units % unitsPerUsdc)
-    .padStart(decimals, "0")
-    .replace(/0+$/, "")
-  return fraction ? `${whole}.${fraction}` : String(whole)
+  const { sign, whole, fraction } = splitBaseUnits(units)
+  const trimmed = fraction.replace(/0+$/, "")
+  return trimmed ? `${sign}${whole}.${trimmed}` : `${sign}${whole}`
+}
+
+// Decimal string with exactly six fraction digits, "4200.000000" (the CSV export's
+// amount, docs/dev/API_CONTRACT.md).
+export function formatUsdcFixed(units: bigint): string {
+  const { sign, whole, fraction } = splitBaseUnits(units)
+  return `${sign}${whole}.${fraction}`
 }
 
 // For display only; a safe integer divided by 1e6 is exact enough to show.

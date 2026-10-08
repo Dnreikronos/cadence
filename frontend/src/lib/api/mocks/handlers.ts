@@ -1,6 +1,6 @@
 import { http, HttpResponse, delay } from "msw"
 import { z } from "zod"
-import { formatBaseUnits } from "@/lib/deposit/schema"
+import { formatUsdcFixed } from "@/lib/deposit/schema"
 import { base64FromBytes } from "../base64"
 import { MOCK_ORIGIN } from "../config"
 import * as s from "../schemas"
@@ -272,12 +272,13 @@ function cell(value: string) {
   return /[",\r\n]/.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe
 }
 
+// Every line, the last one too, ends in CRLF.
 function csv(rows: MockPayment[], name: (p: MockPayment) => string) {
   const lines = rows.map((p) =>
     [
       p.paidAt.slice(0, 10),
       name(p),
-      formatBaseUnits(p.amount),
+      formatUsdcFixed(p.amount),
       p.status,
       p.signature ?? "",
     ]
@@ -285,9 +286,16 @@ function csv(rows: MockPayment[], name: (p: MockPayment) => string) {
       .join(","),
   )
   return new HttpResponse(
-    ["date,counterparty,amount,status,signature", ...lines].join("\n"),
+    ["date,counterparty,amount,status,signature", ...lines]
+      .map((line) => `${line}\r\n`)
+      .join(""),
     {
-      headers: { "content-type": "text/csv; charset=utf-8" },
+      headers: {
+        "content-type": "text/csv; charset=utf-8",
+        "content-disposition": "attachment",
+        "x-content-type-options": "nosniff",
+        "cache-control": "no-store",
+      },
     },
   )
 }
