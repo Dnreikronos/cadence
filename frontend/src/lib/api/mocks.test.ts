@@ -189,6 +189,7 @@ describe("confirm", () => {
       await api.unwrap.prepare({
         wallet: ME_WALLET,
         amount: "1",
+        aes_key: AES_KEY,
         acknowledge_reveal_risk: true,
       }),
       await api.accounts.applyPending(ME_WALLET),
