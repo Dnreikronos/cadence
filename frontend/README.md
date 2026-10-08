@@ -529,13 +529,11 @@ Vercel builds this directory, with a preview for every pull request. The project
 **Root Directory must be `frontend/`**: the frontend is the only thing a Vercel project
 may build. `.vercelignore` at the repository root keeps `spikes/`, `services/`,
 `supabase/`, `ops/` and `docs/` out of an upload, but it only affects uploads from the
-Vercel CLI: for Git-connected deploys the Root Directory setting is the real control. In particular
-**`spikes/embedded-wallet/web` must never be deployed**: it has unauthenticated routes that
-use the Turnkey root key (it is to be removed from `main`). Set the variables from
-`.env.example` per environment: Production gets `mainnet`, Preview and Development get
-`devnet`. Every environment that configures Supabase also sets `NEXT_PUBLIC_SITE_URL` (the https
-origin it is served from), Production and Preview alike, and Production sets no
-`NEXT_PUBLIC_DEV_TOOLS`.
+Vercel CLI: for Git-connected deploys the Root Directory setting is the real control.
+Set the variables from `.env.example` per environment: Production gets `mainnet`,
+Preview and Development get `devnet`. Every environment that configures Supabase also
+sets `NEXT_PUBLIC_SITE_URL` (the https origin it is served from), Production and
+Preview alike, and Production sets no `NEXT_PUBLIC_DEV_TOOLS`.
 
 `NEXT_PUBLIC_API_MODE` must be set outside `next dev`, or the build fails. A Preview
 can run `mock` (with the Supabase variables unset, the demo viewer is on). Production must

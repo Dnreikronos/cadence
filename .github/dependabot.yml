@@ -11,12 +11,9 @@ updates:
       frontend:
         patterns: ['*']
 
-  # The embedded-wallet spike and its web page (unauthenticated routes that hold the
-  # Turnkey root key: it stays on the list until it is removed from main).
+  # The embedded-wallet spike's Node scripts.
   - package-ecosystem: npm
-    directories:
-      - /spikes/embedded-wallet
-      - /spikes/embedded-wallet/web
+    directory: /spikes/embedded-wallet
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

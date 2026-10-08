@@ -241,9 +241,10 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
       check it.
 - [ ] **Vercel Root Directory is `frontend/`**, and nothing else is deployed from the
       repository.
-- [ ] **Remove `spikes/embedded-wallet/web` from `main`.** It has unauthenticated routes
+- [x] **Remove `spikes/embedded-wallet/web` from `main`.** It has unauthenticated routes
       that use the Turnkey root key, and Dependabot still watches it only because it is
-      there.
+      there. Done on 2026-10-06: removed with its Dependabot entry; its last version is
+      in git history at `475646b`.
 - [x] Reconcile the payroll client and mock with the `/runs` the backend implemented
       (#107, `docs/dev/RUNS_API.md`): token-account recipients and a sender account,
       the `aes_key`, `position`-based batch confirm, retry with amounts and the

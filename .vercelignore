@@ -2,7 +2,7 @@
 # project's Root Directory setting is the real control.
 # Only frontend/ is ever built and deployed from a Vercel project (Root Directory:
 # frontend). Everything else here is never part of a deployment, and spikes/ holds
-# unauthenticated routes that use the Turnkey root key.
+# throwaway scripts that read the Turnkey root key from the repository's .env.
 spikes/
 services/
 supabase/
