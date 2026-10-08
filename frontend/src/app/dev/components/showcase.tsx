@@ -1,6 +1,7 @@
 "use client"
 
 import { ArrowRight, Plus, Send } from "lucide-react"
+import { ServiceStatusBanner } from "@/components/app/service-status-banner"
 import { AmountDisplay, type AmountState } from "@/components/ui/amount-display"
 import { AvatarPerson } from "@/components/ui/avatar-person"
 import { buttonVariants, iconNudge } from "@/components/ui/button"
@@ -13,11 +14,13 @@ import { StatusPill, type PaymentStatus } from "@/components/ui/status-pill"
 import { TransparentBadge } from "@/components/ui/transparent-badge"
 import { WhoCanSee, whoCanSee } from "@/components/ui/who-can-see"
 import type { Role } from "@/lib/auth/guard"
+import type { ServiceStatus } from "@/lib/queries/health"
 import { cn } from "@/lib/utils"
 
 const statuses: PaymentStatus[] = ["pending", "confirmed", "failed"]
 const amountStates: AmountState[] = ["revealed", "hidden", "loading"]
 const roles: Role[] = ["admin", "recipient", "auditor"]
+const serviceStatuses: ServiceStatus[] = ["down", "failing", "degraded"]
 const colors = [
   "ink",
   "ink-muted",
@@ -242,6 +245,14 @@ export function Showcase() {
               title="Payment failed"
               description="The transaction expired before it landed. Nothing was sent."
             />
+          </div>
+        </Section>
+
+        <Section title="ServiceStatusBanner">
+          <div className="space-y-4">
+            {serviceStatuses.map((status) => (
+              <ServiceStatusBanner key={status} status={status} />
+            ))}
           </div>
         </Section>
 

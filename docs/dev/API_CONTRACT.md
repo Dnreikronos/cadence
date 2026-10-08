@@ -555,8 +555,10 @@ them. A wrap found confirmed or refused is cleared as before.
 `{ "status": "ok", "build_sha": "<sha>", "rpc_reachable": true }` with `200`, or
 `status: "unavailable"` and `rpc_reachable: false` with `503` when the Solana RPC
 cannot be reached (`health.rs:12-25`). The client has `api.health()`, which returns
-the body of a `503` instead of throwing, but **no screen calls it yet**: there is no
-service-status banner.
+the body of a `503` instead of throwing. The signed-in shell polls it and shows a
+service-status notice when the service does not answer ("Can't reach Cadence"), answers
+a 500 ("Cadence is having trouble") or answers `unavailable` ("Cadence can't reach
+Solana").
 
 ### Wrap: public USDC to private ✅
 
@@ -1171,8 +1173,9 @@ handler, including each failure that changes the UI:
   available balance, `forbidden_role` once a role is chosen. **`transaction_mismatch`
   is not mocked**: no handler emits it, so no screen has been exercised against it.
 - `401` (`unauthenticated`), `429` with `Retry-After` (`rate-limited`), `503` with
-  `service_unavailable` (`service-down`; `/health` answers its own `503` body) and
-  `503` with `auth_unavailable` (`auth-down`).
+  `service_unavailable` (`service-down`, `/health` included) and `503` with
+  `auth_unavailable` (`auth-down`). `/health` answers its own `503` body, `unavailable`,
+  under `rpc-down`, as the service does when it cannot reach the RPC.
 - Slow responses (`slow`, 1.5 s), so the progress states are exercised.
 - The auditor routes with three seeded auditors (one active, one invited and one
   whose invite has expired, derived from the age of the invite), both conflicts, and

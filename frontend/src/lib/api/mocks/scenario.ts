@@ -23,7 +23,8 @@ export const scenarioNames = [
   "prepare-failed",
   // Apply-pending finds a credit that arrived mid-flight.
   "credit-mismatch",
-  // The chain read behind the public USDC balance fails (not a proof-service call).
+  // The chain read behind the public USDC balance fails, and /health answers
+  // `unavailable`, as the service does when it cannot reach the RPC.
   "rpc-down",
   // The wallet refuses to sign, as when the person cancels the prompt: nothing is sent.
   "sign-cancelled",

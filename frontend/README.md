@@ -66,7 +66,8 @@ e2e/                Playwright tests (specs) and e2e/support/ (helpers)
 Every screen below runs end to end on the mock service. A route's data sources are
 routes of [`docs/dev/API_CONTRACT.md`](../docs/dev/API_CONTRACT.md); most of them are
 proposals that the real service does not have yet. The shell of an admin or recipient
-page also reads the private balance (`GET /company/balance`, `GET /me/balance`), and
+page also reads the private balance (`GET /company/balance`, `GET /me/balance`), every
+signed-in shell polls `GET /health` for the [service status](#money-and-queries), and
 `WalletProvider` is mounted by the shell. The issue is the one in
 [`docs/plans/2026-10-04-frontend-completion.md`](../docs/plans/2026-10-04-frontend-completion.md).
 
@@ -96,9 +97,9 @@ different shape (`docs/dev/RUNS_API.md`), so they work on the mock only until th
 client is reconciled; see
 [Payroll run](../docs/dev/API_CONTRACT.md#payroll-run-one-approval-many-recipients-).
 
-Nothing calls `GET /health`, and `POST /transfer` has no screen: payroll goes through
-`/runs`. The filters on the receipts and auditor screens narrow only the pages already
-loaded, because no route has filter parameters.
+`POST /transfer` has no screen: payroll goes through `/runs`. The filters on the
+receipts and auditor screens narrow only the pages already loaded, because no route
+has filter parameters.
 
 ## API client and mocks
 
@@ -222,9 +223,19 @@ in `src/lib/queries/client.ts` (30 s stale time, one retry except for a 4xx
 `src/lib/queries/keys.ts`. The sidebar balance is `useShellBalance(role, viewer)`,
 cached per viewer and cleared on sign-out and when a sign-in page mounts (clearing also
 empties the mutation cache). A mutation that moves money must call
-`invalidateBalances(queryClient)` so the sidebar updates. Two things poll: the run
-screen reads `GET /runs/:id` every 5 s while a payment is open, and `/me` reads the
-balance every 3 s for up to 30 s after a confirmed apply.
+`invalidateBalances(queryClient)` so the sidebar updates. Three things poll: the run
+screen reads `GET /runs/:id` every 5 s while a payment is open, `/me` reads the
+balance every 3 s for up to 30 s after a confirmed apply, and the signed-in shell reads
+`GET /health` every 60 s (every 15 s while something is wrong), and again when the tab
+regains focus or the browser reconnects. The shell shows nothing while the service is
+fine; `useServiceStatus()` (`src/lib/queries/health.ts`) turns the check into a notice
+above the screen: `down` ("Can't reach Cadence") when the service does not answer (a
+network error, or a 502 to 504 from the proxy; `service-down` in the mock), `failing`
+("Cadence is having trouble") when it answers with another 5xx such as a 500
+`internal_error`, and `degraded` ("Cadence can't reach Solana") when it answers
+`unavailable` because it cannot reach the Solana RPC (`rpc-down`). A 429, a 4xx or a
+drifted body is not an outage: the last answer stands. The notice sits in a polite
+live region that is always mounted, so a screen reader reads it when it appears.
 
 ### When a transaction may have been sent
 

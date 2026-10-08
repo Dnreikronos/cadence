@@ -302,7 +302,8 @@ Actions with Dependabot, a non-blocking `pnpm audit`, and a `.vercelignore`.
   parse like the other tolerant enums (the reveal-risk level, the auditor status, the
   access-log enums): a run row shows "Unknown" with no action, and the repay guard treats
   the payment as possibly paid. What a new status means is still for the backend to say.
-- **No service-status banner.** `api.health()` exists and no screen calls it.
+- **Service-status banner.** Done on 2026-10-06: the signed-in shell polls `api.health()`
+  and says when the service is down, failing or cannot reach Solana.
 - **`/transfer` has no screen.** Payroll goes through `/runs`, so the client's `/transfer`
   and the `aes_key` it needs are never used.
 - **This sync was done by reading the code on `main`**, not by running the screens in a
