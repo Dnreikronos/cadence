@@ -53,6 +53,8 @@ function outcome(response: NextResponse) {
 afterEach(() => vi.unstubAllEnvs())
 
 beforeEach(() => {
+  // What next.config.ts inlines into every build.
+  vi.stubEnv("CSP_CONNECT_SRC", "'self' https://a.example")
   Object.assign(config, {
     broken: false,
     mode: "mock",
@@ -65,9 +67,10 @@ beforeEach(() => {
   vi.mocked(membershipOf).mockReset()
   // Supabase configured: a visitor with no session.
   getUser.mockResolvedValue({ data: { user: null } })
-  createMiddlewareClient.mockImplementation(() => ({
+  // As the real client does: the response forwards the request's headers.
+  createMiddlewareClient.mockImplementation((request: NextRequest) => ({
     supabase: { auth: { getUser, signOut } },
-    response: () => NextResponse.next(),
+    response: () => NextResponse.next({ request }),
     cacheHeaders: {},
   }))
 })
@@ -417,5 +420,81 @@ describe("without Supabase configured (real mode, no demo)", () => {
     expect(outcome(await visit("/company"))).toBe("/sign-in?next=%2Fcompany")
     expect(console.error).toHaveBeenCalledExactlyOnceWith("TypeError")
     expect(outcome(await visit("/sign-in"))).toBe("next")
+  })
+})
+
+describe("the Content-Security-Policy", () => {
+  const policy = (response: NextResponse) =>
+    response.headers.get("content-security-policy")!
+  // What Next hands the page renderer: the request headers the response forwards.
+  const forwarded = (response: NextResponse) =>
+    response.headers.get("x-middleware-request-content-security-policy")
+  const nonce = (value: string) => value.match(/'nonce-([^']+)'/)?.[1]
+
+  const real = () => Object.assign(config, { mode: "real" })
+  const supabase = () => Object.assign(config, { supabaseConfigured: true })
+
+  // One path per way out of the middleware, in each configuration.
+  const exits: {
+    name: string
+    set: () => void
+    path: string
+    role?: string
+  }[] = [
+    {
+      name: "the demo, a page",
+      set: () => {},
+      path: "/company",
+      role: "admin",
+    },
+    { name: "the demo, a redirect", set: () => {}, path: "/company" },
+    {
+      name: "the /dev 404 rewrite",
+      set: () => vi.stubEnv("NODE_ENV", "production"),
+      path: "/dev/api",
+    },
+    { name: "no Supabase, a public page", set: real, path: "/" },
+    { name: "no Supabase, a guarded page", set: real, path: "/company" },
+    { name: "Supabase, no session", set: supabase, path: "/company" },
+    { name: "Supabase, a public page", set: supabase, path: "/sign-in" },
+  ]
+
+  it.each(exits)(
+    "is sent, with a nonce, on $name",
+    async ({ set, path, role }) => {
+      set()
+      const response = await visit(path, role)
+      expect(policy(response)).toContain("connect-src 'self' https://a.example")
+      expect(nonce(policy(response))).toBeTruthy()
+      // A page that renders gets the same policy to read its nonce from.
+      if (!response.headers.get("location"))
+        expect(forwarded(response)).toBe(policy(response))
+    },
+  )
+
+  it("has a new nonce on every response", async () => {
+    const nonces = new Set<string | undefined>()
+    for (let i = 0; i < 5; i++) nonces.add(nonce(policy(await visit("/"))))
+    expect(nonces.size).toBe(5)
+  })
+
+  it("lets a /dev page be framed by its own origin, however it is spelled", async () => {
+    vi.stubEnv("NODE_ENV", "production")
+    expect(policy(await visit("/%64ev/api"))).toContain(
+      "frame-ancestors 'self'",
+    )
+    expect(policy(await visit("/developers"))).toContain(
+      "frame-ancestors 'none'",
+    )
+  })
+
+  it("only restricts framing under `next dev`", async () => {
+    vi.stubEnv("NODE_ENV", "development")
+    expect(policy(await visit("/"))).toBe("frame-ancestors 'none'")
+  })
+
+  it("fails every response when the build did not set its sources", async () => {
+    vi.stubEnv("CSP_CONNECT_SRC", "")
+    await expect(visit("/")).rejects.toThrow("CSP_CONNECT_SRC")
   })
 })

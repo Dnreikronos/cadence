@@ -407,21 +407,38 @@ the token to the proof service, so script can read it. Closing that needs a same
 BFF that holds the cookie and adds the token itself; it is a decision for the team (see
 the [completion plan](../docs/plans/2026-10-04-frontend-completion.md#before-going-live)).
 
-`next.config.ts` sets these on every response, built from the `NEXT_PUBLIC_*` values the
-build inlines (`src/lib/security-headers.ts`):
+The middleware (`src/middleware.ts`) sends the policy and `next.config.ts` sends the
+other headers, all built from the `NEXT_PUBLIC_*` values the build inlines
+(`src/lib/security-headers.ts`):
 
-- `Content-Security-Policy` (stage 1): `default-src 'self'; script-src 'self'
-'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src
-'self'; connect-src 'self' <proof service, or the mock origin in mock mode> <Supabase>
-https://api.turnkey.com <Solana RPC>; worker-src 'self' blob:; object-src 'none';
-base-uri 'self'; form-action 'self'; frame-ancestors 'none'`. The `/dev/*` pages say
-  `frame-ancestors 'self'` (they frame each other) and `X-Frame-Options: SAMEORIGIN`. The
-  mock origin has to be listed in mock mode: MSW answers it inside the page, but the
-  browser checks `connect-src` before the worker sees the request. `next dev` gets only
-  `frame-ancestors`, because its refresh runtime needs `eval`. There is no `unsafe-eval`:
-  zod is set `jitless` (`src/lib/zod-config.ts`, loaded first by
-  `src/instrumentation-client.ts`) so it never probes for `new Function`, which a strict
-  CSP reports as a violation.
+- `Content-Security-Policy` (stage 2, per request): `default-src 'self'; script-src
+'self' 'nonce-<new for every response>' 'strict-dynamic'; style-src 'self'
+'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self' <proof
+service, or the mock origin in mock mode> <Supabase> https://api.turnkey.com <Solana
+RPC>; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self';
+frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types
+nextjs#bundler`.
+  - **The nonce.** The middleware mints 16 random bytes per request and sets the policy on
+    the request too: Next reads the nonce from there and stamps it on its own scripts,
+    and `strict-dynamic` trusts the chunks they load. No inline script runs without it.
+    Every page renders per request (`await connection()` in the root layout), because a
+    prerendered page would carry no nonce and the policy would block its scripts. A
+    `<Script>` or inline script added later needs the nonce (read it from the request's
+    `content-security-policy` header) or it will not run.
+  - **Trusted Types.** Script sinks (`innerHTML`, `eval`, a script URL) take only typed
+    values, and only Next's chunk loader policy may make them. A mock-mode build also
+    allows a `default` policy (`src/lib/api/mocks/trusted-types.ts`): MSW registers its
+    service worker with a plain string, and that policy lets exactly
+    `/mockServiceWorker.js` through.
+  - **Styles** keep `unsafe-inline`: React `style` attributes, sonner and the landing's
+    motion cannot take a nonce, and a style runs no script.
+  - The `/dev/*` pages say `frame-ancestors 'self'` (they frame each other) and
+    `X-Frame-Options: SAMEORIGIN`. The mock origin has to be listed in mock mode: MSW
+    answers it inside the page, but the browser checks `connect-src` before the worker
+    sees the request. `next dev` gets only `frame-ancestors`, because its refresh runtime
+    needs `eval`. There is no `unsafe-eval`: zod is set `jitless`
+    (`src/lib/zod-config.ts`, loaded first by `src/instrumentation-client.ts`) so it
+    never probes for `new Function`, which a strict CSP reports as a violation.
 - `X-Frame-Options: DENY`, `Referrer-Policy: same-origin` (not `no-referrer`: Chrome then
   sends `Origin: null` with the confirm form's POST, which the verify route refuses),
   `X-Content-Type-Options: nosniff`,
@@ -431,14 +448,10 @@ base-uri 'self'; form-action 'self'; frame-ancestors 'none'`. The `/dev/*` pages
   year rather than every subdomain of the domain; raise it once the deploy has run clean.
   `poweredByHeader` is off.
 
-The inline allowances are what stage 1 costs. A nonce-based stage 2 (`nonce` plus
-`strict-dynamic`, no `unsafe-inline`) would remove them, and it is cheaper than it
-sounds: the app routes and `/` already render per request (the viewer is read from
-cookies and the responses are no-store), so a nonce does not take static pages away. It
-is recommended before the wallet lands and is not done here. A new third-party origin
-(analytics, fonts, an image host) needs adding to `connectSources` or the policy, and the
-e2e suite fails on any violation (`e2e/csp.spec.ts` and the console watch in
-`e2e/support/test.ts`).
+A new third-party origin (analytics, fonts, an image host) needs adding to
+`connectSources` or the policy, and a library that writes to a script sink needs its
+own Trusted Types policy named in `trusted-types`. The e2e suite fails on any violation
+(`e2e/csp.spec.ts` and the console watch in `e2e/support/test.ts`).
 
 ## End-to-end tests
 

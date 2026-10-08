@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { Instrument_Sans, JetBrains_Mono } from "next/font/google"
+import { connection } from "next/server"
 import { ClusterBadge } from "@/components/app/cluster-badge"
 import { Providers } from "./providers"
 import "./globals.css"
@@ -24,11 +25,15 @@ export const metadata: Metadata = {
     "Confidential USDC payments for teams, freelancers and suppliers.",
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  // Every page renders per request, so its scripts carry the nonce the middleware minted
+  // for it (src/lib/security-headers.ts). A prerendered page would carry none, and the
+  // policy would block its scripts.
+  await connection()
   return (
     <html
       lang="en"

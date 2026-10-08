@@ -29,10 +29,6 @@ const screens = {
   },
 } as const
 
-export function generateStaticParams() {
-  return Object.keys(screens).map((screen) => ({ screen }))
-}
-
 export default async function ScreenPreview({
   params,
 }: {

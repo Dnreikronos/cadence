@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest"
 import {
   connectSources,
   contentSecurityPolicy,
+  cspEnv,
   headerRules,
+  mintNonce,
+  policyFor,
+  readCspEnv,
   type HeaderOptions,
 } from "./security-headers"
 
@@ -36,10 +40,10 @@ const forPath = (path: string, options?: HeaderOptions) =>
       .flatMap(({ headers }) => headers.map(({ key, value }) => [key, value])),
   )
 
-// One directive of the policy served for a path, exactly as written (undefined if absent).
-const directive = (path: string, name: string, options?: HeaderOptions) =>
-  forPath(path, options)
-    ["Content-Security-Policy"].split("; ")
+// One directive of a policy, exactly as written (undefined if absent).
+const directive = (policy: string, name: string) =>
+  policy
+    .split("; ")
     .find((part) => part === name || part.startsWith(`${name} `))
     ?.slice(name.length + 1)
 
@@ -52,10 +56,7 @@ const real = {
 describe("headerRules", () => {
   it.each(["/", "/sign-in", "/company/people", "/auth/confirm"])(
     "refuses framing on %s",
-    (path) => {
-      expect(directive(path, "frame-ancestors")).toBe("'none'")
-      expect(forPath(path)["X-Frame-Options"]).toBe("DENY")
-    },
+    (path) => expect(forPath(path)["X-Frame-Options"]).toBe("DENY"),
   )
 
   it.each([
@@ -64,10 +65,9 @@ describe("headerRules", () => {
     "/dev/components",
     "/dev/components/shell/admin",
     "/dev/api",
-  ])("lets %s be framed by its own origin only", (path) => {
-    expect(directive(path, "frame-ancestors")).toBe("'self'")
-    expect(forPath(path)["X-Frame-Options"]).toBe("SAMEORIGIN")
-  })
+  ])("lets %s be framed by its own origin only", (path) =>
+    expect(forPath(path)["X-Frame-Options"]).toBe("SAMEORIGIN"),
+  )
 
   it("keeps the dev exception out of every other path, including look-alikes", () => {
     for (const path of [
@@ -77,7 +77,6 @@ describe("headerRules", () => {
       "/dev-tools-are-off",
       "/sign-in",
     ]) {
-      expect(directive(path, "frame-ancestors")).toBe("'none'")
       expect(forPath(path)["X-Frame-Options"]).toBe("DENY")
     }
   })
@@ -117,22 +116,26 @@ describe("headerRules", () => {
     ).toBe("max-age=31536000")
   })
 
-  it("restricts only framing under `next dev`, whose refresh runtime needs eval", () => {
-    expect(forPath("/", { development: true })["Content-Security-Policy"]).toBe(
-      "frame-ancestors 'none'",
-    )
-    expect(
-      forPath("/dev/api", { development: true })["Content-Security-Policy"],
-    ).toBe("frame-ancestors 'self'")
+  it("leaves the policy to the middleware: it carries a nonce per request", () => {
+    for (const path of ["/", "/sign-in", "/dev/api"])
+      expect(forPath(path, { production: true })).not.toHaveProperty(
+        "Content-Security-Policy",
+      )
   })
 })
 
+const nonce = "bm9uY2Utbm9uY2Utbm9uY2U="
+
 describe("contentSecurityPolicy", () => {
-  it("is the stage 1 policy, directive by directive", () => {
+  it("is the stage 2 policy, directive by directive", () => {
     const connect = ["'self'", "https://a.example"]
-    expect(contentSecurityPolicy(connect, "'none'").split("; ")).toEqual([
+    expect(
+      contentSecurityPolicy({ connect, frameAncestors: "'none'", nonce }).split(
+        "; ",
+      ),
+    ).toEqual([
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline'",
+      `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "font-src 'self'",
@@ -142,29 +145,81 @@ describe("contentSecurityPolicy", () => {
       "base-uri 'self'",
       "form-action 'self'",
       "frame-ancestors 'none'",
+      "require-trusted-types-for 'script'",
+      "trusted-types nextjs#bundler",
     ])
   })
 
-  it("never allows eval, or a script from anywhere else", () => {
-    const policy = contentSecurityPolicy(connectSources({ ...real }), "'none'")
+  it("never allows an inline script without the nonce, eval, or a script from anywhere else", () => {
+    const policy = contentSecurityPolicy({
+      connect: connectSources({ ...real }),
+      frameAncestors: "'none'",
+      nonce,
+    })
+    expect(directive(policy, "script-src")).not.toContain("unsafe-inline")
     expect(policy).not.toContain("unsafe-eval")
     expect(policy).not.toMatch(/script-src[^;]*https?:/)
     expect(policy).not.toContain("*")
   })
+})
 
-  it("serves the full policy on every path, the dev pages with their own framing", () => {
-    expect(directive("/sign-in", "script-src")).toBe("'self' 'unsafe-inline'")
-    expect(directive("/dev/api", "script-src")).toBe("'self' 'unsafe-inline'")
-    expect(directive("/dev/api", "object-src")).toBe("'none'")
+describe("policyFor", () => {
+  const connect = connectSources({ ...real })
+  const at = (dev: boolean, development = false) =>
+    policyFor({ connect, dev, development, nonce })
+
+  it("refuses framing, except a /dev page by its own origin", () => {
+    expect(directive(at(false), "frame-ancestors")).toBe("'none'")
+    expect(directive(at(true), "frame-ancestors")).toBe("'self'")
   })
 
-  it("carries the connect-src it is given on every path", () => {
-    const connect = connectSources({ ...real })
-    const options = { connect }
-    expect(directive("/", "connect-src", options)).toBe(connect.join(" "))
-    expect(directive("/dev/api", "connect-src", options)).toBe(
-      connect.join(" "),
+  it("serves the full policy on the /dev pages too, with the nonce and connect-src", () => {
+    for (const dev of [false, true]) {
+      expect(directive(at(dev), "script-src")).toBe(
+        `'self' 'nonce-${nonce}' 'strict-dynamic'`,
+      )
+      expect(directive(at(dev), "object-src")).toBe("'none'")
+      expect(directive(at(dev), "connect-src")).toBe(connect.join(" "))
+    }
+  })
+
+  it("allows the `default` Trusted Types policy in a mock build only, for MSW's worker", () => {
+    expect(directive(at(false), "trusted-types")).toBe("nextjs#bundler")
+    expect(
+      directive(
+        policyFor({
+          connect,
+          dev: false,
+          development: false,
+          mockWorker: true,
+          nonce,
+        }),
+        "trusted-types",
+      ),
+    ).toBe("nextjs#bundler default")
+  })
+
+  it("mints a nonce of its own when none is given", () => {
+    const minted = policyFor({ connect, dev: false, development: false })
+    expect(directive(minted, "script-src")).toMatch(
+      /^'self' 'nonce-[A-Za-z0-9+/]{22}==' 'strict-dynamic'$/,
     )
+  })
+
+  it("restricts only framing under `next dev`, whose refresh runtime needs eval", () => {
+    expect(at(false, true)).toBe("frame-ancestors 'none'")
+    expect(at(true, true)).toBe("frame-ancestors 'self'")
+  })
+})
+
+describe("mintNonce", () => {
+  it("is 16 random bytes in base64, a new one each time", () => {
+    const nonces = new Set(Array.from({ length: 50 }, mintNonce))
+    expect(nonces.size).toBe(50)
+    for (const n of nonces) {
+      expect(n).toMatch(/^[A-Za-z0-9+/]{22}==$/)
+      expect(atob(n)).toHaveLength(16)
+    }
   })
 })
 
@@ -209,5 +264,22 @@ describe("connectSources", () => {
       rpcUrl: "https://x.example/rpc",
     })
     expect(sources.filter((s) => s === "https://x.example")).toHaveLength(1)
+  })
+})
+
+describe("cspEnv and readCspEnv", () => {
+  it("carry the sources from next.config.ts to the middleware unchanged", () => {
+    const connect = connectSources(real)
+    for (const mockWorker of [false, true]) {
+      expect(readCspEnv(cspEnv({ connect, mockWorker }))).toEqual({
+        connect,
+        mockWorker,
+      })
+    }
+  })
+
+  it("refuse a build that did not set the connect sources", () => {
+    for (const CSP_CONNECT_SRC of [undefined, ""])
+      expect(() => readCspEnv({ CSP_CONNECT_SRC })).toThrow("CSP_CONNECT_SRC")
   })
 })
