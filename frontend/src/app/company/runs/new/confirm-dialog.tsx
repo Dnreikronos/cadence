@@ -6,6 +6,39 @@ import { Modal } from "@/components/ui/modal"
 import { unitsToUsd } from "@/lib/money"
 import { payLabel, type PayrollPerson } from "@/lib/runs/plan"
 
+// Who is paid, how much, and the token account each payment goes to: the account the
+// pre-sign check holds every transaction to (`checkedSign`), shown whole so it can be
+// compared with what the person gave.
+export function RecipientList({
+  recipients,
+}: {
+  recipients: readonly PayrollPerson[]
+}) {
+  return (
+    <ul className="max-h-56 divide-y divide-line overflow-y-auto rounded-lg border border-line">
+      {recipients.map((person) => (
+        <li
+          key={person.id}
+          className="flex items-center justify-between gap-3 px-3 py-2 text-ui"
+        >
+          <span className="min-w-0">
+            <span className="block wrap-break-word text-ink">
+              {person.name}
+            </span>
+            {person.tokenAccount && (
+              <span className="block font-mono text-caption/normal break-all text-ink-muted">
+                <span className="sr-only">To account </span>
+                {person.tokenAccount}
+              </span>
+            )}
+          </span>
+          <AmountDisplay amount={unitsToUsd(person.amount ?? "0")} />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
 // The one confirmation before anything is created. It shows, and the caller sends,
 // exactly the snapshot taken when it opened. It cannot be dismissed while the run is
 // being created (the caller ignores `onOpenChange(false)` then), and it closes itself
@@ -43,19 +76,7 @@ export function ConfirmRunDialog({
       title={title ?? payLabel(recipients.length, total)}
       description="Payments are sent encrypted on-chain, so the public can't read the amounts. You, each recipient, any auditor you invited and Cadence can. A payment that has to go as an ordinary transfer is marked Transparent, and its amount is public."
     >
-      <ul className="max-h-56 divide-y divide-line overflow-y-auto rounded-lg border border-line">
-        {recipients.map((person) => (
-          <li
-            key={person.id}
-            className="flex items-center justify-between gap-3 px-3 py-2 text-ui"
-          >
-            <span className="min-w-0 wrap-break-word text-ink">
-              {person.name}
-            </span>
-            <AmountDisplay amount={unitsToUsd(person.amount ?? "0")} />
-          </li>
-        ))}
-      </ul>
+      <RecipientList recipients={recipients} />
       {repaid.length > 0 && (
         <p
           role="alert"
@@ -67,8 +88,9 @@ export function ConfirmRunDialog({
         </p>
       )}
       <p className="mt-3 text-caption/normal text-ink-muted">
-        Your wallet signs each payment in turn. Keep this page open until they
-        are all confirmed.
+        Your wallet signs each payment in turn, only to the account shown under
+        each name: a payment prepared for any other account is refused before it
+        is signed. Keep this page open until they are all confirmed.
       </p>
       {error && (
         <p role="alert" className="mt-3 text-ui/normal text-danger-fg">

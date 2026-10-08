@@ -118,6 +118,24 @@ test("the confirmation total equals the sum, and the run completes", async ({
   ).toBeVisible()
 })
 
+test("a payment prepared for another account than the one shown is never signed", async ({
+  page,
+}) => {
+  await openNewRun(page, "foreign-destination")
+  await payButton(page).click()
+  const dialog = page.getByRole("dialog", { name: "Pay 3 people · $20,000.00" })
+  // Each payment names the account it goes to.
+  await expect(dialog.getByText(/^To account /)).toHaveCount(3)
+  await dialog.getByRole("button", { name: "Confirm and sign" }).click()
+
+  // The first payment is refused before the wallet signs it, and the run stops there.
+  await expect(rowOf(page, "Bruno Costa")).toContainText(
+    "prepared this payment differently from what you approved",
+  )
+  await expect(rowOf(page, "Northwind Audit")).toContainText("Not sent")
+  await expect(sidebar(page)).toContainText(usd(startBalance))
+})
+
 test("a failure stops the run there, and a retry waits until nothing can still land", async ({
   page,
   watch,

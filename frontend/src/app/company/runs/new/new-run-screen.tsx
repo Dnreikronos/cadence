@@ -56,7 +56,7 @@ import {
   runBlocker,
   unreadableMessage,
 } from "@/lib/runs/evidence"
-import { paymentKey } from "@/lib/runs/executor"
+import { approvedPayees, paymentKey } from "@/lib/runs/executor"
 import { useLeaveGuard } from "@/lib/runs/use-leave-guard"
 import {
   runLockName,
@@ -298,6 +298,13 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
             void signer.start(
               made.run,
               (position) => made.recipients[position]?.id ?? "",
+              // Each position to the account the admin approved for it.
+              approvedPayees(
+                made.request.payments.map((p, position) => [
+                  position,
+                  p.recipient,
+                ]),
+              ),
               lease,
             )
           },

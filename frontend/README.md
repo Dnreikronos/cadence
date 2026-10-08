@@ -118,6 +118,7 @@ const prepared = await api.wrap.prepare({
 const receipt = await signAndConfirm(prepared, {
   signer, // the user's wallet
   submit, // sends the signed bytes to Solana, returns the signature
+  finality, // reads the signature's status from the network
   confirm: (signature) =>
     api.wrap.confirm({ request_id: prepared.request_id, signature }),
 })
@@ -138,6 +139,64 @@ signer's, and polls confirm for up to 60 s, with `onSubmitted` to keep the signa
 if the page is left. The conventions are in the contract; the rule for what a screen
 does after a transaction may have been sent is
 [below](#when-a-transaction-may-have-been-sent).
+
+**The pre-sign check.** Before anything is signed, `signAndConfirm` decodes the
+prepared bytes with `@solana/kit` (`lib/solana/inspect.ts`; versions 0 and 1, and a
+lookup table is refused outright) and checks them against what the person asked for.
+Every sign call names its flow, and nothing is signed without one. `checkAllowed` holds
+for all of them: the wallet pays and is the only signer, every program is one of
+`lib/solana/programs.ts` (System, Compute Budget, Token-2022, the ZK ElGamal proof program,
+Associated Token and Cadence's token-wrap), and the fee stays bounded: a version 0
+message's compute budget instructions set a unit limit up to the runtime's 1.4M and a
+unit price up to 100,000 micro-lamports; a version 1 message carries none, and its config
+sets a unit limit up to 1.4M and a priority fee up to 0.00014 SOL; neither asks for heap. Then `checkFlow` reads every instruction as the service
+builds it, with every account it names derived in the browser (`lib/solana/accounts.ts`)
+or approved by the person, never taken from the service's answer:
+
+- A payroll payment (`checkedSign` in `lib/runs/executor.ts`): exactly one confidential
+  transfer from the company's token account to the account the admin approved for that
+  position, in the wrapped mint. `approvedPayees` approves each account for one position
+  only, and a run whose prepared payments repeat a position, or name one the admin did not
+  approve, is refused whole before anything is signed. Its three proof contexts are created
+  in the same transaction, funded with no more than their rent-exempt minimum, verified
+  into with the wallet as the context authority (the one key that can close them), and
+  closed back to the wallet; a proof verified into any other account is refused. The
+  approvals live in the page's memory with the held transactions, so "Sign again" after a
+  reload has nothing to sign, as before. Checked against a real payment from the devnet acceptance of #55
+  (`lib/solana/devnet-fixture.ts`).
+- A deposit's wrap (`wrap.rs`): token-wrap's `Wrap` from the wallet's USDC account into
+  its own confidential account, and the deposit, both for the amount entered; optionally
+  creating and configuring that account first. The withdrawal's unwrap (`unwrap.rs`): the
+  withdrawal from that account and `Unwrap` to the wallet's own USDC account, for the
+  amount entered. The escrow, mint authority and wrapped mint are token-wrap's derived
+  addresses.
+- Activation's configure: creating the wallet's own confidential associated account
+  (`CreateIdempotent`, paid by the wallet), reallocating it for the confidential extension
+  and configuring it, with its pubkey validity proof. An apply pending: the extension's
+  apply on that account. Both may carry bounded compute budget instructions in version 0;
+  nothing in either touches another account.
+
+The confidential transfer is the only instruction that moves value to an account the
+wallet does not own, and only in a payment. A refusal is an `UnexpectedTransactionError`
+and every screen says so the same way (`refusalMessage`).
+
+What it cannot check: confidential amounts are ciphertexts, so a payment's amount is the
+service's; the run's sender account is the mock's in mock mode and unknown in real mode
+until the service says where it comes from (API_CONTRACT Q36); configure and apply pending
+have no service builder yet, so their shape is the extension's, on the wallet's associated
+confidential account, and a builder that acts on another account will be refused; proof
+data is not verified here (the proof program does that); and on mainnet the derived
+addresses assume Cadence's devnet token-wrap deployment.
+
+**The network's own read.** A receipt is the service's word. Once confirm returns one,
+`signAndConfirm` asks the wallet's `finality` (`getSignatureStatuses` with the whole
+history, `lib/solana/finality.ts`) about the signature it submitted, within the same
+60 s, and returns the receipt only once the network shows it finalized without an
+error. Not seen in time is a `ConfirmTimeoutError`; finalized with an error is a
+`FinalityMismatchError`. Both are a `SentUnsettledError`, which every screen reads the same
+way: the payment stays as sent and is never sent again. Asking again about a payment sent earlier (the
+run's "Check again", the deposit and withdrawal look-ups) still takes the service's
+word.
 
 `NEXT_PUBLIC_API_MODE` picks the service. `mock` answers from an in-browser
 [MSW](https://mswjs.io) handler for every route, including the failures that
@@ -160,7 +219,10 @@ shadows a Next route. In the browser, `window.cadenceMock` controls it:
 - `set("slow", "partial-failure")`, `clear()` and `active()` flip the failure
   scenarios, and `scenarios` lists them: `instant`, `slow`, `unauthenticated`,
   `rate-limited`, `service-down`, `setup-required`, `tx-failed`, `partial-failure`,
-  `credit-mismatch` and `rpc-down` (the chain read behind the public USDC balance).
+  `credit-mismatch`, `rpc-down` (the chain read behind the public USDC balance),
+  `sign-cancelled`, `chain-unconfirmed` (the network read never sees a confirmed
+  transaction finalized) and `foreign-destination` (a run's payments are prepared to an
+  account no one approved, and the pre-sign check refuses them).
   `?mock=slow,partial-failure` in the page URL turns scenarios on, and is read once,
   when the worker starts (at the first API call).
 - `setRole("admin" | "recipient" | "auditor" | null)` makes routes enforce a role
@@ -201,15 +263,16 @@ go to the mock service, which only knows those ids; in real mode they are the Su
 ## Wallet
 
 Screens sign through `useWallet()` (`src/lib/wallet`): `{ status, address, signer,
-submit }`, plus `loading` while the mock wallet loads and a `reason` when it is
+submit, finality }`, plus `loading` while the mock wallet loads and a `reason` when it is
 unavailable. The signed-in shell mounts `WalletProvider` with the viewer's role. Mock
 mode gives the admin and recipient a mock wallet and the auditor none; those mocks are
 imported dynamically, so a real-mode build has none of them. Real mode is
 `unavailable` and throws naming #78 and #80, until they land, so in real mode nothing
 can be signed yet. The `Signer` has `signTransaction` and an optional `signMessage`
 (used only for the key-derivation message). `useSignAndConfirm()` gives
-`await run(prepared, confirm, onStep, extra)`, where `extra` takes `signal` and
-`onSubmitted`.
+`await run(prepared, confirm, onStep, extra)`, where `extra` takes `signal`,
+`onSubmitted` and the flow's pre-sign `check`. `finality` reads the mock network in mock
+mode (`mockFinality`); the embedded wallet is to use `fetchFinality`.
 
 ## Money and queries
 

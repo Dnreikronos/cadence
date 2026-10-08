@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
+import { base64FromBytes } from "@/lib/api/base64"
 import { ApiError, ContractError } from "@/lib/api/errors"
+import { mockAccountTransaction } from "@/lib/api/mocks/chain"
 import type { Receipt, UnwrapPrepared } from "@/lib/api/schemas"
 import {
   ConfirmTimeoutError,
@@ -7,6 +9,7 @@ import {
   signAndConfirm,
 } from "@/lib/api/sign"
 import { KeyInputUnavailableError } from "@/lib/runs/errors"
+import { UnexpectedTransactionError } from "@/lib/solana/inspect"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
   SentWithdrawalError,
@@ -30,9 +33,16 @@ const receipt: Receipt = {
   slot: 1,
   status: "finalized",
 }
+const unwrapBytes = await mockAccountTransaction({
+  kind: "unwrap",
+  wallet,
+  n: 1,
+  amount: BigInt(4_200_000_000),
+})
 const prepared = (level: "none" | "near" | "exact"): UnwrapPrepared => ({
   request_id: "a".repeat(64),
-  transaction: "AQID",
+  // The wallet's own unwrap of `input.amount`, as the pre-sign check reads it.
+  transaction: base64FromBytes(unwrapBytes),
   transaction_version: 1,
   required_signers: [wallet],
   recent_blockhash: "hash",
@@ -44,7 +54,7 @@ const needsAck = () => new ApiError(409, "reveal_risk_not_acknowledged")
 function deps(overrides: Partial<WithdrawDeps> = {}): WithdrawDeps {
   return {
     prepare: vi.fn(async () => prepared("none")),
-    signAndConfirm: vi.fn(async (_p, confirm, _onStep, onSubmitted) => {
+    signAndConfirm: vi.fn(async (_p, confirm, _onStep, { onSubmitted }) => {
       onSubmitted("sig")
       return confirm("sig")
     }),
@@ -146,7 +156,7 @@ describe("runWithdraw", () => {
       submitted?: string,
     ) =>
       deps({
-        signAndConfirm: vi.fn(async (_p, _c, onStep, onSubmitted) => {
+        signAndConfirm: vi.fn(async (_p, _c, onStep, { onSubmitted }) => {
           for (const step of steps) onStep(step)
           if (submitted) onSubmitted(submitted)
           throw error
@@ -225,8 +235,9 @@ describe("runWithdraw", () => {
     const d: WithdrawDeps = {
       prepare: async () => prepared("none"),
       confirm,
-      signAndConfirm: (p, c, onStep, onSubmitted) =>
+      signAndConfirm: (p, c, onStep, extra) =>
         signAndConfirm(p, {
+          ...extra,
           signer: {
             address: wallet,
             signTransaction: async () => {
@@ -234,9 +245,9 @@ describe("runWithdraw", () => {
             },
           },
           submit,
+          finality: async () => "finalized",
           confirm: c,
           onStep,
-          onSubmitted,
         }),
     }
 
@@ -741,6 +752,10 @@ describe("failureOf", () => {
       failureOf(new WalletUnavailableError("because")).message,
     ).not.toMatch(/because/)
     expect(failureOf(new UnexpectedSignerError()).retryable).toBe(false)
+    const refused = failureOf(new UnexpectedTransactionError("program"))
+    expect(refused.message).toMatch(/doesn't match what you asked for/)
+    expect(refused.message).not.toMatch(/program/)
+    expect(refused.retryable).toBe(false)
   })
 
   it("says a withdrawal cannot be made here yet when its keys are refused, with no retry", () => {

@@ -5,7 +5,7 @@ import { WalletUnavailableError, type Wallet } from "./types"
 type Prepared = Parameters<typeof signAndConfirm>[0]
 type Extra = Omit<
   Parameters<typeof signAndConfirm>[1],
-  "signer" | "submit" | "confirm" | "onStep"
+  "signer" | "submit" | "confirm" | "finality" | "onStep"
 >
 
 // `signAndConfirm` bound to a wallet, so a screen passes only what it prepared and
@@ -14,8 +14,9 @@ export function bindSignAndConfirm(wallet: Wallet) {
   return async (
     prepared: Prepared,
     confirm: (signature: string) => Promise<Receipt>,
-    onStep?: (step: SignStep) => void,
-    extra: Extra = {},
+    onStep: ((step: SignStep) => void) | undefined,
+    // The flow's pre-sign check, required, and what else the call needs.
+    extra: Extra,
   ): Promise<Receipt> => {
     if (wallet.status !== "ready") {
       throw new WalletUnavailableError(wallet.reason ?? "no wallet")
@@ -24,6 +25,7 @@ export function bindSignAndConfirm(wallet: Wallet) {
       ...extra,
       signer: wallet.signer,
       submit: wallet.submit,
+      finality: wallet.finality,
       confirm,
       onStep,
     })

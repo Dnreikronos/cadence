@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest"
 import { base64FromBytes } from "@/lib/api/base64"
+import { flowCheck } from "@/lib/solana/flow-check"
+import {
+  mockAccountTransaction,
+  recordOnMockChain,
+} from "@/lib/api/mocks/chain"
 import { COMPANY_WALLET, ME_WALLET } from "@/lib/api/mocks/db"
 import type { Receipt } from "@/lib/api/schemas"
 import type { SignStep } from "@/lib/api/sign"
@@ -18,10 +23,28 @@ const receipt: Receipt = {
   slot: 1,
   status: "finalized",
 }
-const prepared = (signer: string) => ({
-  transaction: base64FromBytes(Uint8Array.of(1, 2, 3)),
+const prepared = async (signer: string) => ({
+  transaction: base64FromBytes(
+    await mockAccountTransaction({
+      kind: "apply-pending",
+      wallet: signer,
+      n: 1,
+    }),
+  ),
   required_signers: [signer],
 })
+
+// The apply's own pre-sign check, for the wallet that signs.
+const apply = (wallet: string) => ({
+  check: flowCheck(wallet, { flow: "apply" }),
+})
+
+// A confirm that lands the transaction on the mock network, as the mock service does.
+const landing = () =>
+  vi.fn(async (signature: string) => {
+    recordOnMockChain(signature, "finalized")
+    return receipt
+  })
 
 describe("unavailableWallet", () => {
   it("is unavailable and refuses to sign or submit, naming the reason", async () => {
@@ -76,8 +99,13 @@ describe("bindSignAndConfirm", () => {
   it("signs, submits and confirms with the wallet's signer, reporting each step", async () => {
     const run = bindSignAndConfirm(mockWalletFor("recipient"))
     const steps: SignStep[] = []
-    const confirm = vi.fn(async () => receipt)
-    const result = await run(prepared(ME_WALLET), confirm, (s) => steps.push(s))
+    const confirm = landing()
+    const result = await run(
+      await prepared(ME_WALLET),
+      confirm,
+      (s) => steps.push(s),
+      apply(ME_WALLET),
+    )
     expect(result).toBe(receipt)
     expect(steps).toEqual(["signing", "submitting", "confirming"])
     expect(confirm).toHaveBeenCalledOnce()
@@ -89,9 +117,9 @@ describe("bindSignAndConfirm", () => {
   it("refuses a request for anyone else's signature", async () => {
     const run = bindSignAndConfirm(mockWalletFor("recipient"))
     const confirm = vi.fn(async () => receipt)
-    await expect(run(prepared(COMPANY_WALLET), confirm)).rejects.toThrow(
-      /not yours/,
-    )
+    await expect(
+      run(await prepared(COMPANY_WALLET), confirm, undefined, apply(ME_WALLET)),
+    ).rejects.toThrow(/not yours/)
     expect(confirm).not.toHaveBeenCalled()
   })
 
@@ -101,7 +129,8 @@ describe("bindSignAndConfirm", () => {
     const controller = new AbortController()
     controller.abort(new Error("stopped"))
     await expect(
-      run(prepared(COMPANY_WALLET), confirm, undefined, {
+      run(await prepared(COMPANY_WALLET), confirm, undefined, {
+        ...apply(COMPANY_WALLET),
         signal: controller.signal,
       }),
     ).rejects.toThrow("stopped")
@@ -111,9 +140,9 @@ describe("bindSignAndConfirm", () => {
     const run = bindSignAndConfirm(unavailableWallet(realModeReason))
     const confirm = vi.fn(async () => receipt)
     const onStep = vi.fn()
-    await expect(run(prepared(ME_WALLET), confirm, onStep)).rejects.toThrow(
-      /#78.*#80/,
-    )
+    await expect(
+      run(await prepared(ME_WALLET), confirm, onStep, apply(ME_WALLET)),
+    ).rejects.toThrow(/#78.*#80/)
     expect(onStep).not.toHaveBeenCalled()
     expect(confirm).not.toHaveBeenCalled()
   })

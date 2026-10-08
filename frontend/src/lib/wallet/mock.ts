@@ -1,5 +1,6 @@
 import type { Role } from "@/lib/auth/guard"
 import { COMPANY_WALLET, ME_WALLET } from "@/lib/api/mocks/db"
+import { mockFinality } from "@/lib/api/mocks/chain"
 import { mockSigner, mockSubmit } from "@/lib/api/mocks/signer"
 import { unavailableWallet, type Wallet } from "./types"
 
@@ -20,5 +21,6 @@ export function mockWalletFor(role: Role): Wallet {
     address,
     signer: mockSigner(address),
     submit: mockSubmit,
+    finality: mockFinality,
   }
 }

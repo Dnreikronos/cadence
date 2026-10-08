@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { base64FromBytes } from "@/lib/api/base64"
 import { ApiError } from "@/lib/api/errors"
+import { mockAccountTransaction } from "@/lib/api/mocks/chain"
 import { COMPANY_WALLET } from "@/lib/api/mocks/db"
 import { mockSigner } from "@/lib/api/mocks/signer"
 import type { Receipt } from "@/lib/api/schemas"
@@ -29,9 +30,23 @@ const receipt = (id: string): Receipt => ({
   slot: 1,
   status: "finalized",
 })
-const prepared = (id: string) => ({
+// Bytes the pre-sign check reads as the wallet's own wrap of `amount`, and its apply.
+const wrapOf = (amount: string) =>
+  mockAccountTransaction({
+    kind: "wrap",
+    wallet: COMPANY_WALLET,
+    n: 1,
+    amount: BigInt(amount),
+  })
+const applyBytes = await mockAccountTransaction({
+  kind: "apply-pending",
+  wallet: COMPANY_WALLET,
+  n: 2,
+})
+const wrapBytes = await wrapOf("2500000000")
+const prepared = (id: string, bytes = wrapBytes) => ({
   request_id: id.repeat(64).slice(0, 64),
-  transaction: base64FromBytes(Uint8Array.of(1, 2, 3)),
+  transaction: base64FromBytes(bytes),
   transaction_version: 0 as const,
   required_signers: [COMPANY_WALLET],
   recent_blockhash: "blockhash",
@@ -86,8 +101,8 @@ function setup(
   }
   const api = {
     wrap: {
-      prepare: vi.fn(async () => ({
-        ...prepared("a"),
+      prepare: vi.fn(async (request: { amount: string }) => ({
+        ...prepared("a", await wrapOf(request.amount)),
         destination: "dest",
         mint: "mint",
         deposit_state: "pending_after_confirmation" as const,
@@ -97,7 +112,7 @@ function setup(
       ),
     },
     accounts: {
-      applyPending: vi.fn(async () => prepared("b")),
+      applyPending: vi.fn(async () => prepared("b", applyBytes)),
       confirmApplyPending: vi.fn<(...args: unknown[]) => Promise<Receipt>>(
         async () => receipt("b"),
       ),
@@ -109,6 +124,7 @@ function setup(
     address: COMPANY_WALLET,
     signer: mockSigner(COMPANY_WALLET),
     submit: vi.fn(async () => SIG),
+    finality: vi.fn(async () => "finalized" as const),
     ...options.wallet,
   }
   const refresh = vi.fn()
@@ -1021,7 +1037,7 @@ describe("MakePrivateController across tabs", () => {
     api.accounts.applyPending.mockImplementation(async () => {
       // Still held while the apply is prepared.
       expect(taken.held()).toBe(1)
-      return prepared("b")
+      return prepared("b", applyBytes)
     })
 
     await controller.deposit("1000000")

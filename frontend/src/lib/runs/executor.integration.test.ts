@@ -13,12 +13,16 @@ import { MOCK_ORIGIN } from "@/lib/api/config"
 import type { Run } from "@/lib/api/schemas"
 import { signatureSchema } from "@/lib/api/schemas"
 import { signAndConfirm } from "@/lib/api/sign"
-import { mockTokenAccount } from "@/lib/api/mocks/chain"
+import { mockFinality, mockTokenAccount } from "@/lib/api/mocks/chain"
 import { COMPANY_WALLET, db, resetDb, seedPeople } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
 import { mockSigner, mockSubmit } from "@/lib/api/mocks/signer"
+import { wrapAccounts } from "@/lib/solana/accounts"
 import {
+  approvedPayees,
+  checkedSign,
+  payOne,
   paymentKey,
   paySequence,
   recheckOne,
@@ -28,7 +32,11 @@ import {
   type RunContext,
   type RunEvents,
 } from "./executor"
-import { describeFailure, runMessage } from "./messages"
+import {
+  describeFailure,
+  refusedTransactionMessage,
+  runMessage,
+} from "./messages"
 import {
   canRecheck,
   canRetry,
@@ -81,24 +89,50 @@ async function createRun(): Promise<Run> {
   })
 }
 
-// The real `signAndConfirm`, with a clock that only moves when it sleeps, so waiting out
-// a minute of "not finalized" takes no time.
-function realSign(submit: (signed: Uint8Array) => Promise<string>) {
+// The accounts the run below pays, by position, as `approvedPayees` keeps them.
+const approved =
+  (
+    entries: [number, string][] = payees.map((p, i) => [
+      i,
+      mockTokenAccount(p.id),
+    ]),
+  ) =>
+  async () => ({
+    wallet: COMPANY_WALLET,
+    sender: mockTokenAccount(COMPANY_WALLET),
+    mint: (await wrapAccounts()).wrappedMint,
+    payees: approvedPayees(entries),
+  })
+
+// The real `signAndConfirm` with the run's pre-sign check (`checkedSign`), and a clock
+// that only moves when it sleeps, so waiting out a minute of "not finalized" takes no
+// time.
+function realSign(
+  submit: (signed: Uint8Array) => Promise<string>,
+  allowlist = approved(),
+): RunContext["sign"] {
   let time = 0
-  const sign: RunContext["sign"] = (prepared, confirm, onStep, extra) =>
+  const sign: Parameters<typeof checkedSign>[0] = (
+    prepared,
+    confirm,
+    onStep,
+    extra,
+  ) =>
     signAndConfirm(prepared, {
       signer: mockSigner(COMPANY_WALLET),
       submit,
+      finality: mockFinality,
       confirm,
       onStep,
-      signal: extra?.signal,
-      onSubmitted: extra?.onSubmitted,
+      check: extra.check,
+      signal: extra.signal,
+      onSubmitted: extra.onSubmitted,
       now: () => time,
       sleep: async (ms) => {
         time += ms
       },
     })
-  return sign
+  return checkedSign(sign, allowlist)
 }
 
 // What the signer hook does: every event goes through the real reducer.
@@ -314,5 +348,229 @@ describe("the mock wallet's signatures", () => {
       seen.add(signature)
     }
     expect(seen.size).toBe(300)
+  })
+})
+
+describe("a run's payments against the accounts the admin approved", () => {
+  it("signs and confirms a run that pays exactly the approved accounts", async () => {
+    scenarios.set("instant")
+    const created = await createRun()
+    const { events, local } = recorder()
+
+    await paySequence(
+      {
+        runId: created.run_id,
+        sign: realSign(mockSubmit),
+        api: runApi,
+        events,
+      },
+      signablesOf(created),
+    )
+
+    const rows = await rowsOf(created, local())
+    expect(rows.map((row) => row.status)).toEqual([
+      "confirmed",
+      "confirmed",
+      "confirmed",
+    ])
+  })
+
+  it("signs nothing when the service prepared a payment to another account", async () => {
+    scenarios.set("instant", "foreign-destination")
+    const created = await createRun()
+    const before = db.company.available
+    const { events, local } = recorder()
+    const submit = vi.fn(mockSubmit)
+
+    await paySequence(
+      {
+        runId: created.run_id,
+        sign: realSign(submit),
+        api: runApi,
+        events,
+      },
+      signablesOf(created),
+    )
+
+    expect(submit).not.toHaveBeenCalled()
+    expect(db.company.available).toBe(before)
+    expect(local()[paymentKey(created.run_id, 0)]).toMatchObject({
+      status: "failed",
+      message: refusedTransactionMessage,
+    })
+    // The run stops at the first refusal: the others are never signed.
+    expect(local()[paymentKey(created.run_id, 1)]).toBeUndefined()
+  })
+
+  it("signs nothing for an account the admin did not approve, even if the transaction pays it", async () => {
+    scenarios.set("instant")
+    const created = await createRun()
+    const { events, local } = recorder()
+    const submit = vi.fn(mockSubmit)
+    const [first, ...rest] = payees.map((p) => mockTokenAccount(p.id))
+    // Approved for the two later positions only.
+
+    await paySequence(
+      {
+        runId: created.run_id,
+        sign: realSign(
+          submit,
+          approved(rest.map((account, i) => [i + 1, account])),
+        ),
+        api: runApi,
+        events,
+      },
+      signablesOf(created),
+    )
+
+    expect(created.payments[0].destination).toBe(first)
+    expect(submit).not.toHaveBeenCalled()
+    expect(local()[paymentKey(created.run_id, 0)]).toMatchObject({
+      status: "failed",
+      message: refusedTransactionMessage,
+    })
+  })
+
+  it("signs nothing when a payment goes to an approved account, but another position's", async () => {
+    scenarios.set("instant")
+    const created = await createRun()
+    const { events, local } = recorder()
+    const submit = vi.fn(mockSubmit)
+    const [first, second, third] = payees.map((p) => mockTokenAccount(p.id))
+
+    await paySequence(
+      {
+        runId: created.run_id,
+        // The admin approved the first two people the other way round.
+        sign: realSign(
+          submit,
+          approved([
+            [0, second],
+            [1, first],
+            [2, third],
+          ]),
+        ),
+        api: runApi,
+        events,
+      },
+      signablesOf(created),
+    )
+
+    expect(submit).not.toHaveBeenCalled()
+    expect(local()[paymentKey(created.run_id, 0)]).toMatchObject({
+      status: "failed",
+      message: refusedTransactionMessage,
+    })
+  })
+
+  it("signs nothing when two prepared payments claim the same position", async () => {
+    scenarios.set("instant")
+    const created = await createRun()
+    const { events, local } = recorder()
+    const submit = vi.fn(mockSubmit)
+    const [first] = signablesOf(created)
+
+    // The service answered position 0 twice: the same person, paid twice.
+    await paySequence(
+      { runId: created.run_id, sign: realSign(submit), api: runApi, events },
+      [first, { ...first }],
+    )
+
+    expect(submit).not.toHaveBeenCalled()
+    expect(local()[paymentKey(created.run_id, 0)]).toMatchObject({
+      status: "failed",
+      message: refusedTransactionMessage,
+    })
+  })
+
+  it("signs none of a run when one of its positions was not approved", async () => {
+    scenarios.set("instant")
+    const created = await createRun()
+    const { events, local } = recorder()
+    const submit = vi.fn(mockSubmit)
+    const [first, second] = payees.map((p) => mockTokenAccount(p.id))
+
+    await paySequence(
+      {
+        runId: created.run_id,
+        // The third position was never approved: the first two must not go either.
+        sign: realSign(
+          submit,
+          approved([
+            [0, first],
+            [1, second],
+          ]),
+        ),
+        api: runApi,
+        events,
+      },
+      signablesOf(created),
+    )
+
+    expect(submit).not.toHaveBeenCalled()
+    expect(local()[paymentKey(created.run_id, 0)]).toMatchObject({
+      status: "failed",
+      message: refusedTransactionMessage,
+    })
+  })
+
+  it("never passes the same prepared payment twice through one signer", async () => {
+    scenarios.set("instant")
+    const created = await createRun()
+    const { events } = recorder()
+    const submit = vi.fn(mockSubmit)
+    const sign = realSign(submit)
+    const context = { runId: created.run_id, sign, api: runApi, events }
+    const [first] = signablesOf(created)
+
+    expect(await payOne(context, first)).toBe(true)
+    expect(await payOne(context, { ...first })).toBe(false)
+    expect(submit).toHaveBeenCalledTimes(1)
+  })
+
+  it("approves nothing when one account is approved for two positions", () => {
+    const [first, second] = payees.map((p) => mockTokenAccount(p.id))
+    expect(
+      approvedPayees([
+        [0, first],
+        [1, second],
+      ]).size,
+    ).toBe(2)
+    expect(
+      approvedPayees([
+        [0, first],
+        [1, first],
+      ]).size,
+    ).toBe(0)
+    // A later approval of a position replaces the earlier one.
+    expect(
+      approvedPayees([
+        [0, first],
+        [0, second],
+      ]).get(0),
+    ).toBe(second)
+  })
+
+  it("keeps a payment the service confirmed and the network never showed as sent, to ask about again", async () => {
+    scenarios.set("instant", "chain-unconfirmed")
+    const created = await createRun()
+    const { events, local } = recorder()
+
+    await paySequence(
+      {
+        runId: created.run_id,
+        sign: realSign(mockSubmit),
+        api: runApi,
+        events,
+      },
+      signablesOf(created),
+    )
+
+    const row = mergeRow(local()[paymentKey(created.run_id, 0)])
+    expect(row.status).toBe("waiting")
+    expect(canRecheck(row)).toBe(true)
+    expect(canRetry(row)).toBe(false)
+    // Nothing after it was signed.
+    expect(local()[paymentKey(created.run_id, 1)]).toBeUndefined()
   })
 })

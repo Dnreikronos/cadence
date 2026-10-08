@@ -299,6 +299,25 @@ All prepare routes return the same core fields, plus route-specific ones:
   #66): `signAndConfirm` throws `UnexpectedSignerError` before anything is signed
   when `required_signers` is empty or holds any key other than the signer's address.
   Any `transaction_version` other than `0` or `1` is a contract error.
+- The web app **decodes the bytes before signing** and refuses (`UnexpectedTransactionError`,
+  nothing signed) a transaction the wallet does not pay for and sign alone, one that loads
+  accounts from a lookup table, calls a program outside its allowlist or sets a fee above
+  its bounds, or one that is not, instruction by instruction, the shape this contract's
+  route builds. Every account is checked against one the browser derives or the person
+  approved, never against the response: a payroll payment is one confidential transfer
+  from the company's token account to the account the admin approved for that position, in
+  the wrapped mint, and a run whose payments repeat a position, or name one not approved,
+  is refused whole; a wrap and an unwrap move the amount asked for between the wallet's own
+  USDC and confidential associated accounts through token-wrap's derived escrow; configure
+  and apply pending act on the wallet's own confidential associated account only. Proof
+  contexts must be created in the same transaction, funded with at most their rent, verified
+  into with the wallet as the context authority and closed back to the wallet. A version 1
+  transaction states its budget in its config only, with no compute budget instructions. The rules are in the
+  [web app's README](../../frontend/README.md#api-client-and-mocks), with what they cannot
+  check (confidential amounts, proof contents). The service must keep building
+  transactions inside them, and a new instruction, account or program is a contract change.
+  `/accounts/configure` and `/accounts/apply-pending` must act on the wallet's associated
+  Token-2022 account for the wrapped mint.
 - Returning bytes does not move funds. Signing is the authorization.
 
 **The Signer.** The web app needs two things from the user's wallet, and nothing
@@ -1265,7 +1284,11 @@ and each one is a place where a screen has only been exercised against the mock.
   route is open to every caller. The wrap, transfer, accounts and keys routes enforce
   none.
 - **Chain data.** `request_id` is a counter in hex, not a SHA-256; the transaction is
-  96 meaningless bytes; the mock signer and the mock signature are never verified, so
+  real wire bytes the pre-sign check reads (a run payment, `/transfer`, `/wrap` and
+  `/unwrap` shaped like the service's, with the wallet's derived accounts and the amount
+  asked for; configure as creating, reallocating and configuring the wallet's confidential
+  account, and apply pending as the extension's apply on it), with filler for proofs; the "network" is a map of the signatures the mock
+  saw finalized or failed; the mock signer and the mock signature are never verified, so
   `transaction_mismatch` and a wrong wallet signature cannot occur. The recipient's
   and company's wallets are fixed addresses, and the company's plain USDC balance is
   a mock of a chain read (it can fail on its own, with the `rpc-down` scenario).
@@ -1395,6 +1418,10 @@ the problem, why it is real, and the suggested change. The backend owner decides
    _Suggested change._ Settle co-sign timing and spend policy first. Before signing,
    the client should at least decode the message and verify the fee payer, the
    programs, the source, the destination and the mint.
+   _Status (web app)._ Done for the fee payer, the programs and their instructions on
+   every route, and for the source and destination of a payroll payment. The mint is
+   not checked: the source account fixes it. Wrap, unwrap, configure and apply pending
+   have no destination check yet.
 
 9. **The auditor model does not match the tenancy schema.**
    _Problem._ `/audit/:company_id` and the company picker in #88 assume an auditor

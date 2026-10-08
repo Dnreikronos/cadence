@@ -455,7 +455,7 @@ describe("a run reloaded mid-way", () => {
     await recoverOne(
       {
         runId: RUN,
-        sign: vi.fn(),
+        sign: vi.fn() as RunContext["sign"],
         api: {
           confirm: async () => {
             throw new ApiError(0, "network_error")

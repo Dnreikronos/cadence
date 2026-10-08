@@ -6,7 +6,12 @@ import type {
   RunRetryRequest,
 } from "@/lib/api/schemas"
 import { isSignable } from "@/lib/api/schemas"
-import { ConfirmTimeoutError, type SignStep } from "@/lib/api/sign"
+import { SentUnsettledError, type SignStep } from "@/lib/api/sign"
+import type { TransactionCheck } from "@/lib/solana/flow-check"
+import {
+  UnexpectedTransactionError,
+  checkConfidentialTransfer,
+} from "@/lib/solana/inspect"
 import {
   ResponseMismatchError,
   SentPaymentError,
@@ -27,12 +32,115 @@ import {
 // transaction. The one exception is the network itself rejecting the transaction
 // (`transaction_failed`): it ran and did not land.
 
-type SignAndConfirm = (
-  prepared: Pick<Signable, "transaction" | "required_signers">,
+type Extra = {
+  signal?: AbortSignal
+  onSubmitted?: (signature: string) => void
+}
+
+type SignAndConfirm = ((
+  prepared: Pick<
+    Signable,
+    | "transaction"
+    | "required_signers"
+    | "destination"
+    | "position"
+    | "request_id"
+  >,
   confirm: (signature: string) => Promise<Receipt>,
   onStep?: (step: SignStep) => void,
-  extra?: { signal?: AbortSignal; onSubmitted?: (signature: string) => void },
+  extra?: Extra,
+) => Promise<Receipt>) & {
+  // Throws, before anything of a sequence is signed, when its positions are not all
+  // approved (`checkedSign`).
+  admit?: (positions: readonly number[]) => Promise<void>
+}
+
+// The wallet's sign call, which takes the pre-sign check.
+type SignChecked = (
+  prepared: Parameters<SignAndConfirm>[0],
+  confirm: (signature: string) => Promise<Receipt>,
+  onStep: ((step: SignStep) => void) | undefined,
+  extra: Extra & { check: TransactionCheck },
 ) => Promise<Receipt>
+
+// The accounts a run may pay, by position, as the admin approved them. Each account is
+// approved for one position only, so no one is paid twice in a run: only
+// `approvedPayees` makes one.
+export type Payees = ReadonlyMap<number, string> & {
+  readonly approved: unique symbol
+}
+
+// `[position, account]` pairs as the admin approved them, a later pair for a position
+// replacing an earlier one. An account approved for two positions approves nothing:
+// every payment of the run is then refused, unsent.
+export function approvedPayees(
+  entries: Iterable<readonly [number, string | null | undefined]>,
+): Payees {
+  const payees = new Map<number, string>()
+  for (const [position, account] of entries) {
+    if (account) payees.set(position, account)
+  }
+  const unique = new Set(payees.values()).size === payees.size
+  return (unique ? payees : new Map()) as ReadonlyMap<number, string> as Payees
+}
+
+// What a run's payments may do: move money in the wrapped mint from the company's account
+// to the account the admin approved for each position, signed by the company's wallet.
+// `sender` is the company's token account and `mint` the wrapped mint as this app derives
+// them, never as the service names them.
+export type RunAllowlist = {
+  wallet: string
+  sender: string
+  mint: string
+  payees: Payees
+}
+
+// Signing with the pre-sign check for a payment: the transaction must be one confidential
+// transfer from the company's account to the account the admin approved for that
+// position, and the same prepared payment never passes twice through one signer. The service's own
+// `destination` must name that same account, so the screen shows where the money goes.
+// A sequence is admitted only when every one of its positions is approved. The allowlist
+// is resolved when a payment is signed, so one that cannot be (the sender in real mode)
+// fails that payment, unsent.
+export function checkedSign(
+  sign: SignChecked,
+  allowlist: () => Promise<RunAllowlist>,
+): SignAndConfirm {
+  // Prepared payments already checked, by position and request.
+  const passed = new Set<string>()
+  const checked: SignAndConfirm = async (prepared, confirm, onStep, extra) => {
+    const { wallet, sender, mint, payees } = await allowlist()
+    const { position } = prepared
+    const destination = payees.get(position)
+    const key = `${position}:${prepared.request_id}`
+    return sign(prepared, confirm, onStep, {
+      ...extra,
+      check: (transaction) => {
+        if (
+          !destination ||
+          prepared.destination !== destination ||
+          passed.has(key)
+        ) {
+          throw new UnexpectedTransactionError("destination")
+        }
+        checkConfidentialTransfer(transaction, {
+          wallet,
+          sender,
+          destination,
+          mint,
+        })
+        passed.add(key)
+      },
+    })
+  }
+  checked.admit = async (positions) => {
+    const { payees } = await allowlist()
+    if (positions.some((position) => !payees.has(position))) {
+      throw new UnexpectedTransactionError("destination")
+    }
+  }
+  return checked
+}
 
 export type RunApi = {
   confirm: (
@@ -163,7 +271,7 @@ export async function payOne(
         ? new SentPaymentError(
             error,
             signature ??
-              (error instanceof ConfirmTimeoutError ? error.signature : null),
+              (error instanceof SentUnsettledError ? error.signature : null),
           )
         : error,
     )
@@ -179,6 +287,21 @@ export async function paySequence(
   payments: readonly Signable[],
 ): Promise<number | null> {
   const ordered = [...payments].sort((a, b) => a.position - b.position)
+  // The service names each payment's position: one named twice, or one the admin did not
+  // approve, stops the whole sequence before anything is signed.
+  const positions = ordered.map((prepared) => prepared.position)
+  try {
+    if (new Set(positions).size !== positions.length) {
+      throw new UnexpectedTransactionError("destination")
+    }
+    await context.sign.admit?.(positions)
+  } catch (error) {
+    if (ordered.length === 0 || context.signal?.aborted) {
+      return ordered[0]?.position ?? null
+    }
+    context.events.failed(paymentKey(context.runId, positions[0]), error)
+    return positions[0]
+  }
   for (const prepared of ordered) {
     if (context.signal?.aborted) return prepared.position
     if (!(await payOne(context, prepared))) return prepared.position

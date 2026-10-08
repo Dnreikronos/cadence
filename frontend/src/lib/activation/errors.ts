@@ -1,5 +1,6 @@
 import { isApiError, messageFor } from "@/lib/api/errors"
-import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import { SentUnsettledError, UnexpectedSignerError } from "@/lib/api/sign"
+import { refusalMessage } from "@/lib/solana/inspect"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 
 // Step 1 in real mode: the embedded wallet route and Turnkey login are #78, which
@@ -49,7 +50,7 @@ export function activationMessage(error: unknown): string {
   if (error instanceof KeyEnrolledElsewhereError) {
     return "This wallet was set up elsewhere. Contact support."
   }
-  if (error instanceof ConfirmTimeoutError) {
+  if (error instanceof SentUnsettledError) {
     return "Your setup may already have gone through. Check back shortly; we won't start it again."
   }
   if (error instanceof StepNotConfirmedError) {
@@ -58,6 +59,8 @@ export function activationMessage(error: unknown): string {
   if (error instanceof UnexpectedSignerError) {
     return "The setup asked for a signature from a wallet that isn't yours, so it was refused. Try again."
   }
+  const refused = refusalMessage(error, "setup")
+  if (refused) return refused
   if (isApiError(error)) return messageFor(error)
   return "Something went wrong. Try again."
 }

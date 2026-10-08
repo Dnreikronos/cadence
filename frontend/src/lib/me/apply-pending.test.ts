@@ -14,6 +14,7 @@ import { db, resetDb } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
 import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import { UnexpectedTransactionError } from "@/lib/solana/inspect"
 import type { Submission } from "@/lib/submissions"
 import { memoryStore } from "./memory-store"
 import {
@@ -293,6 +294,9 @@ describe("applyPendingMessage", () => {
     expect(applyPendingMessage(new UnexpectedSignerError())).toMatch(
       /wasn't prepared for your wallet/,
     )
+    expect(
+      applyPendingMessage(new UnexpectedTransactionError("instruction")),
+    ).toMatch(/wasn't signed/)
     expect(applyPendingMessage(new ApiError(409, "transaction_failed"))).toBe(
       "The network rejected the transaction.",
     )

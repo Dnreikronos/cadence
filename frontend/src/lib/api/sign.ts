@@ -1,3 +1,6 @@
+import type { Finality } from "@/lib/solana/finality"
+import type { TransactionCheck } from "@/lib/solana/flow-check"
+import { checkAllowed, inspectTransaction } from "@/lib/solana/inspect"
 import { ApiError } from "./errors"
 import { bytesFromBase64 } from "./base64"
 import type { Prepared, Receipt } from "./schemas"
@@ -25,11 +28,31 @@ export class UnexpectedSignerError extends Error {
   }
 }
 
-export class ConfirmTimeoutError extends Error {
-  // The transaction was submitted: the caller can still look it up.
-  constructor(readonly signature: string) {
-    super("The network did not confirm in time")
+// The transaction was submitted and its outcome is not settled: the caller can still
+// look it up with the signature, and must never send another in its place. Every screen
+// reads its two causes below the same way.
+export class SentUnsettledError extends Error {
+  constructor(
+    readonly signature: string,
+    message: string,
+  ) {
+    super(message)
+    this.name = "SentUnsettledError"
+  }
+}
+
+export class ConfirmTimeoutError extends SentUnsettledError {
+  constructor(signature: string) {
+    super(signature, "The network did not confirm in time")
     this.name = "ConfirmTimeoutError"
+  }
+}
+
+// The service confirmed, and the network's own read says the transaction failed.
+export class FinalityMismatchError extends SentUnsettledError {
+  constructor(signature: string) {
+    super(signature, "The network does not show the confirmed transaction")
+    this.name = "FinalityMismatchError"
   }
 }
 
@@ -38,6 +61,14 @@ type Options = {
   // Sends the signed bytes to Solana and returns the transaction signature.
   submit: (signed: Uint8Array) => Promise<string>
   confirm: (signature: string) => Promise<Receipt>
+  // The browser's own read of the network (`lib/solana/finality.ts`), asked after the
+  // service's receipt: the receipt is returned only once this says finalized too.
+  finality: (signature: string, signal?: AbortSignal) => Promise<Finality>
+  // The flow's pre-sign check (`lib/solana/inspect.ts` `checkFlow`), on the decoded
+  // transaction: throws `UnexpectedTransactionError` to refuse it. Required: nothing is
+  // signed without knowing what it is for. A payment passes `checkConfidentialTransfer`
+  // with the account the admin approved for its position; the other flows `flowCheck`.
+  check: TransactionCheck
   onStep?: (step: SignStep) => void
   // Called as soon as the transaction is on the network, so the signature is
   // never lost if confirming fails or the user leaves.
@@ -65,15 +96,18 @@ const wait = (ms: number, signal?: AbortSignal) =>
     signal?.addEventListener("abort", onAbort, { once: true })
   })
 
-// Prepare -> sign the exact bytes -> submit -> confirm, per the contract. The
-// bytes are never edited, and a request for anyone else's signature is refused
-// rather than answered.
+// Prepare -> check -> sign the exact bytes -> submit -> confirm -> read the network,
+// per the contract. The bytes are never edited. A request for anyone else's signature,
+// or a transaction that does more than the flow needs, is refused before anything is
+// signed; a receipt counts only once the network shows the transaction finalized.
 export async function signAndConfirm(
   prepared: Pick<Prepared, "transaction" | "required_signers">,
   {
     signer,
     submit,
     confirm,
+    finality,
+    check,
     onStep,
     onSubmitted,
     sleep = wait,
@@ -88,12 +122,14 @@ export async function signAndConfirm(
   ) {
     throw new UnexpectedSignerError()
   }
+  const bytes = bytesFromBase64(prepared.transaction)
+  const transaction = inspectTransaction(bytes)
+  checkAllowed(transaction, signer.address)
+  await check(transaction)
   signal?.throwIfAborted()
 
   onStep?.("signing")
-  const signed = await signer.signTransaction(
-    bytesFromBase64(prepared.transaction),
-  )
+  const signed = await signer.signTransaction(bytes)
   signal?.throwIfAborted()
 
   onStep?.("submitting")
@@ -104,15 +140,27 @@ export async function signAndConfirm(
   onStep?.("confirming")
   const deadline = now() + timeoutMs
   let delay = 2_000
+  let receipt: Receipt | null = null
   for (;;) {
     let pause = delay
-    try {
-      return await confirm(signature)
-    } catch (error) {
-      // "Not finalized yet", a busy network and a dropped connection all pass
-      // with time. Anything else is final.
-      if (!(error instanceof ApiError && error.isRetryable)) throw error
-      if (error.retryAfter) pause = Math.max(pause, error.retryAfter * 1_000)
+    if (!receipt) {
+      try {
+        receipt = await confirm(signature)
+      } catch (error) {
+        // "Not finalized yet", a busy network and a dropped connection all pass
+        // with time. Anything else is final.
+        if (!(error instanceof ApiError && error.isRetryable)) throw error
+        if (error.retryAfter) pause = Math.max(pause, error.retryAfter * 1_000)
+      }
+    }
+    if (receipt) {
+      // The signature this page submitted, whatever the receipt names. A read that
+      // fails is asked again, like a node that has not caught up.
+      const seen = await finality(signature, signal).catch(
+        () => "pending" as const,
+      )
+      if (seen === "finalized") return receipt
+      if (seen === "failed") throw new FinalityMismatchError(signature)
     }
     const remaining = deadline - now()
     if (remaining <= 0) throw new ConfirmTimeoutError(signature)

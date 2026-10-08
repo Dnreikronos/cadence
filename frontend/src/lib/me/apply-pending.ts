@@ -3,10 +3,12 @@ import { ApiError, messageFor } from "@/lib/api/errors"
 import type { Receipt } from "@/lib/api/schemas"
 import { otherTabMessage } from "@/lib/flow-lock"
 import {
-  ConfirmTimeoutError,
+  SentUnsettledError,
   UnexpectedSignerError,
   type SignStep,
 } from "@/lib/api/sign"
+import { flowCheck } from "@/lib/solana/flow-check"
+import { refusalMessage } from "@/lib/solana/inspect"
 import {
   StorageUnavailableError,
   storageBlockedMessage,
@@ -127,6 +129,8 @@ export async function applyPending(
         onPhase?.(step)
       },
       {
+        // Only the wallet's own confidential account, nothing moved anywhere.
+        check: flowCheck(wallet.address, { flow: "apply" }),
         onSubmitted: (sig) => {
           signature = sig
           if (record) record = store.record({ ...record, signature: sig })
@@ -164,10 +168,12 @@ export function applyPendingMessage(error: unknown): string {
   if (error instanceof WalletUnavailableError) {
     return "Your wallet can't sign here yet."
   }
-  if (error instanceof ConfirmTimeoutError) return sentMessage
+  if (error instanceof SentUnsettledError) return sentMessage
   if (error instanceof UnexpectedSignerError) {
     return "That transaction wasn't prepared for your wallet. Try again."
   }
+  const refused = refusalMessage(error, "update")
+  if (refused) return refused
   if (error instanceof ApiError) return messageFor(error)
   return "Couldn't apply your pending balance. Try again."
 }

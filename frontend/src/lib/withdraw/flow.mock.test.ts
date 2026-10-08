@@ -10,6 +10,7 @@ import {
 vi.mock("@/lib/api/mode", () => ({ apiConfig: { mode: "mock", baseUrl: "" } }))
 
 import { createApiClient } from "@/lib/api/client"
+import { mockFinality } from "@/lib/api/mocks/chain"
 import { ME_WALLET, db, resetDb } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
 import { server } from "@/lib/api/mocks/server"
@@ -40,13 +41,14 @@ const deps: WithdrawDeps = {
       prepare: (request) => api.unwrap.prepare(request),
       userId: async () => "f0000000-0000-4000-8000-000000000001",
     }),
-  signAndConfirm: (prepared, confirm, onStep, onSubmitted) =>
+  signAndConfirm: (prepared, confirm, onStep, extra) =>
     signAndConfirm(prepared, {
+      ...extra,
       signer: mockSigner(ME_WALLET),
       submit: async () => "TestSignature".padEnd(64, "1"),
+      finality: mockFinality,
       confirm,
       onStep,
-      onSubmitted,
       sleep: async () => {},
     }),
   confirm: (request) => api.unwrap.confirm(request),

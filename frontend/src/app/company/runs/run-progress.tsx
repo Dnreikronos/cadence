@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useRun } from "@/lib/queries/payroll"
 import type { Run } from "@/lib/api/schemas"
 import { sumUnits } from "@/lib/money"
-import { paymentKey } from "@/lib/runs/executor"
+import { approvedPayees, paymentKey } from "@/lib/runs/executor"
 import { runMessage } from "@/lib/runs/messages"
 import { initialsOf, peopleByAccount, unknownPerson } from "@/lib/runs/people"
 import type { PayrollPerson } from "@/lib/runs/plan"
@@ -232,6 +232,13 @@ export function RunProgress({
               ]),
             ),
             personOf,
+            // Each position to the person the admin approves for it in this dialog.
+            approvedPayees(
+              retryPeople.map(({ position, person }) => [
+                position,
+                person.tokenAccount,
+              ]),
+            ),
           )
         }}
       />

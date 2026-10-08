@@ -1,7 +1,9 @@
 import type { ApiClient } from "@/lib/api/client"
 import { ApiError, messageFor } from "@/lib/api/errors"
-import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import { SentUnsettledError, UnexpectedSignerError } from "@/lib/api/sign"
 import { SentApplyError } from "@/lib/me/apply-pending"
+import { flowCheck } from "@/lib/solana/flow-check"
+import { refusalMessage } from "@/lib/solana/inspect"
 import {
   StorageUnavailableError,
   storageBlockedMessage,
@@ -115,7 +117,13 @@ export async function runMakePrivate({
           step = next
           onStep(step)
         },
-        { signal, onSubmitted },
+        // The wrap of this amount, from the wallet's USDC account to its own
+        // confidential one.
+        {
+          signal,
+          onSubmitted,
+          check: flowCheck(wallet, { flow: "wrap", amount }),
+        },
       )
       wrapped = true
       onConfirmed?.("wrap")
@@ -142,6 +150,7 @@ export async function runMakePrivate({
       },
       {
         signal,
+        check: flowCheck(wallet, { flow: "apply" }),
         onSubmitted: (signature) => {
           applySignature = signature
         },
@@ -152,13 +161,13 @@ export async function runMakePrivate({
     // The network dropping the apply is the one failure that is not a sent one.
     const dropped = error instanceof ApiError && lostForGood.has(error.code)
     // A timeout carries the signature of a transaction that was submitted.
-    const timedOut = error instanceof ConfirmTimeoutError
+    const timedOut = error instanceof SentUnsettledError
     if (applied && !dropped && (applyPast || timedOut)) {
       const sent = {
         ...applied,
         signature:
           applySignature ??
-          (timedOut ? (error as ConfirmTimeoutError).signature : null),
+          (timedOut ? (error as SentUnsettledError).signature : null),
       }
       throw new MakePrivateError(
         step,
@@ -183,7 +192,7 @@ function resumeFor(
   if (wrapped) {
     // A second apply cannot wrap twice, but one that went out and was not
     // confirmed may make the next one fail: look first.
-    return error instanceof ConfirmTimeoutError ? "check" : "apply"
+    return error instanceof SentUnsettledError ? "check" : "apply"
   }
   const lost = error instanceof ApiError && lostForGood.has(error.code)
   return submitted && !lost ? "check" : "wrap"
@@ -196,7 +205,7 @@ export const sentApplyMessage =
 export function failureMessage(error: unknown): string {
   const cause = error instanceof MakePrivateError ? error.cause : error
   if (cause instanceof SentApplyError) return sentApplyMessage
-  if (cause instanceof ConfirmTimeoutError) {
+  if (cause instanceof SentUnsettledError) {
     return "The network hasn't confirmed this yet. Check your balances before trying again."
   }
   if (cause instanceof StorageUnavailableError) return storageBlockedMessage
@@ -206,6 +215,8 @@ export function failureMessage(error: unknown): string {
   if (cause instanceof UnexpectedSignerError) {
     return "The transaction asked for a signature from another wallet, so it wasn't signed."
   }
+  const refused = refusalMessage(cause, "deposit")
+  if (refused) return refused
   return messageFor(cause)
 }
 

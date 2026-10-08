@@ -1,5 +1,6 @@
 import { ApiError, isApiError, messageFor } from "@/lib/api/errors"
-import { ConfirmTimeoutError, UnexpectedSignerError } from "@/lib/api/sign"
+import { SentUnsettledError, UnexpectedSignerError } from "@/lib/api/sign"
+import { UnexpectedTransactionError } from "@/lib/solana/inspect"
 import {
   StorageUnavailableError,
   storageBlockedMessage,
@@ -85,6 +86,9 @@ export const sentWithoutSignatureMessage =
 export const unrecognizedMessage =
   "Status unknown: check the company payments before doing anything."
 
+export const refusedTransactionMessage =
+  "Not signed: Cadence prepared this payment differently from what you approved, so nothing was sent. Retry it, and contact support if it happens again."
+
 // A cancelled signature sent nothing, and stopped the run there.
 export const cancelledMessage =
   "You cancelled the signature. Nothing was sent: sign again to continue the run from this payment."
@@ -100,12 +104,12 @@ export type Failure = {
 export function describeFailure(error: unknown): Failure {
   if (
     error instanceof SentPaymentError ||
-    error instanceof ConfirmTimeoutError
+    error instanceof SentUnsettledError
   ) {
     const signature =
       error instanceof SentPaymentError
         ? (error.signature ??
-          (error.original instanceof ConfirmTimeoutError
+          (error.original instanceof SentUnsettledError
             ? error.original.signature
             : null))
         : error.signature
@@ -125,6 +129,11 @@ export function describeFailure(error: unknown): Failure {
         "This payment needs a different wallet than the one you're signed in with.",
       sent: false,
     }
+  }
+  // The pre-sign check refused it: another account than the one approved, or steps a
+  // payment does not need. Nothing was signed.
+  if (error instanceof UnexpectedTransactionError) {
+    return { message: refusedTransactionMessage, sent: false }
   }
   if (error instanceof StorageUnavailableError) {
     return { message: storageBlockedMessage, sent: false }
