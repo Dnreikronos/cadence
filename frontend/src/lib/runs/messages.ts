@@ -8,7 +8,7 @@ import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
   PaymentNotOnChainError,
   ResponseMismatchError,
-  RunInputUnavailableError,
+  KeyInputUnavailableError,
   SentPaymentError,
   isSignatureRejection,
 } from "./errors"
@@ -45,6 +45,14 @@ const overrides: Record<string, string> = {
 }
 
 export function runMessage(error: unknown) {
+  // No signed-in user (or a wallet that cannot sign the link text): the wallet cannot be
+  // linked to anyone, whatever the environment.
+  if (error instanceof KeyInputUnavailableError && error.input === "user") {
+    return "This wallet couldn't be linked to your account. Sign in again, then run the payroll again."
+  }
+  if (error instanceof KeyInputUnavailableError) {
+    return "Payroll runs aren't available in this environment yet."
+  }
   if (isApiError(error) && Object.hasOwn(overrides, error.code)) {
     return overrides[error.code]
   }
@@ -120,12 +128,6 @@ export function describeFailure(error: unknown): Failure {
   }
   if (error instanceof StorageUnavailableError) {
     return { message: storageBlockedMessage, sent: false }
-  }
-  if (error instanceof RunInputUnavailableError) {
-    return {
-      message: "Payroll runs aren't available in this environment yet.",
-      sent: false,
-    }
   }
   if (error instanceof PaymentNotOnChainError) {
     return { message: failureCodeMessage(null), sent: false }

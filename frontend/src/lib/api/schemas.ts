@@ -237,10 +237,14 @@ export type RecipientAccount = z.infer<typeof recipientAccountSchema>
 
 // ---- Unwrap -----------------------------------------------------------------
 
+// docs/dev/UNWRAP_API.md (#56). The balance key and the link are as on a run.
 export const unwrapRequestSchema = z.strictObject({
   wallet: key,
   amount: unitsSchema,
+  aes_key: aesKey,
   acknowledge_reveal_risk: z.boolean(),
+  // Only the first request for a wallet (`wallet_link_required` otherwise).
+  wallet_signature: signatureSchema.optional(),
 })
 export type UnwrapRequest = z.infer<typeof unwrapRequestSchema>
 

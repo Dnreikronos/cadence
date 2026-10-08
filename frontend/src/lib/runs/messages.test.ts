@@ -5,7 +5,7 @@ import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
   PaymentNotOnChainError,
   ResponseMismatchError,
-  RunInputUnavailableError,
+  KeyInputUnavailableError,
   SentPaymentError,
   isSignatureRejection,
 } from "./errors"
@@ -31,6 +31,15 @@ describe("runMessage", () => {
     ).toMatch(/can't tell whether this payment went through/)
     expect(runMessage(new ApiError(503, "run_storage_unavailable"))).toMatch(
       /Try again shortly/,
+    )
+  })
+
+  it("words a run that cannot be created here, and a wallet with no user to link it to", () => {
+    expect(runMessage(new KeyInputUnavailableError("balance key"))).toBe(
+      "Payroll runs aren't available in this environment yet.",
+    )
+    expect(runMessage(new KeyInputUnavailableError("user"))).toBe(
+      "This wallet couldn't be linked to your account. Sign in again, then run the payroll again.",
     )
   })
 
@@ -156,8 +165,16 @@ describe("describeFailure", () => {
   })
 
   it("says a run cannot be made here when an input is not available, nothing sent", () => {
-    expect(describeFailure(new RunInputUnavailableError("sender"))).toEqual({
+    expect(describeFailure(new KeyInputUnavailableError("sender"))).toEqual({
       message: "Payroll runs aren't available in this environment yet.",
+      sent: false,
+    })
+  })
+
+  it("asks to sign in again when there is no user to link the wallet to, nothing sent", () => {
+    expect(describeFailure(new KeyInputUnavailableError("user"))).toEqual({
+      message:
+        "This wallet couldn't be linked to your account. Sign in again, then run the payroll again.",
       sent: false,
     })
   })

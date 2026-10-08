@@ -88,6 +88,30 @@ const confirmBody = z.strictObject({
   signature: z.string(),
 })
 
+// Run and unwrap bodies take any string as the link: it gets its own code in
+// `linkWallet`, as the real service answers it. The unwrap balance key gets its own
+// code too (`unwrap.rs`).
+const runRequestBody = s.runRequestSchema.extend({
+  wallet_signature: z.string().nullish(),
+})
+const unwrapRequestBody = s.unwrapRequestSchema.extend({
+  aes_key: z.string(),
+  wallet_signature: z.string().nullish(),
+})
+
+// Links a wallet on its first request, as `transfer_store.rs` does. A linked wallet's
+// signature is not looked at; one that is not a signature does not link. The mock
+// never verifies a well-formed one.
+function linkWallet(wallet: string, signature: string | null | undefined) {
+  if (db.linkedWallets.has(wallet)) return null
+  if (signature == null) return fail(409, "wallet_link_required")
+  if (!s.signatureSchema.safeParse(signature).success) {
+    return fail(403, "wallet_access_denied")
+  }
+  db.linkedWallets.add(wallet)
+  return null
+}
+
 function badConfirm(requestId: string | undefined, signature: string) {
   if (
     requestId !== undefined &&
@@ -536,7 +560,7 @@ export const handlers = [
   http.post(at("/runs"), async ({ request }) => {
     const stopped = await guard(request, undefined, "transfer_rate_limited")
     if (stopped) return stopped
-    const { data, error } = await parse(request, s.runRequestSchema)
+    const { data, error } = await parse(request, runRequestBody)
     if (error) return error
     const recipients = data.payments.map((p) => p.recipient)
     if (
@@ -545,10 +569,8 @@ export const handlers = [
     ) {
       return fail(400, "invalid_payments")
     }
-    if (!db.linkedWallets.has(data.company_wallet)) {
-      if (!data.wallet_signature) return fail(409, "wallet_link_required")
-      db.linkedWallets.add(data.company_wallet)
-    }
+    const unlinked = linkWallet(data.company_wallet, data.wallet_signature)
+    if (unlinked) return unlinked
     if (data.sender !== mockTokenAccount(data.company_wallet)) {
       return fail(403, "wallet_access_denied")
     }
@@ -651,8 +673,14 @@ export const handlers = [
   http.post(at("/unwrap"), async ({ request }) => {
     const stopped = await guard(request, "recipient", "transfer_rate_limited")
     if (stopped) return stopped
-    const { data, error } = await parse(request, s.unwrapRequestSchema)
+    const { data, error } = await parse(request, unwrapRequestBody)
     if (error) return error
+    if (!s.unwrapRequestSchema.shape.aes_key.safeParse(data.aes_key).success) {
+      return fail(400, "invalid_balance_key")
+    }
+    // Linked as on a run, before the balance or the risk is looked at.
+    const unlinked = linkWallet(data.wallet, data.wallet_signature)
+    if (unlinked) return unlinked
     const amount = BigInt(data.amount)
     if (amount > db.me.available) return fail(409, "invalid_confidential_state")
     const risk = revealRisk(amount)

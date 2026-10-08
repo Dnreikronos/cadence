@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-query"
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { toast } from "sonner"
-import { api } from "@/lib/api"
+import { api, currentUserId } from "@/lib/api"
 import { apiConfig } from "@/lib/api/mode"
 import {
   acquireFlowLock,
@@ -34,6 +34,7 @@ import {
   type HeldCheck,
   type HeldRecord,
 } from "@/lib/withdraw/held"
+import { prepareUnwrap } from "@/lib/withdraw/prepare"
 import { useSignAndConfirm, useWallet } from "@/lib/wallet/context"
 import { invalidateBalances } from "./invalidate"
 import type { ViewerScope } from "./keys"
@@ -284,7 +285,11 @@ export function useWithdraw(viewer: ViewerScope) {
     mutationFn: (variables: WithdrawVariables) =>
       runWithdraw(
         {
-          prepare: (request) => api.unwrap.prepare(request),
+          prepare: (ask) =>
+            prepareUnwrap(wallet.signer, ask, {
+              prepare: (request) => api.unwrap.prepare(request),
+              userId: currentUserId,
+            }),
           signAndConfirm: (prepared, confirm, onStep, onSubmitted) =>
             signAndConfirm(prepared, confirm, onStep, { onSubmitted }),
           confirm: (request) => api.unwrap.confirm(request),

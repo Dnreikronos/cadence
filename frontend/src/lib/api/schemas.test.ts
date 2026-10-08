@@ -81,7 +81,12 @@ describe("request formats", () => {
       [walletRequestSchema, { wallet: WALLET }],
       [
         unwrapRequestSchema,
-        { wallet: WALLET, amount: "1", acknowledge_reveal_risk: false },
+        {
+          wallet: WALLET,
+          amount: "1",
+          aes_key: AES_KEY,
+          acknowledge_reveal_risk: false,
+        },
       ],
       [
         runRequestSchema,

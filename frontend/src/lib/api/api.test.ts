@@ -445,6 +445,7 @@ describe("unwrap and the reveal-risk flag", () => {
     api.unwrap.prepare({
       wallet: ME_WALLET,
       amount,
+      aes_key: "AAAAAAAAAAAAAAAAAAAAAA==",
       acknowledge_reveal_risk: acknowledge,
     })
 

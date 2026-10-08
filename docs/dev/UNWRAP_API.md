@@ -71,8 +71,8 @@ No withdrawal proofs, transaction
 or unsigned receipt are built in this case. Render the warning, obtain the
 recipient's acknowledgement, then prepare again with the boolean set to true.
 Acknowledgement does not guarantee anonymity; the public withdrawal can still
-reveal its amount. The frontend's mock-backed request schema must supply the
-AES key and association signature before switching this flow to the live service.
+reveal its amount. The frontend sends the AES key and, on `wallet_link_required`,
+the association signature; real mode refuses them until the web app can derive them.
 
 A successful response contains the standard `request_id`, base64 `transaction`,
 `transaction_version: 1`, `required_signers`, `recent_blockhash` and

@@ -100,7 +100,7 @@ describe("createRun", () => {
     const { signer, deps } = setup([new ApiError(409, "wallet_link_required")])
     await expect(
       createRun(signer, [person], { ...deps, userId: async () => null }),
-    ).rejects.toMatchObject({ name: "RunInputUnavailableError" })
+    ).rejects.toMatchObject({ name: "KeyInputUnavailableError" })
   })
 })
 

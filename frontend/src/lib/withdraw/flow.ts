@@ -9,7 +9,6 @@ import type {
   Receipt,
   RevealRiskLevel,
   UnwrapPrepared,
-  UnwrapRequest,
 } from "@/lib/api/schemas"
 import {
   ConfirmTimeoutError,
@@ -20,13 +19,16 @@ import {
   StorageUnavailableError,
   storageBlockedMessage,
 } from "@/lib/storage-guard"
+import { KeyInputUnavailableError } from "@/lib/runs/errors"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import type { SentEvidence } from "./held"
+import type { UnwrapAsk } from "./prepare"
 
 // ---- Running a withdrawal ---------------------------------------------------
 
 export type WithdrawDeps = {
-  prepare: (request: UnwrapRequest) => Promise<UnwrapPrepared>
+  // Adds the keys (`prepareUnwrap`).
+  prepare: (ask: UnwrapAsk) => Promise<UnwrapPrepared>
   // Sign, submit and poll `confirm` until the network finalizes. `onSubmitted`
   // gets the signature the moment the transaction is on the network.
   signAndConfirm: (
@@ -224,6 +226,23 @@ export function failureOf(error: unknown): Failure {
   }
   if (error instanceof StorageUnavailableError) {
     return { ...base, message: storageBlockedMessage, retryable: true }
+  }
+  // No signed-in user (or a wallet that cannot sign the link text): the wallet cannot be
+  // linked to anyone, whatever the environment.
+  if (error instanceof KeyInputUnavailableError && error.input === "user") {
+    return {
+      ...base,
+      message:
+        "This wallet couldn't be linked to your account. Sign in again, then retry.",
+      retryable: false,
+    }
+  }
+  if (error instanceof KeyInputUnavailableError) {
+    return {
+      ...base,
+      message: "Withdrawals aren't available in this environment yet.",
+      retryable: false,
+    }
   }
   if (isSignatureRejection(error)) {
     return {

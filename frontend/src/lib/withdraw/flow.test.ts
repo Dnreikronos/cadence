@@ -6,6 +6,7 @@ import {
   UnexpectedSignerError,
   signAndConfirm,
 } from "@/lib/api/sign"
+import { KeyInputUnavailableError } from "@/lib/runs/errors"
 import { WalletUnavailableError } from "@/lib/wallet/types"
 import {
   SentWithdrawalError,
@@ -740,5 +741,26 @@ describe("failureOf", () => {
       failureOf(new WalletUnavailableError("because")).message,
     ).not.toMatch(/because/)
     expect(failureOf(new UnexpectedSignerError()).retryable).toBe(false)
+  })
+
+  it("says a withdrawal cannot be made here yet when its keys are refused, with no retry", () => {
+    expect(failureOf(new KeyInputUnavailableError("balance key"))).toEqual({
+      message: "Withdrawals aren't available in this environment yet.",
+      retryable: false,
+      refreshBalance: false,
+      sent: false,
+      signature: null,
+    })
+  })
+
+  it("asks to sign in again when there is no user to link the wallet to", () => {
+    expect(failureOf(new KeyInputUnavailableError("user"))).toEqual({
+      message:
+        "This wallet couldn't be linked to your account. Sign in again, then retry.",
+      retryable: false,
+      refreshBalance: false,
+      sent: false,
+      signature: null,
+    })
   })
 })

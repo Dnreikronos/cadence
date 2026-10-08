@@ -1,4 +1,14 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest"
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest"
+vi.mock("@/lib/api/mode", () => ({ apiConfig: { mode: "mock", baseUrl: "" } }))
+
 import { createApiClient } from "@/lib/api/client"
 import { ME_WALLET, db, resetDb } from "@/lib/api/mocks/db"
 import { scenarios } from "@/lib/api/mocks/scenario"
@@ -6,9 +16,11 @@ import { server } from "@/lib/api/mocks/server"
 import { mockSigner } from "@/lib/api/mocks/signer"
 import { signAndConfirm } from "@/lib/api/sign"
 import { runWithdraw, type WithdrawDeps } from "./flow"
+import { prepareUnwrap } from "./prepare"
 
 // The flow against the mock service, so the screen's two prepare calls are checked
-// against the answers it will really get, not only against fakes.
+// against the answers it will really get, not only against fakes. The keys come from
+// the demo seams, as on the screen.
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }))
 afterEach(() => {
   server.resetHandlers()
@@ -23,7 +35,11 @@ const api = createApiClient({
 })
 
 const deps: WithdrawDeps = {
-  prepare: (request) => api.unwrap.prepare(request),
+  prepare: (ask) =>
+    prepareUnwrap(mockSigner(ME_WALLET), ask, {
+      prepare: (request) => api.unwrap.prepare(request),
+      userId: async () => "f0000000-0000-4000-8000-000000000001",
+    }),
   signAndConfirm: (prepared, confirm, onStep, onSubmitted) =>
     signAndConfirm(prepared, {
       signer: mockSigner(ME_WALLET),
@@ -57,6 +73,13 @@ describe("withdrawing against the mock service", () => {
     const outcome = await withdraw("4200000000", true)
     expect(outcome).toMatchObject({ kind: "done", level: "exact" })
     expect(db.me.available).toBe(before - 4_200_000_000n)
+  })
+
+  it("links a wallet on its first withdrawal and goes on", async () => {
+    db.linkedWallets.clear()
+    const outcome = await withdraw("1000000000", false)
+    expect(outcome).toMatchObject({ kind: "done", level: "none" })
+    expect(db.linkedWallets.has(ME_WALLET)).toBe(true)
   })
 
   it("reports a close match as such", async () => {
