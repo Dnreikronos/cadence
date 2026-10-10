@@ -1,5 +1,9 @@
 # Gotchas
 
+- For #58, include standalone wrap, transfer and unwrap indexing as well as
+  payroll runs. #147 addresses safe standalone retries, not background status
+  indexing; check adjacent issue scope before splitting that work out.
+
 - Authenticate the caller and authorize wallet ownership before charging a
   per-wallet quota. Rejected ownership checks must not spend another wallet's
   budget. Quota regression tests must reuse the same router across callers;

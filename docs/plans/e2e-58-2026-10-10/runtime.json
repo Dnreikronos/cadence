@@ -1,0 +1,20 @@
+{
+  "checkout": "/Users/blsoaresdev/cadence",
+  "branch": "squads_confidential_vault_spike",
+  "commit": "b092365e1e9dfa35f2765580163112332e4bece5",
+  "working_tree_sha256": "be8dc0028f48e3e45e107a3aede77c4fc038119ad7cf014f49a79fe1a90eef0d",
+  "frontend": "http://127.0.0.1:3000",
+  "proof": "http://127.0.0.1:3001",
+  "supabase": "http://127.0.0.1:58621",
+  "database_port": 58622,
+  "cluster": "devnet",
+  "browser": "Codex in-app browser",
+  "api_mode": "real",
+  "temporary_driver": "services/proof/tests/live_indexer58.rs",
+  "serving_sources_sha256": "37a0a6f79c93024bf577a4b4929de996284845ebbe4b9b2b544e0f079c25a56c",
+  "proof_binary_sha256": "3d598675640a217306a5f5a4611efee5a7ba86ec55703b8129896f62c0b6be47",
+  "proof_pid": 42429,
+  "frontend_pid": 37051,
+  "final_websocket": "wss://api.devnet.solana.com",
+  "temporary_driver_removed": true
+}

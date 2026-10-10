@@ -1,0 +1,16 @@
+{
+  "proof": 47688,
+  "dashboard": 47689,
+  "checkout": "/Users/blsoaresdev/.codex/worktrees/proof-chain-status/cadence",
+  "commit": "a791c296ec260a1f3cf5145a8b2adf4716316005",
+  "base_commit": "f3f198811bfd7b5bddd27df4a3d95b1b1add5e35",
+  "health": {
+    "status": "ok",
+    "build_sha": "a791c296ec260a1f3cf5145a8b2adf4716316005",
+    "rpc_reachable": true
+  },
+  "events_unchanged": true,
+  "event_count": 6,
+  "proof_binary_sha256": "e5067e5fa10ee5cbad2d292d4f1934bbaed0dafe9e6cea0a5eef67cd14a95d09",
+  "proof_sources_match_live_acceptance": true
+}

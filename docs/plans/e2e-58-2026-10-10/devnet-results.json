@@ -1,0 +1,263 @@
+{
+  "setup-public.json": {
+    "destination": "GK7aNbfgnJiVAWfncfQguZ6vanu78a6wMJAUoRSoq34J",
+    "recipient": "4NbqB5LBit2mw96RDPMWocPV56Aw4scCmYVA371kPLp7",
+    "source": "HmKG8Y2afPTzFGHXfnkKfFc3ushmGPteqekicsj3oLXD",
+    "wallet": "Cnmffc1cjh1s6qJZzuHtTGxdBrCx9VCBxzDDY6qaSLXf"
+  },
+  "wrap-result.json": {
+    "signature": "3W3TsqTUxq4kLepMhLTukMDmJJJoKuaF6huBgZyfszYDCkzteNu8bmR9TF73GQ8VkfTHN47yPegTMifJCqyXgJmt",
+    "slot": 509600265,
+    "status": "finalized"
+  },
+  "run-submitted.json": {
+    "request_id": "859caf47b70b63ba18deb81466fe10ee2ed4f2b81e82883711c2793d94729fb5",
+    "run_id": "64754d8f-52b9-43ef-872e-49957cf28cb0",
+    "signature": "39Hhj1gTBLmMFVV6wvpTu2jaTP275Kc5RABTWqCbK97pHBPEQCPAcULRKnEJrXDgUDrxTUeHnFMYL2khYnMFhdez"
+  },
+  "run-result.json": {
+    "signature": "39Hhj1gTBLmMFVV6wvpTu2jaTP275Kc5RABTWqCbK97pHBPEQCPAcULRKnEJrXDgUDrxTUeHnFMYL2khYnMFhdez",
+    "slot": 509601043,
+    "status": "finalized"
+  },
+  "transfer-result.json": {
+    "signature": "fbgJcSGtRWmTzBw8rxQn7vaZEurM9Bc3gpZWVsapXZXTEezTKQurnQ1RdBMqg3UmUTwSXj6JRCjohFDG1eUgwmA",
+    "slot": 509601167,
+    "status": "finalized"
+  },
+  "unwrap-result.json": {
+    "signature": "2rB9bwLbJYPVP1TKz2baJBzjAeEFN7MTC15c2VPJZCM5WWD8aJj5RZvYKzUPNZTUyK9UPhotFQcyXVPG6Wa6uQ9i",
+    "slot": 509601394,
+    "status": "finalized"
+  },
+  "offline-submitted.json": {
+    "request_id": "81241177f845138f0b5a6a41cce1620187c458ac43c9f520d1c2dbddea13afb2",
+    "run_id": "a9942f05-11a9-49f3-b9f6-e89ea4a8c94f",
+    "signature": "sFkYWbSkjfrd3XysmDUCCdznSMGBgkPiArBhQNGudTi7pATVrUnmzsaGxLYnKprmuu24Sjcq3op7o7bhsJMxupR"
+  },
+  "offline-before-restart.json": {
+    "http_listener_closed": true,
+    "database_status": "prepared",
+    "signature": "sFkYWbSkjfrd3XysmDUCCdznSMGBgkPiArBhQNGudTi7pATVrUnmzsaGxLYnKprmuu24Sjcq3op7o7bhsJMxupR",
+    "run_id": "a9942f05-11a9-49f3-b9f6-e89ea4a8c94f"
+  },
+  "offline-result.json": {
+    "signature": "sFkYWbSkjfrd3XysmDUCCdznSMGBgkPiArBhQNGudTi7pATVrUnmzsaGxLYnKprmuu24Sjcq3op7o7bhsJMxupR",
+    "slot": 509601241,
+    "status": "failed"
+  },
+  "restart-result.json": {
+    "run_id": "a9942f05-11a9-49f3-b9f6-e89ea4a8c94f",
+    "first_served_status": "failed",
+    "signature": "sFkYWbSkjfrd3XysmDUCCdznSMGBgkPiArBhQNGudTi7pATVrUnmzsaGxLYnKprmuu24Sjcq3op7o7bhsJMxupR",
+    "slot": 509601241,
+    "listener_closed_observations": 52,
+    "startup_seconds": 2.916,
+    "pid": 40931
+  },
+  "websocket-result.json": {
+    "request_id": "f1e2386d5bb76a16daca6cedf7f7d76ce726ffaf2c3cdec9f33e99babf6314a0",
+    "run_id": "1b989f0c-d12f-4407-b184-cd0db0383de2",
+    "signature": "4mJzMV3uHuvjA4b4Mcb7fphw93MqqEsVdjYwn2EMUJVXznG36Jez7aEwBaHxVDRbAvADzZ3WTGxrT7cvnVRd42Mb",
+    "status": "finalized",
+    "slot": 509601737,
+    "live_subscribe_ack": 1811755,
+    "live_notification": {
+      "time": "2026-10-10T16:32:02.021Z",
+      "event": "response",
+      "method": "signatureNotification",
+      "subscription": 1811755,
+      "slot": 509601737,
+      "failed": false
+    },
+    "upstream": "wss://api.devnet.solana.com",
+    "relay": "ws://127.0.0.1:58758"
+  },
+  "database-result.json": {
+    "event_count": 6,
+    "unique_terminal_events": true,
+    "duplicate_confirms_preserve_outbox": true,
+    "outbox_sha256": "7d186d6a4ad786f2364274178a8dd607be3bf717dbd9d6eb181a3eedc582abfd",
+    "owner_supabase_read": "finalized",
+    "other_user_supabase_rows": 0,
+    "other_user_proof_status": 404,
+    "events": [
+      {
+        "id": "13989c8b-9050-4f4e-979f-10293c8ec6dd",
+        "kind": "run",
+        "request_id": "81241177f845138f0b5a6a41cce1620187c458ac43c9f520d1c2dbddea13afb2",
+        "user_id": "28afa4ba-e6be-4963-827d-cbe42ca1b534",
+        "wallet": "Cnmffc1cjh1s6qJZzuHtTGxdBrCx9VCBxzDDY6qaSLXf",
+        "destination": "GK7aNbfgnJiVAWfncfQguZ6vanu78a6wMJAUoRSoq34J",
+        "run_id": "a9942f05-11a9-49f3-b9f6-e89ea4a8c94f",
+        "position": 0,
+        "attempt": 0,
+        "status": "failed",
+        "signature": "sFkYWbSkjfrd3XysmDUCCdznSMGBgkPiArBhQNGudTi7pATVrUnmzsaGxLYnKprmuu24Sjcq3op7o7bhsJMxupR",
+        "slot": 509601241,
+        "created_at": "2026-10-10T16:30:23.930496+00:00"
+      },
+      {
+        "id": "574355ca-54cf-4942-ac51-fcf07ead9ac2",
+        "kind": "run",
+        "request_id": "859caf47b70b63ba18deb81466fe10ee2ed4f2b81e82883711c2793d94729fb5",
+        "user_id": "28afa4ba-e6be-4963-827d-cbe42ca1b534",
+        "wallet": "Cnmffc1cjh1s6qJZzuHtTGxdBrCx9VCBxzDDY6qaSLXf",
+        "destination": "GK7aNbfgnJiVAWfncfQguZ6vanu78a6wMJAUoRSoq34J",
+        "run_id": "64754d8f-52b9-43ef-872e-49957cf28cb0",
+        "position": 0,
+        "attempt": 0,
+        "status": "finalized",
+        "signature": "39Hhj1gTBLmMFVV6wvpTu2jaTP275Kc5RABTWqCbK97pHBPEQCPAcULRKnEJrXDgUDrxTUeHnFMYL2khYnMFhdez",
+        "slot": 509601043,
+        "created_at": "2026-10-10T16:29:17.630413+00:00"
+      },
+      {
+        "id": "672cbc58-131b-4afe-9c33-065126834fae",
+        "kind": "wrap",
+        "request_id": "8ec54cc582902a1f628a14d143612290f660c391a0695c240231e3d4e78ee727",
+        "user_id": null,
+        "wallet": "Cnmffc1cjh1s6qJZzuHtTGxdBrCx9VCBxzDDY6qaSLXf",
+        "destination": "HmKG8Y2afPTzFGHXfnkKfFc3ushmGPteqekicsj3oLXD",
+        "run_id": null,
+        "position": null,
+        "attempt": 0,
+        "status": "finalized",
+        "signature": "3W3TsqTUxq4kLepMhLTukMDmJJJoKuaF6huBgZyfszYDCkzteNu8bmR9TF73GQ8VkfTHN47yPegTMifJCqyXgJmt",
+        "slot": 509600265,
+        "created_at": "2026-10-10T16:26:12.103449+00:00"
+      },
+      {
+        "id": "77c7f2c4-a89b-45fc-b7b1-65c210932e42",
+        "kind": "unwrap",
+        "request_id": "e8b0b83cc2b46a6b9d5e8e092f9301024ba6567d392fba1457b3d5aa252bc8c2",
+        "user_id": "28afa4ba-e6be-4963-827d-cbe42ca1b534",
+        "wallet": "Cnmffc1cjh1s6qJZzuHtTGxdBrCx9VCBxzDDY6qaSLXf",
+        "destination": "CzfW5HHiBPMsh5f37WQFKGEHUK9sq9iCD1dDXhN8ER1A",
+        "run_id": null,
+        "position": null,
+        "attempt": 0,
+        "status": "finalized",
+        "signature": "2rB9bwLbJYPVP1TKz2baJBzjAeEFN7MTC15c2VPJZCM5WWD8aJj5RZvYKzUPNZTUyK9UPhotFQcyXVPG6Wa6uQ9i",
+        "slot": 509601394,
+        "created_at": "2026-10-10T16:30:41.965149+00:00"
+      },
+      {
+        "id": "ae7f9ec0-1184-4722-995a-010bcbbadb95",
+        "kind": "transfer",
+        "request_id": "239b413fc4afd7913f7d5834516a8bda36926009405101e7a1d08e8b5a06cb65",
+        "user_id": "28afa4ba-e6be-4963-827d-cbe42ca1b534",
+        "wallet": "Cnmffc1cjh1s6qJZzuHtTGxdBrCx9VCBxzDDY6qaSLXf",
+        "destination": "GK7aNbfgnJiVAWfncfQguZ6vanu78a6wMJAUoRSoq34J",
+        "run_id": null,
+        "position": null,
+        "attempt": 0,
+        "status": "finalized",
+        "signature": "fbgJcSGtRWmTzBw8rxQn7vaZEurM9Bc3gpZWVsapXZXTEezTKQurnQ1RdBMqg3UmUTwSXj6JRCjohFDG1eUgwmA",
+        "slot": 509601167,
+        "created_at": "2026-10-10T16:29:47.670881+00:00"
+      },
+      {
+        "id": "c5f7b24e-44b8-438e-9614-8a6f8113ed7c",
+        "kind": "run",
+        "request_id": "f1e2386d5bb76a16daca6cedf7f7d76ce726ffaf2c3cdec9f33e99babf6314a0",
+        "user_id": "28afa4ba-e6be-4963-827d-cbe42ca1b534",
+        "wallet": "Cnmffc1cjh1s6qJZzuHtTGxdBrCx9VCBxzDDY6qaSLXf",
+        "destination": "GK7aNbfgnJiVAWfncfQguZ6vanu78a6wMJAUoRSoq34J",
+        "run_id": "1b989f0c-d12f-4407-b184-cd0db0383de2",
+        "position": 0,
+        "attempt": 0,
+        "status": "finalized",
+        "signature": "4mJzMV3uHuvjA4b4Mcb7fphw93MqqEsVdjYwn2EMUJVXznG36Jez7aEwBaHxVDRbAvADzZ3WTGxrT7cvnVRd42Mb",
+        "slot": 509601737,
+        "created_at": "2026-10-10T16:32:02.36336+00:00"
+      }
+    ],
+    "indexer_privileges": {
+      "vault_usage": false,
+      "private_schema_usage": false,
+      "event_update": false,
+      "event_delete": false
+    },
+    "outbox_unchanged_after_final_restart": true
+  },
+  "finalized_rpc_verification": [
+    {
+      "kind": "run",
+      "request_id": "81241177f845138f0b5a6a41cce1620187c458ac43c9f520d1c2dbddea13afb2",
+      "run_id": "a9942f05-11a9-49f3-b9f6-e89ea4a8c94f",
+      "status": "failed",
+      "signature": "sFkYWbSkjfrd3XysmDUCCdznSMGBgkPiArBhQNGudTi7pATVrUnmzsaGxLYnKprmuu24Sjcq3op7o7bhsJMxupR",
+      "slot": 509601241,
+      "wire_bytes": 2913,
+      "transaction_version": 1,
+      "explorer": "https://explorer.solana.com/tx/sFkYWbSkjfrd3XysmDUCCdznSMGBgkPiArBhQNGudTi7pATVrUnmzsaGxLYnKprmuu24Sjcq3op7o7bhsJMxupR?cluster=devnet"
+    },
+    {
+      "kind": "run",
+      "request_id": "859caf47b70b63ba18deb81466fe10ee2ed4f2b81e82883711c2793d94729fb5",
+      "run_id": "64754d8f-52b9-43ef-872e-49957cf28cb0",
+      "status": "finalized",
+      "signature": "39Hhj1gTBLmMFVV6wvpTu2jaTP275Kc5RABTWqCbK97pHBPEQCPAcULRKnEJrXDgUDrxTUeHnFMYL2khYnMFhdez",
+      "slot": 509601043,
+      "wire_bytes": 2913,
+      "transaction_version": 1,
+      "explorer": "https://explorer.solana.com/tx/39Hhj1gTBLmMFVV6wvpTu2jaTP275Kc5RABTWqCbK97pHBPEQCPAcULRKnEJrXDgUDrxTUeHnFMYL2khYnMFhdez?cluster=devnet"
+    },
+    {
+      "kind": "wrap",
+      "request_id": "8ec54cc582902a1f628a14d143612290f660c391a0695c240231e3d4e78ee727",
+      "run_id": null,
+      "status": "finalized",
+      "signature": "3W3TsqTUxq4kLepMhLTukMDmJJJoKuaF6huBgZyfszYDCkzteNu8bmR9TF73GQ8VkfTHN47yPegTMifJCqyXgJmt",
+      "slot": 509600265,
+      "wire_bytes": 812,
+      "transaction_version": 0,
+      "explorer": "https://explorer.solana.com/tx/3W3TsqTUxq4kLepMhLTukMDmJJJoKuaF6huBgZyfszYDCkzteNu8bmR9TF73GQ8VkfTHN47yPegTMifJCqyXgJmt?cluster=devnet"
+    },
+    {
+      "kind": "unwrap",
+      "request_id": "e8b0b83cc2b46a6b9d5e8e092f9301024ba6567d392fba1457b3d5aa252bc8c2",
+      "run_id": null,
+      "status": "finalized",
+      "signature": "2rB9bwLbJYPVP1TKz2baJBzjAeEFN7MTC15c2VPJZCM5WWD8aJj5RZvYKzUPNZTUyK9UPhotFQcyXVPG6Wa6uQ9i",
+      "slot": 509601394,
+      "wire_bytes": 1918,
+      "transaction_version": 1,
+      "explorer": "https://explorer.solana.com/tx/2rB9bwLbJYPVP1TKz2baJBzjAeEFN7MTC15c2VPJZCM5WWD8aJj5RZvYKzUPNZTUyK9UPhotFQcyXVPG6Wa6uQ9i?cluster=devnet"
+    },
+    {
+      "kind": "transfer",
+      "request_id": "239b413fc4afd7913f7d5834516a8bda36926009405101e7a1d08e8b5a06cb65",
+      "run_id": null,
+      "status": "finalized",
+      "signature": "fbgJcSGtRWmTzBw8rxQn7vaZEurM9Bc3gpZWVsapXZXTEezTKQurnQ1RdBMqg3UmUTwSXj6JRCjohFDG1eUgwmA",
+      "slot": 509601167,
+      "wire_bytes": 2913,
+      "transaction_version": 1,
+      "explorer": "https://explorer.solana.com/tx/fbgJcSGtRWmTzBw8rxQn7vaZEurM9Bc3gpZWVsapXZXTEezTKQurnQ1RdBMqg3UmUTwSXj6JRCjohFDG1eUgwmA?cluster=devnet"
+    },
+    {
+      "kind": "run",
+      "request_id": "f1e2386d5bb76a16daca6cedf7f7d76ce726ffaf2c3cdec9f33e99babf6314a0",
+      "run_id": "1b989f0c-d12f-4407-b184-cd0db0383de2",
+      "status": "finalized",
+      "signature": "4mJzMV3uHuvjA4b4Mcb7fphw93MqqEsVdjYwn2EMUJVXznG36Jez7aEwBaHxVDRbAvADzZ3WTGxrT7cvnVRd42Mb",
+      "slot": 509601737,
+      "wire_bytes": 2913,
+      "transaction_version": 1,
+      "explorer": "https://explorer.solana.com/tx/4mJzMV3uHuvjA4b4Mcb7fphw93MqqEsVdjYwn2EMUJVXznG36Jez7aEwBaHxVDRbAvADzZ3WTGxrT7cvnVRd42Mb?cluster=devnet"
+    }
+  ],
+  "checks": {
+    "migration_applied": true,
+    "dedicated_roles": true,
+    "live_history_discovery": true,
+    "live_subscription_notification": true,
+    "startup_reconciliation_before_http": true,
+    "dashboard_confirmation_persists": true,
+    "dashboard_failure_persists": true,
+    "owner_rls": true,
+    "durable_events_idempotent": true
+  }
+}

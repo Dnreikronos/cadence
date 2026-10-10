@@ -1,0 +1,25 @@
+{
+  "setup_issues": [
+    {
+      "step": "Wrap storage configuration",
+      "observed": "503 wrap_storage_unavailable",
+      "cause": "Separate wrap PostgREST JWT missing from initial local environment",
+      "resolution": "Configured PROOF_WRAP_SERVICE_JWT; subsequent real wrap finalized"
+    },
+    {
+      "step": "Recipient fixture configuration",
+      "observed": "InstructionError[3,InvalidAccountData]",
+      "cause": "New ATA had not been reallocated for ConfidentialTransferAccount",
+      "resolution": "Reused allocation pattern from the existing wrap builder; subsequent setup passed"
+    }
+  ],
+  "expired_fixture": {
+    "run_id": "7df20d08-b07a-42fd-94fc-0cb9afb79ce5",
+    "broadcast_error": "BlockhashNotFound",
+    "persisted_status": "prepared",
+    "terminal_events": 0,
+    "resolution": "Kept original metadata; prepared and promptly submitted a fresh run"
+  },
+  "application_acceptance_assertions_changed": false,
+  "final_scenarios_passed": 7
+}
