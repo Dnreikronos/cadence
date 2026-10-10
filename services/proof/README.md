@@ -107,6 +107,12 @@ browser wallet integration.
 
 ## Decryption audit log
 
+Company-scoped auditor reads and admin grant creation/revocation are documented
+in [AUDIT_API.md](../../docs/dev/AUDIT_API.md). Configure
+`PROOF_AUDIT_DATABASE_URL` with the dedicated `cadence_audit_service` role after
+applying the auditor migration. Each authorized page commits one company-targeted
+audit row before any Vault read, including pages using multiple sender keys.
+
 Apply `supabase/migrations/20260928000000_decryption_audit_log.sql` as the
 Supabase migration administrator. The runtime must use `service_role`, which
 has INSERT permission only on actor, reason and target account. PostgreSQL
@@ -120,8 +126,8 @@ context; do not trust a caller-supplied actor field. Reasons describe operations
 and must never include amounts or secrets. `audit::log::append` remains available
 for general audit events. Stored viewing keys must use `keys::vault::load`, which
 uses the audit module to obtain a committed read permit before decrypting.
-Future endpoint integration owns connection setup, TLS, timeouts and account
-authorization; no decryption HTTP endpoint is added here.
+Endpoint integration owns connection setup, TLS, timeouts and account
+authorization; company-page reads also enforce an explicit auditor grant.
 
 Run the database test against an **empty disposable PostgreSQL database** as
 an administrator. It creates the Supabase roles and applies the migration;
