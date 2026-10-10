@@ -53,9 +53,18 @@ impl Store {
         })
     }
     pub async fn pending(&self) -> Result<Vec<Pending>, AppError> {
-        self.read(None, None).await
+        self.read(None, None, None).await
     }
-    async fn read(&self, id: Option<&str>, wallet: Option<&str>) -> Result<Vec<Pending>, AppError> {
+    pub(super) async fn pending_from(&self, minimum_expiry: u64) -> Result<Vec<Pending>, AppError> {
+        let minimum_expiry = i64::try_from(minimum_expiry).map_err(|_| AppError::RpcUnavailable)?;
+        self.read(None, None, Some(minimum_expiry)).await
+    }
+    async fn read(
+        &self,
+        id: Option<&str>,
+        wallet: Option<&str>,
+        minimum_expiry: Option<i64>,
+    ) -> Result<Vec<Pending>, AppError> {
         let client = self.database.connect().await?;
         let rows = client.query(
             "SELECT * FROM (SELECT 'run' AS kind, p.request_id AS id, r.company_wallet AS wallet, p.transaction, p.submitted_signature, p.last_valid_block_height \
@@ -63,8 +72,8 @@ impl Store {
              UNION ALL SELECT 'wrap',id,company_wallet,transaction,submitted_signature,last_valid_block_height FROM public.wrap_requests WHERE status='prepared' \
              UNION ALL SELECT 'transfer',id,company_wallet,transaction,submitted_signature,last_valid_block_height FROM public.transfer_requests WHERE status='prepared' \
              UNION ALL SELECT 'unwrap',id,wallet,transaction,submitted_signature,last_valid_block_height FROM public.unwrap_requests WHERE status='prepared') pending \
-             WHERE ($1::text IS NULL OR id=$1) AND ($2::text IS NULL OR wallet=$2)",
-            &[&id, &wallet],
+             WHERE ($1::text IS NULL OR id=$1) AND ($2::text IS NULL OR wallet=$2) AND ($3::bigint IS NULL OR last_valid_block_height >= $3)",
+            &[&id, &wallet, &minimum_expiry],
         ).await.map_err(|_| AppError::StorageUnavailable)?;
         rows.into_iter()
             .map(|row| {
@@ -195,6 +204,6 @@ impl Store {
     }
     pub async fn find(&self, id: &str, wallet: &str) -> Result<Vec<Pending>, AppError> {
         // Refresh after observing the chain: preparations may commit during discovery.
-        self.read(Some(id), Some(wallet)).await
+        self.read(Some(id), Some(wallet), None).await
     }
 }

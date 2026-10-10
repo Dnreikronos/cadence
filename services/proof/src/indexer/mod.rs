@@ -58,8 +58,21 @@ impl Indexer {
         Self::new(rpc, &database, websocket).map(Some)
     }
     pub async fn backfill(&self) -> Result<(), AppError> {
+        self.recover(true).await
+    }
+    pub(super) async fn active_pending(&self) -> Result<Vec<Pending>, AppError> {
+        let height = self.rpc.finalized_block_height().await?;
+        self.store
+            .pending_from(height.saturating_sub(history::FINALITY_GRACE))
+            .await
+    }
+    async fn recover(&self, full: bool) -> Result<(), AppError> {
         self.rpc.require_devnet().await?;
-        let pending = self.store.pending().await?;
+        let pending = if full {
+            self.store.pending().await?
+        } else {
+            self.active_pending().await?
+        };
         let mut error = None;
         for p in pending.iter().filter(|p| p.signature.is_some()) {
             if let Err(e) = self.reconcile(p).await {
@@ -71,7 +84,7 @@ impl Indexer {
             wallets.entry(&p.wallet).or_default().push(p);
         }
         for (wallet, requests) in wallets {
-            if let Err(e) = self.discover(wallet, &requests, true).await {
+            if let Err(e) = self.discover(wallet, &requests, full).await {
                 error = Some(e);
             }
         }
@@ -91,13 +104,44 @@ impl Indexer {
     }
     pub fn spawn(self: Arc<Self>) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            loop {
-                if self.backfill().await.is_ok() {
-                    let _ = self.watch().await;
+            let (hints, mut notifications) = tokio::sync::mpsc::channel(64);
+            let recovery = async {
+                let mut active = tokio::time::interval(Duration::from_secs(30));
+                let mut full = tokio::time::interval_at(
+                    tokio::time::Instant::now() + Duration::from_secs(300),
+                    Duration::from_secs(300),
+                );
+                active.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                full.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    let result = tokio::select! {
+                        _ = full.tick() => self.backfill().await,
+                        _ = active.tick() => self.recover(false).await,
+                    };
+                    if result.is_err() {
+                        eprintln!(
+                            "chain indexer reconciliation failed; retaining unresolved requests"
+                        );
+                    }
                 }
-                eprintln!("chain indexer disconnected or reconciliation failed; retrying");
-                tokio::time::sleep(Duration::from_secs(5)).await;
-            }
+            };
+            let subscriptions = async {
+                loop {
+                    let _ = self.watch(&hints).await;
+                    eprintln!("chain indexer disconnected; retrying subscriptions");
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                }
+            };
+            let receipts = async {
+                while let Some(p) = notifications.recv().await {
+                    if self.reconcile(&p).await.is_err() {
+                        eprintln!(
+                            "chain indexer notification reconciliation failed; retaining request"
+                        );
+                    }
+                }
+            };
+            tokio::join!(recovery, subscriptions, receipts);
         })
     }
 }

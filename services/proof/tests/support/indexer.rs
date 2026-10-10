@@ -39,6 +39,7 @@ pub struct Backend {
     pub unavailable: AtomicBool,
     pub delay: AtomicBool,
     pub history_delay: AtomicBool,
+    pub history_waiting: AtomicBool,
 }
 async fn rpc(State(state): State<Arc<Backend>>, Json(request): Json<Value>) -> Json<Value> {
     state.calls.lock().unwrap().push(request.clone());
@@ -47,7 +48,9 @@ async fn rpc(State(state): State<Arc<Backend>>, Json(request): Json<Value>) -> J
     }
     if request["method"] == "getSignaturesForAddress" && state.history_delay.load(Ordering::SeqCst)
     {
-        tokio::time::sleep(Duration::from_millis(600)).await;
+        state.history_waiting.store(true, Ordering::SeqCst);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        state.history_waiting.store(false, Ordering::SeqCst);
     }
     if state.unavailable.load(Ordering::SeqCst) {
         return Json(

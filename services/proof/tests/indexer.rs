@@ -1,5 +1,7 @@
 #[path = "support/indexer_history.rs"]
 mod history;
+#[path = "support/indexer_scheduling.rs"]
+mod scheduling;
 #[path = "support/indexer_startup.rs"]
 mod startup;
 #[path = "support/indexer.rs"]
@@ -246,6 +248,7 @@ async fn backfill_subscriptions_events_permissions_and_restart() {
     startup::verify(&h).await;
     assert_eq!(h.events().await, 12);
     history::verify(&h).await;
+    scheduling::verify(&h).await;
     let events_before_permission_checks = h.events().await;
 
     for role in ["anon", "authenticated", "service_role"] {

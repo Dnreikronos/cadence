@@ -47,6 +47,7 @@ tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 spl-token-client = { path = "vendor/spl-token-client" }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 static_assertions = "1.1"
 solana-keypair = "3.1"
 tower = { version = "0.5", features = ["util"] }
