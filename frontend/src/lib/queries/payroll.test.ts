@@ -1,6 +1,7 @@
 import { QueryClient, QueryObserver } from "@tanstack/react-query"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { api } from "@/lib/api"
+import { ApiError } from "@/lib/api/errors"
 import type { Run, RunPayment } from "@/lib/api/schemas"
 import { queryKeys } from "./keys"
 import { runOptions } from "./payroll"
@@ -115,6 +116,36 @@ describe("indexed run reads", () => {
     })
     cache.clear()
   })
+
+  it("keeps checking after the initial read exhausts retries and recovers", async () => {
+    const cache = client()
+    vi.mocked(api.runs.get).mockRejectedValueOnce(
+      new ApiError(503, "service_unavailable"),
+    )
+    await expect(cache.fetchQuery(runOptions(RUN_ID))).rejects.toThrow(
+      "service_unavailable",
+    )
+    expect(cache.getQueryData(queryKeys.runs.detail(RUN_ID))).toBeUndefined()
+    expect(pollMs(cache)).toBe(5_000)
+
+    vi.mocked(api.runs.get).mockResolvedValueOnce(run("finalized"))
+    await cache.fetchQuery(runOptions(RUN_ID))
+    expect(pollMs(cache)).toBe(false)
+    cache.clear()
+  })
+
+  it.each([401, 403, 404])(
+    "stops polling an initial permanent %i error",
+    async (status) => {
+      const cache = client()
+      vi.mocked(api.runs.get).mockRejectedValueOnce(
+        new ApiError(status, "request_failed"),
+      )
+      await expect(cache.fetchQuery(runOptions(RUN_ID))).rejects.toThrow()
+      expect(pollMs(cache)).toBe(false)
+      cache.clear()
+    },
+  )
 
   it("keeps reading an unfamiliar status until the service returns a known outcome", async () => {
     const cache = client()

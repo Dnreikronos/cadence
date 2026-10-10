@@ -8,6 +8,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import { api, currentUserId } from "@/lib/api"
+import { isApiError } from "@/lib/api/errors"
 import { isKnownRunPaymentStatus } from "@/lib/api/schemas"
 import type { Signer } from "@/lib/api/sign"
 import { createRun } from "@/lib/runs/create"
@@ -117,14 +118,20 @@ export const runOptions = (runId: string) =>
   queryOptions({
     queryKey: queryKeys.runs.detail(runId),
     queryFn: ({ signal }) => api.runs.get(runId, { signal }),
-    refetchInterval: (query) =>
-      query.state.data?.payments.some(
+    refetchInterval: (query) => {
+      if (!query.state.data) {
+        return isApiError(query.state.error) && query.state.error.isRetryable
+          ? 5_000
+          : false
+      }
+      return query.state.data.payments.some(
         (payment) =>
           payment.status === "prepared" ||
           !isKnownRunPaymentStatus(payment.status),
       )
         ? 5_000
-        : false,
+        : false
+    },
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
