@@ -68,3 +68,8 @@
   transaction signing does not prove confidential-key enrollment: the SDK's
   canonical derivation message was rejected separately. Never substitute a new
   message or submit setup with discarded temporary keys just to pass an E2E test.
+
+- Run fresh Supabase migration startup after migration changes. Rust fixtures that
+  execute SQL directly bypass the migration-version registry and cannot detect
+  duplicate filename timestamps. Fetch main and check its migration versions
+  before choosing a new one; keep fixture migration order consistent with it.

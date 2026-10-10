@@ -1,7 +1,7 @@
 # Auditor payments and grants
 
 Issue [#59](https://github.com/Dnreikronos/cadence/issues/59), PRD R4. Apply
-`20261010000001_auditor_grants.sql` after the preceding migrations, including #58.
+`20261010000002_auditor_grants.sql` after the preceding migrations, including #58.
 Enable LOGIN and provision a password for `cadence_audit_service` through deployment
 secret management. Set `PROOF_AUDIT_DATABASE_URL` to a connection using that exact
 role, plus `PROOF_SUPABASE_URL` and `PROOF_SUPABASE_API_KEY` for verified user

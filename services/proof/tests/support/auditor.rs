@@ -89,7 +89,8 @@ impl Harness {
             include_str!("../../../../supabase/migrations/20261003000001_runs.sql"),
             include_str!("../../../../supabase/migrations/20261004000000_unwrap_requests.sql"),
             include_str!("../../../../supabase/migrations/20261010000000_chain_indexer.sql"),
-            include_str!("../../../../supabase/migrations/20261010000001_auditor_grants.sql"),
+            include_str!("../../../../supabase/migrations/20261010000001_indexer_scan_checkpoints.sql"),
+            include_str!("../../../../supabase/migrations/20261010000002_auditor_grants.sql"),
         ] {
             admin.batch_execute(migration).await.unwrap();
         }
