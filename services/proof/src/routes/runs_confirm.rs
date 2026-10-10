@@ -126,6 +126,13 @@ pub(super) async fn reconcile(
             Err(AppError::Conflict("payment_already_resolved"))
         };
     }
+    state
+        .service
+        .as_ref()
+        .ok_or(AppError::RunUnavailable)?
+        .runs
+        .submitted(user, &run.id, p, value)
+        .await?;
     state.devnet().await?;
     // Observe finalized expiry before classifying a missing history response.
     let expired = expire

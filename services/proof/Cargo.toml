@@ -41,11 +41,13 @@ spl-token-2022-interface = "3.1"
 wincode = "0.6"
 zeroize = "1.8"
 futures-util = "0.3"
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 
 [patch.crates-io]
 spl-token-client = { path = "vendor/spl-token-client" }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 static_assertions = "1.1"
 solana-keypair = "3.1"
 tower = { version = "0.5", features = ["util"] }

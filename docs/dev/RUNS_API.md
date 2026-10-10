@@ -3,8 +3,9 @@
 Runs reuse the [transfer API](TRANSFER_API.md), its Supabase authentication,
 wallet association and two restricted database connections. Apply
 `supabase/migrations/20261003000001_runs.sql` after the transfer migration.
-No new credentials are required. Missing configuration returns
-`503 run_storage_unavailable`.
+The [chain indexer](INDEXER.md) additionally requires its migration and dedicated
+database connection when running the payment-enabled service. Missing route
+configuration returns `503 run_storage_unavailable`.
 
 The company wallet is the sole signer. Source/recipients must be configured
 Token-2022 accounts for the devnet wrapped-USDC mint. The sender needs an enrolled
@@ -79,6 +80,11 @@ Wallet session
 management and the approval UI belong to #83/#77.
 
 ## Confirm and read
+
+The indexer updates the same payment rows in the background. Confirm requests
+persist verified submission signatures before RPC reads; missed client confirms
+are recovered from finalized wallet history. Status reads remain entirely in
+Postgres, and startup reconciliation completes before accepting requests.
 
 `POST /runs/:id/confirm` accepts any subset of up to 100 distinct positions:
 

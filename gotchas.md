@@ -1,5 +1,16 @@
 # Gotchas
 
+- Keep chain recovery outside the WebSocket receive loop and notification receipt
+  path. Expired requests need slower recovery, not endless fast polling or an
+  inferred failure. Bound history using block heights rather than slots, save
+  descending page progress separately, and revisit pending windows when new
+  preparations can commit after a scan starts. Check real provider throttling
+  as well as mock responses when adding block-header reads.
+
+- For #58, include standalone wrap, transfer and unwrap indexing as well as
+  payroll runs. #147 addresses safe standalone retries, not background status
+  indexing; check adjacent issue scope before splitting that work out.
+
 - Authenticate the caller and authorize wallet ownership before charging a
   per-wallet quota. Rejected ownership checks must not spend another wallet's
   budget. Quota regression tests must reuse the same router across callers;

@@ -44,6 +44,8 @@ repo's paths instead of these.
 
 - [API contract for the web app](dev/API_CONTRACT.md) — #63. What the web app builds and mocks against: authentication, the prepare-sign-confirm pattern, errors that never carry an amount, and every route, marked implemented or proposed (the payroll `/runs` routes are implemented, in a different shape from the one the client uses), plus the design review findings to resolve before building. Synced with the client and the mock on 2026-10-04: it now lists the mock's deviations from a real service and what the screens assume from the backend. Status: working draft, open questions 1 to 37 for the backend owner.
 
+- [Chain indexer](dev/INDEXER.md) — #58. Finalized payment recovery, runtime setup and durable payment events.
+
 - [Wrap USDC](dev/WRAP_API.md) — #52. The implemented `POST /wrap` and `POST /wrap/confirm`, their configuration, errors and storage.
 
 - [Transfer API](dev/TRANSFER_API.md) — #54. The implemented `POST /transfer` and `POST /transfer/confirm`, their configuration, authentication, errors and storage.

@@ -316,6 +316,10 @@ async fn confirm(
     let slot = if let Some(slot) = record.slot.filter(|_| record.signature.is_some()) {
         slot
     } else {
+        service
+            .store
+            .submitted(&user, &record, &request.signature)
+            .await?;
         state.rpc.require_devnet().await.map_err(cluster_error)?;
         let result = state.rpc.finalized_transaction(&request.signature).await?;
         let slot = super::wrap::verify_confirmation(

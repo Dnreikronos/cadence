@@ -1,0 +1,7 @@
+{"time":"2026-10-10T16:31:31.288Z","event":"upstream_open"}
+{"time":"2026-10-10T16:31:46.717Z","event":"request","method":"signatureSubscribe","id":1,"signature":"4mJzMV3uHuvjA4b4Mcb7fphw93MqqEsVdjYwn2EMUJVXznG36Jez7aEwBaHxVDRbAvADzZ3WTGxrT7cvnVRd42Mb","commitment":"finalized"}
+{"time":"2026-10-10T16:31:46.874Z","event":"response","id":1,"result":1811755}
+{"time":"2026-10-10T16:32:02.021Z","event":"response","method":"signatureNotification","subscription":1811755,"slot":509601737,"failed":false}
+{"time":"2026-10-10T16:33:02.022Z","event":"upstream_close"}
+{"time":"2026-10-10T16:33:08.162Z","event":"upstream_open"}
+{"time":"2026-10-10T16:34:06.234Z","event":"upstream_close"}

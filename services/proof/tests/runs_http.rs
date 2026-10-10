@@ -159,12 +159,6 @@ async fn invalid_and_disabled_runs_have_sanitized_errors() {
 #[ignore = "requires TRANSFER_TEST_DATABASE_URL for an empty disposable Supabase instance with vault.sql applied"]
 async fn three_recipient_run_recovers_partial_failure_without_repaying_successes() {
     let h = Harness::new().await;
-    h.admin
-        .batch_execute(include_str!(
-            "../../../supabase/migrations/20261003000001_runs.sql"
-        ))
-        .await
-        .unwrap();
     let recipients: Vec<_> = (20..23)
         .map(|i| Address::new_from_array([i; 32]).to_string())
         .collect();

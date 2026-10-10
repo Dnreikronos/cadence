@@ -1,0 +1,55 @@
+{"method": "getGenesisHash", "status": 200, "rpc_error_code": null, "seconds": 0.663}
+{"method": "getSignaturesForAddress", "status": 200, "rpc_error_code": null, "seconds": 0.93}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 0.675, "slot": 509601737, "block_height": 496832046}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 0.588, "slot": 509601394, "block_height": 496831703}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 0.654, "slot": 509601241, "block_height": 496831554}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 3.466, "slot": 509601167, "block_height": 496831480}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 0.645, "slot": 509601043, "block_height": 496831356}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 0.663, "slot": 509600513, "block_height": 496830838}
+{"method": "getTransaction", "status": 200, "rpc_error_code": null, "seconds": 3.264}
+{"method": "getBlock", "status": 429, "rpc_error_code": 429, "seconds": 0.664, "slot": 509600290, "block_height": null}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 0.624, "slot": 509600290, "block_height": 496830615}
+{"method": "getGenesisHash", "status": 200, "rpc_error_code": null, "seconds": 0.612}
+{"method": "getGenesisHash", "status": 200, "rpc_error_code": null, "seconds": 0.67}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.587}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.646}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.659}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.626}
+{"method": "getHealth", "status": 200, "rpc_error_code": null, "seconds": 0.665}
+{"method": "getHealth", "status": 200, "rpc_error_code": null, "seconds": 0.685}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.639}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.62}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.652}
+{"method": "getHealth", "status": 200, "rpc_error_code": null, "seconds": 0.609}
+{"method": "getHealth", "status": 200, "rpc_error_code": null, "seconds": 0.603}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.632}
+{"method": "getGenesisHash", "status": 200, "rpc_error_code": null, "seconds": 0.636}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.594}
+{"method": "getHealth", "status": 200, "rpc_error_code": null, "seconds": 0.634}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.71}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.674}
+{"method": "getHealth", "status": 200, "rpc_error_code": null, "seconds": 0.663}
+{"method": "getHealth", "status": 200, "rpc_error_code": null, "seconds": 0.651}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.634}
+{"method": "getGenesisHash", "status": 200, "rpc_error_code": null, "seconds": 0.694}
+{"method": "getSignaturesForAddress", "status": 200, "rpc_error_code": null, "seconds": 0.98}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 0.662, "slot": 509601737, "block_height": 496832046}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 0.644, "slot": 509601394, "block_height": 496831703}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 0.679, "slot": 509601241, "block_height": 496831554}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 0.646, "slot": 509601167, "block_height": 496831480}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 0.637, "slot": 509601043, "block_height": 496831356}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 0.587, "slot": 509600513, "block_height": 496830838}
+{"method": "getTransaction", "status": 200, "rpc_error_code": null, "seconds": 0.636}
+{"method": "getBlock", "status": 429, "rpc_error_code": 429, "seconds": 0.646, "slot": 509600290, "block_height": null}
+{"method": "getBlock", "status": 429, "rpc_error_code": 429, "seconds": 0.642, "slot": 509600290, "block_height": null}
+{"method": "getBlock", "status": 200, "rpc_error_code": null, "seconds": 0.681, "slot": 509600290, "block_height": 496830615}
+{"method": "getGenesisHash", "status": 200, "rpc_error_code": null, "seconds": 0.628}
+{"method": "getGenesisHash", "status": 200, "rpc_error_code": null, "seconds": 0.667}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.645}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.633}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.66}
+{"method": "getHealth", "status": 200, "rpc_error_code": null, "seconds": 0.674}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.616}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.65}
+{"method": "getHealth", "status": 200, "rpc_error_code": null, "seconds": 0.627}
+{"method": "getBlockHeight", "status": 200, "rpc_error_code": null, "seconds": 0.622}

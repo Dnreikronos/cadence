@@ -6,6 +6,7 @@ pub mod config;
 pub mod cors;
 pub mod database;
 pub mod error;
+pub mod indexer;
 pub mod run_store;
 pub mod transfer_store;
 pub mod unwrap_store;

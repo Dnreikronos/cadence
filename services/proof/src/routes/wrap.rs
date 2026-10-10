@@ -175,6 +175,7 @@ async fn confirm(
             status: "finalized",
         }));
     }
+    store.submitted(&record, &request.signature).await?;
     state.rpc.require_devnet().await?;
     let result = state.rpc.finalized_transaction(&request.signature).await?;
     let slot = verify_confirmation(
@@ -193,7 +194,7 @@ async fn confirm(
     }))
 }
 
-pub(super) fn verify_confirmation(
+pub(crate) fn verify_confirmation(
     id: &str,
     wallet: &str,
     transaction: &str,

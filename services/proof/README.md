@@ -313,6 +313,12 @@ evidence. The proof service never signs or submits a transfer.
 
 ## Payment runs
 
+The [chain indexer](../../docs/dev/INDEXER.md) recovers run, wrap, transfer and
+unwrap status in the background and before startup. Payment-enabled runtimes
+require its migration and a dedicated `PROOF_INDEXER_DATABASE_URL`; optionally
+set `PROOF_RPC_WS_URL` for a separate subscription endpoint. Confirmations emit
+durable events in Postgres for the future notifier.
+
 `POST /runs` prepares ordered confidential payments with one unsigned v1
 transaction per buildable recipient. `POST /runs/:id/confirm` records each
 payment's verified success or failure independently. `GET /runs/:id` returns

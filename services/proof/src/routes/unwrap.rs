@@ -357,6 +357,10 @@ async fn confirm(
     let slot = if let Some(slot) = record.slot.filter(|_| record.signature.is_some()) {
         slot
     } else {
+        service
+            .unwrap
+            .submitted(&user, &record, &request.signature)
+            .await?;
         state
             .rpc
             .require_devnet()
