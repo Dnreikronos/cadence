@@ -177,6 +177,9 @@ async fn update(
     if record.signature.is_some() {
         return Ok(Json(json!([])));
     }
+    if body.get("submitted_signature").is_some() {
+        return Ok(Json(json!([record])));
+    }
     record.signature = Some(body["signature"].as_str().unwrap().into());
     record.slot = body["slot"].as_u64();
     Ok(Json(json!([record])))

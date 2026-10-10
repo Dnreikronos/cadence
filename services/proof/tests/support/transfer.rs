@@ -166,6 +166,15 @@ impl Harness {
             ))
             .await
             .unwrap();
+        for migration in [
+            include_str!("../../../../supabase/migrations/20260929000001_wrap_requests.sql"),
+            include_str!("../../../../supabase/migrations/20260930000001_wrap_cleanup.sql"),
+            include_str!("../../../../supabase/migrations/20261003000001_runs.sql"),
+            include_str!("../../../../supabase/migrations/20261004000000_unwrap_requests.sql"),
+            include_str!("../../../../supabase/migrations/20261010000000_chain_indexer.sql"),
+        ] {
+            admin.batch_execute(migration).await.unwrap();
+        }
         admin.batch_execute("ALTER ROLE cadence_key_service LOGIN PASSWORD 'transfer54-test-only'; ALTER ROLE cadence_transfer_service LOGIN PASSWORD 'transfer54-test-only'; INSERT INTO auth.users (id) VALUES ('11111111-1111-4111-8111-111111111111'), ('22222222-2222-4222-8222-222222222222');").await.unwrap();
         let mut keys: reqwest::Url = url.parse().unwrap();
         keys.set_username("cadence_key_service").unwrap();

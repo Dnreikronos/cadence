@@ -92,18 +92,6 @@ async fn unconfigured_and_malformed_requests_use_fixed_errors_and_limits() {
 #[ignore = "requires TRANSFER_TEST_DATABASE_URL for an empty disposable Supabase instance with vault.sql applied"]
 async fn authenticated_withdrawal_warns_before_preparing_and_confirms_immutably() {
     let h = Harness::new().await;
-    h.admin
-        .batch_execute(include_str!(
-            "../../../supabase/migrations/20261003000001_runs.sql"
-        ))
-        .await
-        .unwrap();
-    h.admin
-        .batch_execute(include_str!(
-            "../../../supabase/migrations/20261004000000_unwrap_requests.sql"
-        ))
-        .await
-        .unwrap();
     let wallet = h.fixture.wallet.pubkey();
     let source = unwrap::source(&wallet);
     let signature = h

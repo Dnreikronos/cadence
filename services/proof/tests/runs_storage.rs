@@ -24,6 +24,15 @@ async fn run_storage_is_private_atomic_and_preserves_attempts() {
     ))
     .await
     .unwrap();
+    db.batch_execute("CREATE ROLE authenticator").await.unwrap();
+    for migration in [
+        include_str!("../../../supabase/migrations/20260929000001_wrap_requests.sql"),
+        include_str!("../../../supabase/migrations/20260930000001_wrap_cleanup.sql"),
+        include_str!("../../../supabase/migrations/20261004000000_unwrap_requests.sql"),
+        include_str!("../../../supabase/migrations/20261010000000_chain_indexer.sql"),
+    ] {
+        db.batch_execute(migration).await.unwrap();
+    }
     db.batch_execute("ALTER ROLE cadence_transfer_service LOGIN PASSWORD 'runs-test-only'; INSERT INTO public.proof_wallets (wallet,user_id) VALUES (repeat('1',32),'11111111-1111-4111-8111-111111111111');").await.unwrap();
     let mut receipts: reqwest::Url = url.parse().unwrap();
     receipts.set_username("cadence_transfer_service").unwrap();
