@@ -1,3 +1,5 @@
+#[path = "support/indexer_history.rs"]
+mod history;
 #[path = "support/indexer_startup.rs"]
 mod startup;
 #[path = "support/indexer.rs"]
@@ -243,6 +245,8 @@ async fn backfill_subscriptions_events_permissions_and_restart() {
     h.assert_status(&unknown, "finalized").await;
     startup::verify(&h).await;
     assert_eq!(h.events().await, 12);
+    history::verify(&h).await;
+    let events_before_permission_checks = h.events().await;
 
     for role in ["anon", "authenticated", "service_role"] {
         h.db.batch_execute(&format!("SET ROLE {role}"))
@@ -281,7 +285,7 @@ async fn backfill_subscriptions_events_permissions_and_restart() {
             .await
             .unwrap()
             .get::<_, i64>(0),
-        12
+        events_before_permission_checks
     );
     let allowed = [
         "run_id",
@@ -306,6 +310,8 @@ async fn backfill_subscriptions_events_permissions_and_restart() {
         "wallet",
         "source",
         "kind",
+        "scan_head",
+        "scan_before",
     ];
     for row in h.db.query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('runs','payments','payment_attempts','wrap_requests','transfer_requests','unwrap_requests','payment_events','indexer_cursors')",&[]).await.unwrap() {
         assert!(allowed.contains(&row.get::<_,&str>(0)));

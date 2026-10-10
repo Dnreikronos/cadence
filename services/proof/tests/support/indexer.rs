@@ -16,7 +16,7 @@ use solana_signer::Signer;
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -30,13 +30,23 @@ pub const RUN: &str = "22222222-2222-4222-8222-222222222222";
 pub struct Backend {
     pub transactions: Mutex<HashMap<String, Value>>,
     pub history: Mutex<Vec<String>>,
+    pub wallet_history: Mutex<HashMap<String, Vec<String>>>,
+    pub slots: Mutex<HashMap<String, u64>>,
+    pub blocks: Mutex<HashMap<u64, Value>>,
+    pub first_available: AtomicU64,
+    pub height: AtomicU64,
     pub calls: Mutex<Vec<Value>>,
     pub unavailable: AtomicBool,
     pub delay: AtomicBool,
+    pub history_delay: AtomicBool,
 }
 async fn rpc(State(state): State<Arc<Backend>>, Json(request): Json<Value>) -> Json<Value> {
     state.calls.lock().unwrap().push(request.clone());
     if state.delay.load(Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(600)).await;
+    }
+    if request["method"] == "getSignaturesForAddress" && state.history_delay.load(Ordering::SeqCst)
+    {
         tokio::time::sleep(Duration::from_millis(600)).await;
     }
     if state.unavailable.load(Ordering::SeqCst) {
@@ -47,6 +57,23 @@ async fn rpc(State(state): State<Arc<Backend>>, Json(request): Json<Value>) -> J
     let result = match request["method"].as_str().unwrap() {
         "getHealth" => json!("ok"),
         "getGenesisHash" => json!("EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG"),
+        "getBlockHeight" => json!(state.height.load(Ordering::SeqCst)),
+        "getFirstAvailableBlock" => json!(state.first_available.load(Ordering::SeqCst)),
+        "getBlock" => {
+            assert_eq!(request["params"][1]["commitment"], "finalized");
+            assert_eq!(request["params"][1]["transactionDetails"], "none");
+            let block = state
+                .blocks
+                .lock()
+                .unwrap()
+                .get(&request["params"][0].as_u64().unwrap())
+                .cloned()
+                .unwrap_or(json!({"blockHeight":42}));
+            if block.get("error").is_some() {
+                return Json(json!({"jsonrpc":"2.0","id":1,"error":block["error"]}));
+            }
+            block
+        }
         "getTransaction" => state
             .transactions
             .lock()
@@ -56,7 +83,14 @@ async fn rpc(State(state): State<Arc<Backend>>, Json(request): Json<Value>) -> J
             .unwrap_or(Value::Null),
         "getSignaturesForAddress" => {
             assert_eq!(request["params"][1]["commitment"], "finalized");
-            let history = state.history.lock().unwrap();
+            let history = state
+                .wallet_history
+                .lock()
+                .unwrap()
+                .get(request["params"][0].as_str().unwrap())
+                .cloned()
+                .unwrap_or_else(|| state.history.lock().unwrap().clone());
+            let slots = state.slots.lock().unwrap();
             let start = request["params"][1]["before"]
                 .as_str()
                 .map(|s| history.iter().position(|h| h == s).unwrap() + 1)
@@ -70,7 +104,7 @@ async fn rpc(State(state): State<Arc<Backend>>, Json(request): Json<Value>) -> J
                 .iter()
                 .take(2)
                 .map(
-                    |s| json!({"signature":s,"slot":42,"err":null,"confirmationStatus":"finalized"})
+                    |s| json!({"signature":s,"slot":slots.get(s).copied().unwrap_or(42),"err":null,"confirmationStatus":"finalized"})
                 )
                 .collect::<Vec<_>>())
         }
@@ -104,6 +138,7 @@ pub fn payment(
             wallet: wallet.pubkey().to_string(),
             transaction: STANDARD.encode(bytes),
             signature: tracked.then(|| signature.clone()),
+            last_valid_block_height: 1,
         },
         signature,
         receipt,
@@ -145,6 +180,9 @@ impl Harness {
             include_str!("../../../../supabase/migrations/20261003000001_runs.sql"),
             include_str!("../../../../supabase/migrations/20261004000000_unwrap_requests.sql"),
             include_str!("../../../../supabase/migrations/20261010000000_chain_indexer.sql"),
+            include_str!(
+                "../../../../supabase/migrations/20261010000001_indexer_scan_checkpoints.sql"
+            ),
         ] {
             db.batch_execute(migration).await.unwrap();
         }
@@ -183,12 +221,13 @@ impl Harness {
     }
     pub async fn insert(&self, p: &Pending, position: i16) {
         let destination = Address::new_from_array([position as u8 + 20; 32]).to_string();
+        let expiry = i64::try_from(p.last_valid_block_height).unwrap();
         match p.kind {
             Kind::Run => {
-                self.db.execute("INSERT INTO public.payments(run_id,position,destination,request_id,transaction,last_valid_block_height,status,submitted_signature) VALUES ($1::text::uuid,$2,$3,$4,$5,1,'prepared',$6)",&[&RUN,&position,&destination,&p.id,&p.transaction,&p.signature]).await.unwrap();
+                self.db.execute("INSERT INTO public.payments(run_id,position,destination,request_id,transaction,last_valid_block_height,status,submitted_signature) VALUES ($1::text::uuid,$2,$3,$4,$5,$7,'prepared',$6)",&[&RUN,&position,&destination,&p.id,&p.transaction,&p.signature,&expiry]).await.unwrap();
             }
             Kind::Wrap => {
-                self.db.execute("INSERT INTO public.wrap_requests(id,company_wallet,destination,transaction,last_valid_block_height,submitted_signature) VALUES ($1,$2,$3,$4,1,$5)",&[&p.id,&p.wallet,&destination,&p.transaction,&p.signature]).await.unwrap();
+                self.db.execute("INSERT INTO public.wrap_requests(id,company_wallet,destination,transaction,last_valid_block_height,submitted_signature) VALUES ($1,$2,$3,$4,$6,$5)",&[&p.id,&p.wallet,&destination,&p.transaction,&p.signature,&expiry]).await.unwrap();
             }
             kind => {
                 let (table, wallet, source) = if kind == Kind::Transfer {
@@ -196,7 +235,7 @@ impl Harness {
                 } else {
                     ("unwrap_requests", "wallet", "source")
                 };
-                self.db.execute(&format!("INSERT INTO public.{table}(id,user_id,{wallet},{source},destination,transaction,last_valid_block_height,submitted_signature) VALUES ($1,$2::text::uuid,$3,$4,$4,$5,1,$6)"),&[&p.id,&USER,&p.wallet,&destination,&p.transaction,&p.signature]).await.unwrap();
+                self.db.execute(&format!("INSERT INTO public.{table}(id,user_id,{wallet},{source},destination,transaction,last_valid_block_height,submitted_signature) VALUES ($1,$2::text::uuid,$3,$4,$4,$5,$7,$6)"),&[&p.id,&USER,&p.wallet,&destination,&p.transaction,&p.signature,&expiry]).await.unwrap();
             }
         }
     }

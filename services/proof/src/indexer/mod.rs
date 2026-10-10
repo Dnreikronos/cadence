@@ -1,10 +1,11 @@
+mod history;
 pub mod store;
 mod subscription;
 pub mod verify;
 
 use crate::{error::AppError, solana::client::RpcClient};
-use serde_json::{json, Value};
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use serde_json::Value;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use store::{Pending, Store};
 
 pub struct Indexer {
@@ -65,82 +66,16 @@ impl Indexer {
                 error = Some(e);
             }
         }
-        let cursors = self.store.cursors().await?;
-        let wallets: HashSet<_> = pending
-            .iter()
-            .filter(|p| p.signature.is_none())
-            .map(|p| p.wallet.as_str())
-            .collect();
-        for wallet in wallets {
-            if let Err(e) = self
-                .discover(wallet, cursors.get(wallet).map(String::as_str))
-                .await
-            {
+        let mut wallets: HashMap<&str, Vec<&Pending>> = HashMap::new();
+        for p in pending.iter().filter(|p| p.signature.is_none()) {
+            wallets.entry(&p.wallet).or_default().push(p);
+        }
+        for (wallet, requests) in wallets {
+            if let Err(e) = self.discover(wallet, &requests, true).await {
                 error = Some(e);
             }
         }
         error.map_or(Ok(()), Err)
-    }
-    async fn discover(&self, wallet: &str, until: Option<&str>) -> Result<(), AppError> {
-        let mut before: Option<String> = None;
-        let mut head = None;
-        let mut seen = HashSet::new();
-        loop {
-            let mut config = json!({"commitment":"finalized","limit":1000});
-            if let Some(before) = &before {
-                config["before"] = json!(before);
-            }
-            if let Some(until) = until {
-                config["until"] = json!(until);
-            }
-            let result = self
-                .rpc
-                .call("getSignaturesForAddress", json!([wallet, config]))
-                .await?;
-            let entries = result.as_array().ok_or(AppError::RpcUnavailable)?;
-            if entries.is_empty() {
-                break;
-            }
-            for entry in entries {
-                let signature = entry["signature"]
-                    .as_str()
-                    .ok_or(AppError::RpcUnavailable)?;
-                if !seen.insert(signature.to_owned()) {
-                    return Err(AppError::RpcUnavailable);
-                }
-                if head.is_none() {
-                    head = Some(signature.to_owned());
-                }
-                let result = self.rpc.finalized_transaction(signature).await?;
-                // An unavailable history entry must not advance the cursor past a payment.
-                if result.is_null() {
-                    return Err(AppError::Conflict("transaction_history_unavailable"));
-                }
-                match verify::discovered(&result) {
-                    Ok((id, actual)) => {
-                        if actual != signature {
-                            return Err(AppError::RpcUnavailable);
-                        }
-                        for p in self.store.find(&id, wallet).await? {
-                            self.record(&p, signature, &result).await?;
-                        }
-                    }
-                    Err(AppError::Conflict("transaction_mismatch")) => {}
-                    Err(error) => return Err(error),
-                }
-            }
-            before = Some(
-                entries.last().unwrap()["signature"]
-                    .as_str()
-                    .unwrap()
-                    .to_owned(),
-            );
-            // Always request the next page; providers can return a short page.
-        }
-        if let Some(head) = head {
-            self.store.cursor(wallet, &head).await?;
-        }
-        Ok(())
     }
     pub(super) async fn reconcile(&self, p: &Pending) -> Result<(), AppError> {
         let signature = p.signature.as_deref().ok_or(AppError::StorageUnavailable)?;

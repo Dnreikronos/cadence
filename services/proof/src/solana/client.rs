@@ -23,6 +23,17 @@ impl RpcClient {
     }
 
     pub(crate) async fn call(&self, method: &str, params: Value) -> Result<Value, AppError> {
+        let envelope = self.envelope(method, params).await?;
+        if envelope.get("error").is_some_and(|error| !error.is_null()) {
+            return Err(AppError::RpcUnavailable);
+        }
+        envelope
+            .get("result")
+            .cloned()
+            .ok_or(AppError::RpcUnavailable)
+    }
+
+    async fn envelope(&self, method: &str, params: Value) -> Result<Value, AppError> {
         // Provider errors can echo credentials from the URL. Keep them out of errors.
         let response = self
             .http
@@ -37,15 +48,31 @@ impl RpcClient {
             .json()
             .await
             .map_err(|_| AppError::RpcUnavailable)?;
-        if envelope["jsonrpc"] != "2.0"
-            || envelope["id"] != 1
-            || envelope.get("error").is_some_and(|error| !error.is_null())
-        {
+        if envelope["jsonrpc"] != "2.0" || envelope["id"] != 1 {
             return Err(AppError::RpcUnavailable);
         }
-        envelope
-            .get("result")
-            .cloned()
+        Ok(envelope)
+    }
+
+    pub(crate) async fn finalized_height_at(&self, slot: u64) -> Result<Option<u64>, AppError> {
+        let envelope = self.envelope("getBlock", json!([slot, {"commitment":"finalized","transactionDetails":"none","rewards":false,"maxSupportedTransactionVersion":1}])).await?;
+        if matches!(
+            envelope["error"]["code"].as_i64(),
+            Some(-32001 | -32007 | -32009)
+        ) {
+            return Ok(None);
+        }
+        if envelope.get("error").is_some_and(|e| !e.is_null()) {
+            return Err(AppError::RpcUnavailable);
+        }
+        let result = envelope.get("result").ok_or(AppError::RpcUnavailable)?;
+        if result.is_null() {
+            return Ok(None);
+        }
+        result["blockHeight"]
+            .as_u64()
+            .filter(|height| *height <= slot)
+            .map(Some)
             .ok_or(AppError::RpcUnavailable)
     }
 

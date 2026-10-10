@@ -34,6 +34,13 @@ pub struct Pending {
     pub wallet: String,
     pub transaction: String,
     pub signature: Option<String>,
+    pub last_valid_block_height: u64,
+}
+
+#[derive(Default)]
+pub(super) struct Cursor {
+    pub head: Option<String>,
+    pub before: Option<String>,
 }
 
 pub struct Store {
@@ -51,11 +58,11 @@ impl Store {
     async fn read(&self, id: Option<&str>, wallet: Option<&str>) -> Result<Vec<Pending>, AppError> {
         let client = self.database.connect().await?;
         let rows = client.query(
-            "SELECT * FROM (SELECT 'run' AS kind, p.request_id AS id, r.company_wallet AS wallet, p.transaction, p.submitted_signature \
+            "SELECT * FROM (SELECT 'run' AS kind, p.request_id AS id, r.company_wallet AS wallet, p.transaction, p.submitted_signature, p.last_valid_block_height \
              FROM public.payments p JOIN public.runs r ON r.id=p.run_id WHERE p.status='prepared' \
-             UNION ALL SELECT 'wrap',id,company_wallet,transaction,submitted_signature FROM public.wrap_requests WHERE status='prepared' \
-             UNION ALL SELECT 'transfer',id,company_wallet,transaction,submitted_signature FROM public.transfer_requests WHERE status='prepared' \
-             UNION ALL SELECT 'unwrap',id,wallet,transaction,submitted_signature FROM public.unwrap_requests WHERE status='prepared') pending \
+             UNION ALL SELECT 'wrap',id,company_wallet,transaction,submitted_signature,last_valid_block_height FROM public.wrap_requests WHERE status='prepared' \
+             UNION ALL SELECT 'transfer',id,company_wallet,transaction,submitted_signature,last_valid_block_height FROM public.transfer_requests WHERE status='prepared' \
+             UNION ALL SELECT 'unwrap',id,wallet,transaction,submitted_signature,last_valid_block_height FROM public.unwrap_requests WHERE status='prepared') pending \
              WHERE ($1::text IS NULL OR id=$1) AND ($2::text IS NULL OR wallet=$2)",
             &[&id, &wallet],
         ).await.map_err(|_| AppError::StorageUnavailable)?;
@@ -81,6 +88,10 @@ impl Store {
                     signature: row
                         .try_get("submitted_signature")
                         .map_err(|_| AppError::StorageUnavailable)?,
+                    last_valid_block_height: u64::try_from(
+                        row.get::<_, i64>("last_valid_block_height"),
+                    )
+                    .map_err(|_| AppError::StorageUnavailable)?,
                 })
             })
             .collect()
@@ -139,7 +150,10 @@ impl Store {
             .database
             .connect()
             .await?
-            .query("SELECT wallet,signature FROM public.indexer_cursors", &[])
+            .query(
+                "SELECT wallet,signature FROM public.indexer_cursors WHERE signature IS NOT NULL",
+                &[],
+            )
             .await
             .map_err(|_| AppError::StorageUnavailable)?
             .into_iter()
@@ -147,7 +161,35 @@ impl Store {
             .collect())
     }
     pub async fn cursor(&self, wallet: &str, signature: &str) -> Result<(), AppError> {
-        self.database.connect().await?.execute("INSERT INTO public.indexer_cursors (wallet,signature) VALUES ($1,$2) ON CONFLICT (wallet) DO UPDATE SET signature=EXCLUDED.signature", &[&wallet, &signature])
+        self.database.connect().await?.execute("INSERT INTO public.indexer_cursors (wallet,signature) VALUES ($1,$2) ON CONFLICT (wallet) DO UPDATE SET signature=EXCLUDED.signature,scan_head=NULL,scan_before=NULL", &[&wallet, &signature])
+            .await.map_err(|_| AppError::StorageUnavailable)?;
+        Ok(())
+    }
+    pub(super) async fn scan(&self, wallet: &str) -> Result<Cursor, AppError> {
+        let row = self
+            .database
+            .connect()
+            .await?
+            .query_opt(
+                "SELECT scan_head,scan_before FROM public.indexer_cursors WHERE wallet=$1",
+                &[&wallet],
+            )
+            .await
+            .map_err(|_| AppError::StorageUnavailable)?;
+        Ok(row
+            .map(|row| Cursor {
+                head: row.get(0),
+                before: row.get(1),
+            })
+            .unwrap_or_default())
+    }
+    pub(super) async fn checkpoint(
+        &self,
+        wallet: &str,
+        head: &str,
+        before: &str,
+    ) -> Result<(), AppError> {
+        self.database.connect().await?.execute("INSERT INTO public.indexer_cursors (wallet,scan_head,scan_before) VALUES ($1,$2,$3) ON CONFLICT (wallet) DO UPDATE SET scan_head=EXCLUDED.scan_head,scan_before=EXCLUDED.scan_before", &[&wallet, &head, &before])
             .await.map_err(|_| AppError::StorageUnavailable)?;
         Ok(())
     }
