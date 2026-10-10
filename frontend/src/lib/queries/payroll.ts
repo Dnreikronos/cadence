@@ -1,8 +1,14 @@
 "use client"
 
 import { useMemo } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { api, currentUserId } from "@/lib/api"
+import { isKnownRunPaymentStatus } from "@/lib/api/schemas"
 import type { Signer } from "@/lib/api/sign"
 import { createRun } from "@/lib/runs/create"
 import { readAllByPerson, type AmountsRead } from "@/lib/people/amounts"
@@ -106,13 +112,26 @@ export function useRecentlyPaid() {
   })
 }
 
-// The run's payments, without amounts or people. The service changes a payment only when
-// it is confirmed or retried, never on its own, so there is nothing to poll for.
-export function useRun(runId: string) {
-  return useQuery({
+// The indexer can resolve a payment while this browser is idle or disconnected.
+export const runOptions = (runId: string) =>
+  queryOptions({
     queryKey: queryKeys.runs.detail(runId),
     queryFn: ({ signal }) => api.runs.get(runId, { signal }),
+    refetchInterval: (query) =>
+      query.state.data?.payments.some(
+        (payment) =>
+          payment.status === "prepared" ||
+          !isKnownRunPaymentStatus(payment.status),
+      )
+        ? 5_000
+        : false,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
+
+export function useRun(runId: string) {
+  return useQuery(runOptions(runId))
 }
 
 // Creating a run moves no money: its transactions are unsigned, and a run whose answer
