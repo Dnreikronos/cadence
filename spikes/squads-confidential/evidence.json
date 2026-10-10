@@ -1,0 +1,509 @@
+{
+  "cluster": "devnet",
+  "date": "2026-10-04",
+  "events": [
+    {
+      "instructions": 1,
+      "signature": "3FVP2pVgS36Tks1Cwzs9fT2V4ufV9G6nbFxNaeuuWbguNChAdpfx5iDcioShpsr8G1nmGD7E2xGzGojYbc7jiSJT",
+      "slot": 507537170,
+      "step": "create 2-of-2 multisig",
+      "wire_bytes": 531
+    },
+    {
+      "instructions": 2,
+      "signature": "2JSjQ8vXg8n2ATses3bThCYttMR4cyYeatEmxeoQ7gqFdAugJVdNnMfNP2nFZVvZhNfTWh2N3qxpy1mitdbHLddY",
+      "slot": 507537180,
+      "step": "create vault token account",
+      "wire_bytes": 435
+    },
+    {
+      "instructions": 2,
+      "signature": "2BxqLjbhbJ2fUZsMvivHpHVJd8XoANkfqrzTVAT5GvLu9HuL3xihgGM2EwVFdoZNZbATxEZSPjjws19BCpH5v543",
+      "slot": 507537188,
+      "step": "create recipient token account",
+      "wire_bytes": 435
+    },
+    {
+      "instructions": 2,
+      "signature": "4m2DvCzRYHbKB4DZExWmnVRTBHgTjzAaEGhXj3XVs5aMyXaTmUSBoMMBmihB7Evhd8pzrzW3Uc5jTMgR7yuoQXye",
+      "slot": 507537205,
+      "step": "configure recipient",
+      "wire_bytes": 558
+    },
+    {
+      "instructions": 1,
+      "signature": "5WSqFSQXqm1ANZvb68h1gkh92uvufHMpaLS1LPb2ZJwr96XeeomEQbP8YQwhT5LBU19sGT1JcBAM5JHtuiGyp6uE",
+      "slot": 507537213,
+      "step": "wrap 1 USDC into vault",
+      "wire_bytes": 456
+    },
+    {
+      "instructions": 2,
+      "signature": "3b6kgJFtzLf1LWEm23cxx3gDVRrA5BVD3zAu4AXjovkrq6VtupDvTwnWrciEBwiF5E9hE4HebTmciqKoVNXJMmH2",
+      "slot": 507537223,
+      "step": "ordinary vault transfer: propose",
+      "wire_bytes": 540
+    },
+    {
+      "instructions": 1,
+      "signature": "35rAazUq6FnM84eiw1hmUrLznmUWH889bm63CJRMBLETfrowVowYCcJeLMsMYrb5KQoVkL1B5JCLvqi183wSggEn",
+      "slot": 507537232,
+      "step": "ordinary vault transfer: first approval",
+      "wire_bytes": 258
+    },
+    {
+      "logs": [
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf invoke [1]",
+        "Program log: Instruction: VaultTransactionExecute",
+        "Program log: AnchorError thrown in programs/squads_multisig_program/src/instructions/vault_transaction_execute.rs:75. Error Code: InvalidProposalStatus. Error Number: 6008. Error Message: Invalid proposal status.",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf consumed 17217 of 1400000 compute units",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf failed: custom program error: 0x1778"
+      ],
+      "simulation_error": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6008
+          }
+        ]
+      },
+      "step": "ordinary vault transfer: one approval rejected"
+    },
+    {
+      "instructions": 1,
+      "signature": "3jEyUz8LPf63nPkshmaU1Gy22RpejSKioPBQWVmsJkhyoHKwSEkXdsARHLoDrns8jbTRCHBLowdDwMDM4kT47Qvi",
+      "slot": 507537245,
+      "step": "ordinary vault transfer: second approval",
+      "wire_bytes": 354
+    },
+    {
+      "instructions": 1,
+      "signature": "2Kne8Z2Q4MdjAxVdqmzHoi3FPvYRMcg4CgSwu522XpjDHERsX9bys2Yxb7g2PqicKQ1DqwoaKp4wfv4i6dN94f5w",
+      "slot": 507537253,
+      "step": "ordinary vault transfer",
+      "wire_bytes": 455
+    },
+    {
+      "instructions": 2,
+      "signature": "2S36GzVFvbTha6fgUVeQRidAHR4PURcaZr2BMc6vRVMrP9fmsgSs6hv9LkvSa3y3QUdKmeFwaFS2TLR4DZS9GuQF",
+      "slot": 507537264,
+      "step": "configure vault confidential account: propose",
+      "wire_bytes": 577
+    },
+    {
+      "instructions": 1,
+      "signature": "7svr543snMbU5ff1kyGfRNj84dnGeZQtdayUzXnB5g5tdhfCryWxLNh6yAUjtYs1rUghTNACewTyJfZRqcnxgKo",
+      "slot": 507537273,
+      "step": "configure vault confidential account: first approval",
+      "wire_bytes": 258
+    },
+    {
+      "logs": [
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf invoke [1]",
+        "Program log: Instruction: VaultTransactionExecute",
+        "Program log: AnchorError thrown in programs/squads_multisig_program/src/instructions/vault_transaction_execute.rs:75. Error Code: InvalidProposalStatus. Error Number: 6008. Error Message: Invalid proposal status.",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf consumed 17344 of 1400000 compute units",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf failed: custom program error: 0x1778"
+      ],
+      "simulation_error": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6008
+          }
+        ]
+      },
+      "step": "configure vault confidential account: one approval rejected"
+    },
+    {
+      "instructions": 1,
+      "signature": "vjYACyx9jBzBMQqd1jYxEgLUz6GnthsryaLVuB8poWaiCfcrL1pSi1U7KDBYNLzwK5kRTve4PRvPZnq8PAmVfJM",
+      "slot": 507537286,
+      "step": "configure vault confidential account: second approval",
+      "wire_bytes": 354
+    },
+    {
+      "instructions": 2,
+      "signature": "5nhXx5BkiW6GRmrD9WnWNY1j7YxQNAQvkVjQG9YRoy8Unat9tcJnSdQfzEB5PnzBwMy1BFXsCP8CHHgE9kfhz6Zo",
+      "slot": 507537294,
+      "step": "configure vault confidential account",
+      "wire_bytes": 588
+    },
+    {
+      "instructions": 2,
+      "signature": "2xQLANg5Pvbt9uxd1Aeg43MVsBZ9jixKospsnsgFTc6es1ews1gN1iz3Ha5NNczeZq65xDtVZQRqQbTC8K29qC4j",
+      "slot": 507537304,
+      "step": "deposit vault confidential balance: propose",
+      "wire_bytes": 508
+    },
+    {
+      "instructions": 1,
+      "signature": "2M1bugnGw3iqK5qw2FGRU9ZHiKzk1jXPTjXRu7vz1v4AqLReRszy2bPvF8Ea5Kf14tzdL1jmoztc9bM2w7mh7zME",
+      "slot": 507537313,
+      "step": "deposit vault confidential balance: first approval",
+      "wire_bytes": 258
+    },
+    {
+      "logs": [
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf invoke [1]",
+        "Program log: Instruction: VaultTransactionExecute",
+        "Program log: AnchorError thrown in programs/squads_multisig_program/src/instructions/vault_transaction_execute.rs:75. Error Code: InvalidProposalStatus. Error Number: 6008. Error Message: Invalid proposal status.",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf consumed 16593 of 1400000 compute units",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf failed: custom program error: 0x1778"
+      ],
+      "simulation_error": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6008
+          }
+        ]
+      },
+      "step": "deposit vault confidential balance: one approval rejected"
+    },
+    {
+      "instructions": 1,
+      "signature": "3LavjzynTpSzaFh9c3vnLogaWoQ2mEzpvm78z4ziJ8BCR7JrMwE2ZX9xwqfyJue7NyNtj4YwyzDv6wJiudyzRxzR",
+      "slot": 507537326,
+      "step": "deposit vault confidential balance: second approval",
+      "wire_bytes": 354
+    },
+    {
+      "instructions": 1,
+      "signature": "4kHnPFVCBLn2tXsuvQTJmZhJi3aLjgB9VtErYDXMcTLA9w37EZVJEQHo6iTRJF2osyh6ynWCwEn8cvpZLoQC1BGq",
+      "slot": 507537336,
+      "step": "deposit vault confidential balance",
+      "wire_bytes": 422
+    },
+    {
+      "instructions": 2,
+      "signature": "3na4dztHvbwXfffLEZW1hYqxjnZJPJYcdKHFWL6n1xayNjP1XFnZZ92F8o8AYgQcbPeqtBuioDy9DZG2cVrK3LkC",
+      "slot": 507537349,
+      "step": "apply vault pending balance: propose",
+      "wire_bytes": 510
+    },
+    {
+      "instructions": 1,
+      "signature": "4saVscxfPeVgma5RDKtgRVGoFKjkBRjfRWxKFkDnzkEcc2XxgqwiDQ7oT5MN9Go18uWZ6SqahKoMcPSCkoL2CGw6",
+      "slot": 507537359,
+      "step": "apply vault pending balance: first approval",
+      "wire_bytes": 258
+    },
+    {
+      "logs": [
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf invoke [1]",
+        "Program log: Instruction: VaultTransactionExecute",
+        "Program log: AnchorError thrown in programs/squads_multisig_program/src/instructions/vault_transaction_execute.rs:75. Error Code: InvalidProposalStatus. Error Number: 6008. Error Message: Invalid proposal status.",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf consumed 16053 of 1400000 compute units",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf failed: custom program error: 0x1778"
+      ],
+      "simulation_error": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6008
+          }
+        ]
+      },
+      "step": "apply vault pending balance: one approval rejected"
+    },
+    {
+      "instructions": 1,
+      "signature": "3V3apZ83gaaGm7Rzdhi34tAKrAYEKKKcjTqFteEcSgLB6mpf3zw7QSmBE5bxaZESJKqcNmkyknmpScL8Mazt89Wt",
+      "slot": 507537372,
+      "step": "apply vault pending balance: second approval",
+      "wire_bytes": 354
+    },
+    {
+      "instructions": 1,
+      "signature": "4Qf58vuWEsi7GuWXeVeZo2fhNtr3Q61QZuThWRhLG7JjB5xRH1tcpUqaMMPde1R8mCYaXrssnNuJqMyNpxAXEPvj",
+      "slot": 507537380,
+      "step": "apply vault pending balance",
+      "wire_bytes": 389
+    },
+    {
+      "instructions": 2,
+      "signature": "44Tv6YAzdD3xBC41VhtWs6PyY1EwrTFjSzFfK2wRGST2E4bGZziwo2ntJ6Dnu9CAUir1jBmbmjGQyy3QukLDtQZt",
+      "slot": 507537393,
+      "step": "confidential vault transfer: propose",
+      "wire_bytes": 732
+    },
+    {
+      "instructions": 1,
+      "signature": "AjB16Z7zRPM1W5RXFjNp8ow1rxErYMWaq7BoGqFTt1asECMtRuLFfW9RhtxzHtaSVskhcSAs2yWbt3eu7TG3BML",
+      "slot": 507537402,
+      "step": "confidential vault transfer: first approval",
+      "wire_bytes": 258
+    },
+    {
+      "logs": [
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf invoke [1]",
+        "Program log: Instruction: VaultTransactionExecute",
+        "Program log: AnchorError thrown in programs/squads_multisig_program/src/instructions/vault_transaction_execute.rs:75. Error Code: InvalidProposalStatus. Error Number: 6008. Error Message: Invalid proposal status.",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf consumed 17825 of 1400000 compute units",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf failed: custom program error: 0x1778"
+      ],
+      "simulation_error": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6008
+          }
+        ]
+      },
+      "step": "confidential vault transfer: one approval rejected"
+    },
+    {
+      "instructions": 1,
+      "signature": "3AeePWiQzShD8PCiV52aSp3GD7ffTuXkwo5ngjnEFUgNg7JjYQqdUAeaFgPd3WVXJZxWXyreNt3Me42ZpDsNEL6Z",
+      "slot": 507537420,
+      "step": "confidential vault transfer: second approval",
+      "wire_bytes": 354
+    },
+    {
+      "logs": [
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf invoke [1]",
+        "Program log: Instruction: VaultTransactionExecute",
+        "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb invoke [2]",
+        "Program log: ConfidentialTransferInstruction::Transfer",
+        "Program log: Unexpected proof instruction",
+        "Program log: Error: InvalidInstructionData",
+        "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb consumed 2992 of 1377035 compute units",
+        "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb failed: invalid instruction data",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf consumed 25957 of 1400000 compute units",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf failed: invalid instruction data"
+      ],
+      "simulation_error": {
+        "InstructionError": [
+          0,
+          "InvalidInstructionData"
+        ]
+      },
+      "step": "reordered transfer proofs rejected"
+    },
+    {
+      "logs": [
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf invoke [1]",
+        "Program log: Instruction: VaultTransactionExecute",
+        "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb invoke [2]",
+        "Program log: ConfidentialTransferInstruction::Transfer",
+        "Program log: Error: Balance mismatch",
+        "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb consumed 4645 of 1377035 compute units",
+        "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb failed: custom program error: 0x1b",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf consumed 27610 of 1400000 compute units",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf failed: custom program error: 0x1b"
+      ],
+      "simulation_error": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 27
+          }
+        ]
+      },
+      "step": "substituted amount proofs rejected"
+    },
+    {
+      "instructions": 4,
+      "signature": "4uST64fP3eTW4WjDpRz78aR55eJXFNdYGiR94Sm73isXYQkkkKdNggSsaXttCsRWMnkGC5FSm3CZAcuVWnic92Jt",
+      "slot": 507537434,
+      "step": "confidential vault transfer",
+      "wire_bytes": 2399
+    },
+    {
+      "payment_units": 420000,
+      "recipient_pending_units": 420000,
+      "recipient_public_units": 100000,
+      "sender_available_units": 480000,
+      "signature": "4uST64fP3eTW4WjDpRz78aR55eJXFNdYGiR94Sm73isXYQkkkKdNggSsaXttCsRWMnkGC5FSm3CZAcuVWnic92Jt",
+      "slot": 507537434,
+      "step": "independent verification",
+      "version": 1
+    },
+    {
+      "instructions": 2,
+      "signature": "S3CYaT2BXD3tZgG4PNQpChPmZSUuVeqL9hCkLgxAV1RQe2hm8YTLvJ55ppS12GZGjWMh9JbtRb3D22gyeTgEKen",
+      "slot": 507538969,
+      "step": "setup probe: create empty unbound account",
+      "wire_bytes": 435
+    },
+    {
+      "instructions": 2,
+      "signature": "5BhVwYSx3QUiSVHpuA7j9CNn9hvzDsv74j7ZuPfwaPzfJCu6v8gcbURNegXh9Kpb9Fn9DbVTy8wtAptWQzH8e5GQ",
+      "slot": 507538978,
+      "step": "setup probe: propose inline setup",
+      "wire_bytes": 577
+    },
+    {
+      "instructions": 1,
+      "signature": "37q5adGNqyrqRSxyG7fXwex8sXpgKTMyC9BBjbKpdgS9ZgigUqeayZpsWjvTAsKtZYUHJENbSTkM56DwBRt3VFy7",
+      "slot": 507538987,
+      "step": "setup probe: approve inline setup",
+      "wire_bytes": 258
+    },
+    {
+      "instructions": 1,
+      "signature": "ewUv8BL5pchXyrCzmBaFnDkUdzkVrXhiomDFxFFnaWDbtM4zvqA8pZjsZYMf1j6mE4t23hwcbkEwe6TCUupdA31",
+      "slot": 507538996,
+      "step": "setup probe: approve inline setup",
+      "wire_bytes": 354
+    },
+    {
+      "logs": [
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf invoke [1]",
+        "Program log: Instruction: VaultTransactionExecute",
+        "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb invoke [2]",
+        "Program log: ConfidentialTransferInstruction::ConfigureAccount",
+        "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb consumed 2861 of 1377960 compute units",
+        "Program TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb success",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf consumed 26228 of 1400000 compute units",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf success",
+        "Program ZkE1Gama1Proof11111111111111111111111111111 invoke [1]",
+        "VerifyPubkeyValidity",
+        "Program ZkE1Gama1Proof11111111111111111111111111111 success"
+      ],
+      "original_public_key": "NvohsCzgT+IF6r4CGZVHCO9+u6vZODvX+unpDw2FIFY=",
+      "simulation_error": null,
+      "step": "inline setup accepts substituted encryption key",
+      "substituted_public_key": "YKPL4ck324Hsm93PdV9K9kZ3p+mAqS0IEkIKB+OZRio="
+    },
+    {
+      "instructions": 2,
+      "signature": "42vZo4iSAooFRpQnqMaqUnKpxsifx3vMbNrQ9fn99goEMRYLpztDTThGo3vH7mo5m2AvRetFJtmdHkf2Rk2DT6Ye",
+      "slot": 507539008,
+      "step": "setup probe: create empty bound account",
+      "wire_bytes": 435
+    },
+    {
+      "instructions": 2,
+      "signature": "3vKxSnjgsfTbUYXgt14yRE31NPW29ogJF2Suszk6ATaqHQwTXs1dKksz53vXEXi7DjYYtFgSJJRrgPqSSCMtFpQT",
+      "slot": 507539017,
+      "step": "setup probe: create immutable key proof context",
+      "wire_bytes": 499
+    },
+    {
+      "instructions": 2,
+      "signature": "3HuiJSDYjVs2j66qnBvQniwsQdEJacenT8DQ3jSeuD69UM4cGUdzz5w3L3AJTiMrp4JttSpgYeNceK2exM6VHBtj",
+      "slot": 507539026,
+      "step": "configure vault with bound encryption key: propose",
+      "wire_bytes": 577
+    },
+    {
+      "instructions": 1,
+      "signature": "WVoQDCBeXXGegrctm1dpgCxWgVe1ncfEG5rD26My1nszFGvQuYZMUdgnvtYy7B2K14tippnwgkhfEZuUnfmxBWw",
+      "slot": 507539036,
+      "step": "configure vault with bound encryption key: first approval",
+      "wire_bytes": 258
+    },
+    {
+      "logs": [
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf invoke [1]",
+        "Program log: Instruction: VaultTransactionExecute",
+        "Program log: AnchorError thrown in programs/squads_multisig_program/src/instructions/vault_transaction_execute.rs:75. Error Code: InvalidProposalStatus. Error Number: 6008. Error Message: Invalid proposal status.",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf consumed 17344 of 1400000 compute units",
+        "Program SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf failed: custom program error: 0x1778"
+      ],
+      "simulation_error": {
+        "InstructionError": [
+          0,
+          {
+            "Custom": 6008
+          }
+        ]
+      },
+      "step": "configure vault with bound encryption key: one approval rejected"
+    },
+    {
+      "instructions": 1,
+      "signature": "2DADr1XPPZHqiPSGSQg64Q7wjT7QG2CNnoreqKGuZU8fJ1YzMwgov9EoQH9AMsC59tJgF6tyEbZyDepaevNRLcyE",
+      "slot": 507539048,
+      "step": "configure vault with bound encryption key: second approval",
+      "wire_bytes": 354
+    },
+    {
+      "instructions": 1,
+      "signature": "3c8M6YFKbn9eJZ1Bu57PFWSzPkJN6LZRLkTBPSJ56vzBTwiBvVor9qgK6HL6KyTGvUCJ9o9NdXaLUCGmf9b7rQ7b",
+      "slot": 507539057,
+      "step": "configure vault with bound encryption key",
+      "wire_bytes": 455
+    },
+    {
+      "account": "EG1JUz1Nhdn7u2tp4qduRsfCW8fq8P6nhfAFHtUgnLbq",
+      "close_authority": "CfdxppRM9PDWk9QSdRahdD4Zf57V9FhkbthxD9gT3gt8",
+      "elgamal_public_key": "hA7IkJHTVVbMTEquq5hFeovisuy8S6sFlYVcAZaukXU=",
+      "proof_context": "5DVLd5kLEZGxiqCUudb2jLRHmBT8dX32Zc8tdP3zZCBK",
+      "step": "bound setup verified"
+    },
+    {
+      "logs": [
+        "Program ZkE1Gama1Proof11111111111111111111111111111 invoke [1]",
+        "VerifyPubkeyValidity",
+        "Program ZkE1Gama1Proof11111111111111111111111111111 failed: instruction requires an uninitialized account"
+      ],
+      "simulation_error": {
+        "InstructionError": [
+          0,
+          "AccountAlreadyInitialized"
+        ]
+      },
+      "step": "bound key proof context cannot be overwritten"
+    }
+  ],
+  "genesis_hash": "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
+  "members": [
+    "DLk4sKdCznkrXX7QP51vQEcLRtgTuTv5P3pG86kKo1cY",
+    "Hd69XN95yPhnbqBwVxN7qoRm2KfKmNnvKzYS6DahydXi"
+  ],
+  "mint": "CGL4U4VC8arAEUDxLh7c6K4rJnZr1T6faK9QQRn2sYmb",
+  "multisig": "6i3gFXbcc1ro7FkxEMMdjS2S9mXGC9VNHnLokM36pjNe",
+  "payer": "DLk4sKdCznkrXX7QP51vQEcLRtgTuTv5P3pG86kKo1cY",
+  "recipient": "AC2j3CdssyZSa8smdyhfBTDMs7jrKB972YJBHFzsTp3L",
+  "rpc": "https://api.devnet.solana.com",
+  "sender": "7HVCaMzmB8t7tdbc4UysJo4GcRa1E84ZKvQE18VKmQqh",
+  "sender_elgamal_public_key": "HmjDuyRLEHF1PzvMNzNMwRptU+IodKgYqru+DeN1cWM=",
+  "squads_program": "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf",
+  "threshold": 2,
+  "vault": "CfdxppRM9PDWk9QSdRahdD4Zf57V9FhkbthxD9gT3gt8",
+  "verdict": "direct confidential vault payment confirmed",
+  "verification_rpc": "https://solana-devnet.api.onfinality.io/public",
+  "observer": {
+    "signature": "4uST64fP3eTW4WjDpRz78aR55eJXFNdYGiR94Sm73isXYQkkkKdNggSsaXttCsRWMnkGC5FSm3CZAcuVWnic92Jt",
+    "slot": 507537434,
+    "version": 1,
+    "wire_bytes": 2399,
+    "outer_programs": [
+      "SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf",
+      "ZkE1Gama1Proof11111111111111111111111111111",
+      "ZkE1Gama1Proof11111111111111111111111111111",
+      "ZkE1Gama1Proof11111111111111111111111111111"
+    ],
+    "confidential_transfer": {
+      "parsed": {
+        "info": {
+          "ciphertextValidityProofInstructionOffset": 2,
+          "destination": "AC2j3CdssyZSa8smdyhfBTDMs7jrKB972YJBHFzsTp3L",
+          "equalityProofInstructionOffset": 1,
+          "instructionsSysvar": "Sysvar1nstructions1111111111111111111111111",
+          "mint": "CGL4U4VC8arAEUDxLh7c6K4rJnZr1T6faK9QQRn2sYmb",
+          "newSourceDecryptableAvailableBalance": "roC7TqgHmLXGLzc4ef+fuvTx74Jc6QDUNlBwAgZgDzPp6kQy",
+          "owner": "CfdxppRM9PDWk9QSdRahdD4Zf57V9FhkbthxD9gT3gt8",
+          "rangeProofInstructionOffset": 3,
+          "source": "7HVCaMzmB8t7tdbc4UysJo4GcRa1E84ZKvQE18VKmQqh"
+        },
+        "type": "confidentialTransfer"
+      },
+      "program": "spl-token",
+      "programId": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "stackHeight": 2
+    },
+    "raw_transfer_bytes": 169,
+    "plaintext_amount_field": false,
+    "plaintext_amount_bytes": false
+  },
+  "runtime": {
+    "node": "v26.5.0",
+    "rust": "1.98.1",
+    "squads_sdk": "2.1.4",
+    "web3_js": "1.99.0"
+  }
+}
