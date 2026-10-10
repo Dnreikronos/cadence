@@ -52,6 +52,7 @@ pub enum AppError {
 }
 
 impl AppError {
+    /// Map domain failures to HTTP status without exposing their internal details.
     pub fn status(&self) -> StatusCode {
         match self {
             Self::AuditNotFound => StatusCode::NOT_FOUND,
@@ -79,6 +80,7 @@ impl AppError {
 }
 
 impl IntoResponse for AppError {
+    /// Emit fixed public error codes, adding risk or retry metadata where required.
     fn into_response(self) -> axum::response::Response {
         if let Self::RevealRisk(risk) = self {
             return (

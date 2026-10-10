@@ -36,6 +36,7 @@ pub struct Payment {
     pub signature: String,
 }
 impl Drop for Payment {
+    /// Clear the response model's plaintext amount when it is released.
     fn drop(&mut self) {
         self.amount.zeroize();
     }
@@ -51,6 +52,7 @@ pub struct Grant {
 const GRANT_COLUMNS: &str = "id::text, company_id::text, user_id::text AS auditor_id, \
     to_char(granted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS granted_at";
 
+/// Preserve the fixed scope-denial code and hide other database error details.
 fn database_error(error: tokio_postgres::Error) -> AppError {
     if error.code().is_some_and(|code| code.code() == "CD404") {
         AppError::AuditNotFound
@@ -60,12 +62,14 @@ fn database_error(error: tokio_postgres::Error) -> AppError {
 }
 
 impl AuditStore {
+    /// Require the dedicated audit role; privileged or unrelated roles are rejected.
     pub fn new(url: &str) -> Result<Self, AppError> {
         Ok(Self {
             database: Database::new(url, "cadence_audit_service")?,
         })
     }
 
+    /// Set RLS identity from a verified Supabase user, never from request parameters.
     async fn session(&self, user: &str) -> Result<Session, AppError> {
         let session = self
             .database
@@ -82,6 +86,9 @@ impl AuditStore {
         Ok(session)
     }
 
+    /// Commit one audit row before reading this page's sender keys from Vault.
+    /// The caller must supply a verified user and a validated limit of 1 to 100.
+    /// SQL checks the company grant at permit creation and again before key access.
     pub async fn payments(
         &self,
         user: &str,
@@ -119,6 +126,7 @@ impl AuditStore {
         Ok(Page { items, next_cursor })
     }
 
+    /// Resolve the company from the verified user's current admin membership.
     async fn admin(&self, user: &str) -> Result<(Session, String), AppError> {
         let session = self.session(user).await?;
         let row = session.query_opt("SELECT company_id::text FROM cadence_rls.current_membership() WHERE role = 'admin'", &[])
@@ -126,6 +134,8 @@ impl AuditStore {
         Ok((session, row.get(0)))
     }
 
+    /// List the admin's company grants after the optional grant UUID cursor.
+    /// The caller must validate the limit to 1 through 100; this reads no keys.
     pub async fn grants(
         &self,
         user: &str,
@@ -151,6 +161,8 @@ impl AuditStore {
         })
     }
 
+    /// Grant an existing auditor in the verified admin's company.
+    /// Duplicate grants return a conflict; missing or foreign identities return 404.
     pub async fn create_grant(&self, user: &str, auditor: &str) -> Result<Grant, AppError> {
         let (session, company) = self.admin(user).await?;
         let row = session.query_opt(&format!("INSERT INTO public.auditor_grants (company_id, user_id) SELECT company_id, user_id FROM public.memberships WHERE company_id=$1::text::uuid AND user_id=$2::text::uuid AND role='auditor' ON CONFLICT DO NOTHING RETURNING {GRANT_COLUMNS}"), &[&company, &auditor])
@@ -166,6 +178,8 @@ impl AuditStore {
         })
     }
 
+    /// Delete an own-company grant without changing the auditor's membership.
+    /// Missing and foreign grant IDs share the same scope-denial error.
     pub async fn revoke_grant(&self, user: &str, id: &str) -> Result<(), AppError> {
         let (session, company) = self.admin(user).await?;
         let count = session.execute("DELETE FROM public.auditor_grants WHERE company_id=$1::text::uuid AND id=$2::text::uuid", &[&company, &id]).await.map_err(database_error)?;
@@ -177,6 +191,7 @@ impl AuditStore {
     }
 }
 
+/// Convert the grant query's fixed projection into public response metadata.
 fn grant(row: Row) -> Grant {
     Grant {
         id: row.get("id"),
@@ -186,6 +201,8 @@ fn grant(row: Row) -> Grant {
     }
 }
 
+/// Decode an audited finalized receipt with its bound sender key and wrapped mint.
+/// Missing recipient metadata falls back to the destination address and a null ID.
 fn payment(row: Row) -> Result<Payment, AppError> {
     let key = vault::key_from_row(&row).map_err(|_| AppError::AuditUnavailable)?;
     let sender = row

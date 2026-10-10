@@ -94,6 +94,8 @@ pub fn sent_amount(
     transfer_amount(encoded, sender, mint, key, true)
 }
 
+/// Select sender handle 0 or recipient handle 1 after checking account, mint and proof context.
+/// The receipt must already be finalized; the selected proof public key must match `key`.
 fn transfer_amount(
     encoded: &str,
     account: &Address,

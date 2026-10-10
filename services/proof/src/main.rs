@@ -4,6 +4,7 @@ use cadence_proof::{
 };
 use std::sync::Arc;
 
+/// Configure services, reconcile payments before serving, and stop background tasks on shutdown.
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     let config = Config::from_env()?;

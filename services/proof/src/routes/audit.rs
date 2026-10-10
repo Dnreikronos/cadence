@@ -23,6 +23,8 @@ pub struct Service {
 }
 
 impl Service {
+    /// Combine verified bearer authentication with the dedicated audit database role.
+    /// At most four company pages may decrypt concurrently through this service.
     pub fn new(auth: SupabaseAuth, database_url: &str) -> Result<Self, AppError> {
         Ok(Self {
             auth,
@@ -31,10 +33,13 @@ impl Service {
         })
     }
 
+    /// Load audit configuration, leaving the service disabled when its URL is absent.
     pub fn from_env() -> Result<Option<Self>, AppError> {
         Self::parse(|name| std::env::var(name).ok())
     }
 
+    /// Require Supabase Auth settings whenever the audit database URL is supplied.
+    /// An absent audit URL returns `None`; incomplete enabled configuration is an error.
     pub fn parse(get: impl Fn(&str) -> Option<String>) -> Result<Option<Self>, AppError> {
         let Some(database) = get("PROOF_AUDIT_DATABASE_URL") else {
             return Ok(None);
@@ -48,6 +53,8 @@ impl Service {
     }
 }
 
+/// Register bounded audit and grant routes, including fixed 503s when disabled.
+/// The middleware marks every response as uncacheable, including rejections.
 pub fn router(service: Option<Arc<Service>>) -> Router {
     Router::new()
         .route("/audit/{company}/payments", get(payments))
@@ -58,6 +65,7 @@ pub fn router(service: Option<Arc<Service>>) -> Router {
         .with_state(service)
 }
 
+/// Keep successful amount reads and all error responses out of HTTP caches.
 async fn no_store(request: axum::extract::Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     response
@@ -66,6 +74,7 @@ async fn no_store(request: axum::extract::Request, next: Next) -> Response {
     response
 }
 
+/// Normalize a non-nil UUID without echoing invalid input in the response.
 fn uuid(value: &str) -> Result<String, AppError> {
     uuid::Uuid::parse_str(value)
         .ok()
@@ -81,6 +90,7 @@ struct Pagination {
     cursor: Option<String>,
 }
 impl Pagination {
+    /// Default to 20 rows and reject limits outside 1 to 100 or invalid cursors.
     fn validate(self) -> Result<(i32, Option<String>), AppError> {
         let limit = self
             .limit
@@ -95,6 +105,7 @@ impl Pagination {
     }
 }
 
+/// Authenticate before validating scope, then bound concurrent page decryption.
 async fn payments(
     State(service): State<Option<Arc<Service>>>,
     headers: HeaderMap,
@@ -121,6 +132,7 @@ async fn payments(
     ))
 }
 
+/// Return grant metadata for the verified admin's company without decrypting.
 async fn grants(
     State(service): State<Option<Arc<Service>>>,
     headers: HeaderMap,
@@ -146,6 +158,7 @@ struct GrantRequest {
     auditor_id: String,
 }
 
+/// Validate the auditor identity and let membership and RLS choose the company.
 async fn create_grant(
     State(service): State<Option<Arc<Service>>>,
     headers: HeaderMap,
@@ -165,6 +178,7 @@ async fn create_grant(
     ))
 }
 
+/// Revoke only a grant belonging to the verified admin's company.
 async fn revoke_grant(
     State(service): State<Option<Arc<Service>>>,
     headers: HeaderMap,
