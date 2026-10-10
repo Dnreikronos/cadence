@@ -133,3 +133,6 @@ after reload. [Report and public transaction evidence](../plans/e2e-58-2026-10-1
 Browser wallet configuration and the other dashboard API flows are outside these
 status checks; no hosted deployment was changed. Shipping checks against current
 main are recorded in [shipping-check.md](../plans/e2e-58-2026-10-10/shipping-check.md).
+The follow-up [review check](../plans/e2e-58-2026-10-10/review-check.md) records
+bounded recovery, scheduling, actual provider throttling and automatic dashboard
+recovery from an initial outage.
