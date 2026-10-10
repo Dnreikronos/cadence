@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs"
 import { Turnkey } from "@turnkey/sdk-server"
 import bs58 from "bs58"
 import { ed25519 } from "@noble/curves/ed25519.js"
+import { getTransactionDecoder } from "@solana/kit"
 import { signedInUser, newSessionKey, nonceOf, parentTurnkey, loadEnv } from "./lib.mjs"
 
 const env = loadEnv()
@@ -57,6 +58,15 @@ async function signTx(client, organizationId) {
 try {
   const signed = await signTx(session, subOrgId)
   console.log("session signs the v1 transaction: ok", { bytes: signed.length, changed: !signed.equals(wire) })
+  // Offline stand-in for a broadcast: the message is the one we sent, and the wallet's
+  // signature over it verifies. A real devnet transfer waits on #157.
+  const { messageBytes: sent } = getTransactionDecoder().decode(wire)
+  const { messageBytes, signatures } = getTransactionDecoder().decode(signed)
+  const sig = signatures[address]
+  console.log("signed v1 transaction checks:", {
+    sameMessage: Buffer.from(messageBytes).equals(Buffer.from(sent)),
+    signatureVerifies: !!sig && ed25519.verify(sig, messageBytes, bs58.decode(address)),
+  })
 } catch (e) { console.log("session signs the v1 transaction: FAILED", e.message) }
 
 // ---- The parent organization must not be able to sign for the user.

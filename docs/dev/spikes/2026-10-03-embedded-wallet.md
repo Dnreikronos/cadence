@@ -55,8 +55,12 @@ Extension wallets cannot do this. Phantom and Brave Wallet advertise only
 (read through the Wallet Standard, without connecting, in Brave on 2026-10-03). That
 check was run with an inline script that is not in the repo; the earlier Phantom
 evidence is in [`spikes/wallet-providers/README.md`](../../../spikes/wallet-providers/README.md).
-Solflare and Backpack were not installed to check. So every user needs the embedded
-wallet, as #77 assumed.
+Solflare and Backpack were checked on 2026-10-10 the same way (a local page reading
+the Wallet Standard registrations, without connecting): **Solflare advertises
+`["legacy", 0, 1]`** for both features, and Backpack `["legacy", 0]`. Solflare's
+advertised support was not exercised: nothing was signed with it. Phantom and Backpack
+still cannot sign a v1 transaction, so the embedded wallet stays the default for every
+user, as #77 assumed; Solflare is a possible second path for users who already have it.
 
 ## How the login works
 
@@ -265,34 +269,57 @@ platform, and never from a file read by path. The build folder was deleted.
 6. Accepting email OTP as the root of trust, or requiring MFA for company admins.
 7. How product copy states custody.
 
+## Rerun on 2026-10-10
+
+`step3-sign.mjs` was run again, unchanged apart from a new signature check, against a
+fresh throwaway Turnkey organization and the local Supabase (CLI 2.119.0) behind a quick
+tunnel, with an RS256 key and `hook.sql` installed:
+
+| Check                                                       | Result                                                     |
+| ----------------------------------------------------------- | ---------------------------------------------------------- |
+| Sub-organization after the login                            | 1 user, 1 OAuth provider, 1 API key (the session's)        |
+| Any API key on the user equals the parent's public key      | no                                                         |
+| Session signs the v1 transaction (2,395 bytes, 0x81)        | ok                                                         |
+| Signed message equals the one sent                          | yes                                                        |
+| The wallet's ed25519 signature verifies against the message | yes (decoded with `@solana/kit` 8.4.0)                     |
+| Parent signing for the user                                 | refused (`request not authorized`)                         |
+| `signMessage`                                               | ok, verifies                                               |
+| 20 signatures in a row                                      | 0 failed, 5.4 s total, median 263 ms                       |
+
+This runs the corrected parent-key check (after the login) and the hook's nonce check in
+Supabase for the first time: Turnkey accepted the login, so the token carried the
+`tknonce` the hook copied. The signature check stands in for a broadcast: the bytes
+Turnkey returns are a valid signature over the unchanged message, which is what a
+validator checks. Broadcasting a real `POST /transfer` transaction moved to
+[#157](https://github.com/Dnreikronos/cadence/issues/157), because the configure, enroll
+and apply-pending routes it needs do not exist yet.
+
 ## Not done
 
+Moved out of this spike when #77 was closed:
+
 - A real v1 transaction from `POST /transfer`, signed by a user session and broadcast
-  and confirmed on devnet. This needs funded accounts and the proof service.
-- The behaviour at and after session expiry, and with two tabs.
-- Deleting the old key on renewal.
-- Verifying the signature of a signed transaction against its message. Only
-  `signMessage` was verified (in Node).
-- The web page ran with `reactStrictMode: false` (`web/next.config.mjs`, now only in
-  git history at `475646b`); Next's
-  default is `true`. "Works under the App Router" was shown with strict mode off.
-- The committed scripts' check for the parent key was corrected after the run (it now
-  runs after the login) and has not been re-run. The same goes for the other
-  hardening in this branch: the hook's nonce check (validated only as SQL in a
-  throwaway Postgres 16 container, not in Supabase), the login route's validation,
-  and the dev route's limits. None of it has been run against Turnkey or Supabase.
-- The real key-derivation message from #50 through `signMessage`. The spike signed a
-  sample string; the real message's bytes are the true test, because Phantom rejected
-  it.
-- A hosted Supabase project with an RS256 key.
-- The `aud` array form, and browser console health (the page was driven by script, and
-  its console was not read).
-- Solflare and Backpack.
-- Turnkey plan and signature budget ([#71](https://github.com/Dnreikronos/cadence/issues/71)).
-- Cleanup: the runs created several throwaway sub-organizations in the `cadence`
-  Turnkey organization, named `spike-<timestamp>`. They can be deleted from the
-  dashboard. The API key used is the root user's; revoke it from My Profile → API Keys
-  when the spike is no longer needed.
+  and confirmed on devnet; the session's behaviour at and after expiry and with two
+  tabs; deleting the old key on renewal; running under React strict mode (the web page
+  ran with `reactStrictMode: false`, now only in git history at `475646b`)
+  → [#157](https://github.com/Dnreikronos/cadence/issues/157).
+- The real key-derivation message from #50 through `signMessage` (the spike signed a
+  sample string; Phantom rejected the real bytes)
+  → [#63](https://github.com/Dnreikronos/cadence/issues/63).
+- A hosted Supabase project with an RS256 key
+  → [#100](https://github.com/Dnreikronos/cadence/issues/100).
+- Turnkey plan and signature budget
+  → [#71](https://github.com/Dnreikronos/cadence/issues/71).
+
+Still not run: the login route's validation and the dev route's limits (both in the
+removed web page), the `aud` array form, and browser console health.
+
+- Signing a v1 transaction with Solflare, which advertises version 1.
+- Cleanup: the runs left throwaway sub-organizations named `spike-<timestamp>` in the
+  `cadence` Turnkey organization and in the one used on 2026-10-10. They stay orphaned:
+  deleting a sub-organization has to be approved by its own root user, an OIDC identity
+  whose issuer (a quick-tunnel URL) no longer exists. They hold no funds, and the API
+  keys used by the runs were revoked on 2026-10-10.
 
 ## Sources
 
