@@ -74,3 +74,20 @@ pub(crate) async fn key_read_permit(
         .map(|row| row.get(0))
         .map_err(|_| AuditError::Unavailable)
 }
+
+/// Commit one company-page audit record before any of its keys can be read.
+/// The dedicated SQL issuer checks the verified user's company grant itself.
+pub(crate) async fn company_read_permit(
+    client: &Client,
+    company: &str,
+    limit: i32,
+    cursor: Option<&str>,
+) -> Result<String, tokio_postgres::Error> {
+    client
+        .query_one(
+            "SELECT cadence_private.audit_company_read($1, $2, $3)",
+            &[&company, &limit, &cursor],
+        )
+        .await
+        .map(|row| row.get(0))
+}

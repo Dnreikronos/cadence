@@ -1,15 +1,17 @@
 use cadence_proof::{
-    config::Config, error::AppError, indexer::Indexer, router_with_payments,
+    config::Config, error::AppError, indexer::Indexer, router_with_audit,
     routes::transfer::Service, solana::client::RpcClient, wrap_store::WrapStore, AppState,
 };
 use std::sync::Arc;
 
+/// Configure services, reconcile payments before serving, and stop background tasks on shutdown.
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     let config = Config::from_env()?;
     let rpc = Arc::new(RpcClient::new(config.rpc_url.clone(), config.rpc_timeout)?);
     let wrap_store = WrapStore::from_env()?.map(Arc::new);
     let transfer = Service::from_env()?.map(Arc::new);
+    let audit = cadence_proof::routes::audit::Service::from_env()?.map(Arc::new);
     let cors = cadence_proof::cors::from_env()?;
     let indexer = Indexer::from_env(
         rpc.clone(),
@@ -52,13 +54,14 @@ async fn main() -> Result<(), AppError> {
     let indexer = indexer.map(|indexer| indexer.spawn());
     let result = axum::serve(
         listener,
-        router_with_payments(
+        router_with_audit(
             AppState {
                 rpc,
                 build_sha: config.build_sha,
             },
             wrap_store,
             transfer,
+            audit,
         )
         .layer(cors)
         .into_make_service_with_connect_info::<std::net::SocketAddr>(),

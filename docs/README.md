@@ -24,6 +24,8 @@ repo's paths instead of these.
 
 ## Implementation plans
 
+- [Auditor read endpoint](plans/2026-10-10-059-auditor-read.md) — #59. Company grants, immutable payment attribution and one durable audit row per decrypted page. [API contract](dev/AUDIT_API.md).
+
 - [Proof service scaffold](plans/2026-09-28-048-plan-proof-service.md) — 2026-09-28, #48. The standalone `services/proof` Rust crate: HTTP server, validated configuration, one error mapping, a Solana RPC client, a container image and a workflow. It adds no proof endpoints, key storage or signing.
 
 - [Decryption audit log](plans/2026-09-28-049-decryption-audit-log.md) — 2026-09-28, #49. The audit record written before any key access (actor, reason, target account, no amount). Implements ADR B19 and PRD R11.
@@ -41,6 +43,8 @@ repo's paths instead of these.
 - [Finish the frontend, against mocks](plans/2026-10-04-frontend-completion.md) — 2026-10-04, #76 and #78 to #88. Complete (the end-to-end suite, #126, is merged): every screen runs on the mock service. The task table with PR numbers, what changed from the plan, the checklist before going live, and the known gaps.
 
 ## Contracts
+
+- [Auditor payments and grants](dev/AUDIT_API.md) — #59. Authenticated company payment reads and admin grant creation/revocation; deployment configuration and local verification.
 
 - [API contract for the web app](dev/API_CONTRACT.md) — #63. What the web app builds and mocks against: authentication, the prepare-sign-confirm pattern, errors that never carry an amount, and every route, marked implemented or proposed (the payroll `/runs` routes are implemented, in a different shape from the one the client uses), plus the design review findings to resolve before building. Synced with the client and the mock on 2026-10-04: it now lists the mock's deviations from a real service and what the screens assume from the backend. Status: working draft, open questions 1 to 37 for the backend owner.
 

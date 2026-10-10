@@ -81,6 +81,28 @@ pub fn received_amount(
     mint: &Address,
     key: &ViewingKey,
 ) -> Result<Zeroizing<u64>, AppError> {
+    transfer_amount(encoded, recipient, mint, key, false)
+}
+
+/// Read the sender handle of a trusted finalized company-payment receipt.
+pub fn sent_amount(
+    encoded: &str,
+    sender: &Address,
+    mint: &Address,
+    key: &ViewingKey,
+) -> Result<Zeroizing<u64>, AppError> {
+    transfer_amount(encoded, sender, mint, key, true)
+}
+
+/// Select sender handle 0 or recipient handle 1 after checking account, mint and proof context.
+/// The receipt must already be finalized; the selected proof public key must match `key`.
+fn transfer_amount(
+    encoded: &str,
+    account: &Address,
+    mint: &Address,
+    key: &ViewingKey,
+    sender: bool,
+) -> Result<Zeroizing<u64>, AppError> {
     let invalid = || AppError::TransferUnavailable("reveal_history_unavailable");
     let bytes = STANDARD.decode(encoded).map_err(|_| invalid())?;
     let tx: VersionedTransaction = wincode::deserialize(&bytes).map_err(|_| invalid())?;
@@ -105,7 +127,11 @@ pub fn received_amount(
     }
     let transfer = transfers[0];
     if transfer.accounts.get(1).and_then(|i| address(*i)) != Some(mint)
-        || transfer.accounts.get(2).and_then(|i| address(*i)) != Some(recipient)
+        || transfer
+            .accounts
+            .get(if sender { 0 } else { 2 })
+            .and_then(|i| address(*i))
+            != Some(account)
     {
         return Err(invalid());
     }
@@ -126,20 +152,25 @@ pub fn received_amount(
     }
     let proof: BatchedGroupedCiphertext3HandlesValidityProofData =
         bytemuck::try_pod_read_unaligned(&proof.data[1..]).map_err(|_| invalid())?;
-    if proof.context.second_pubkey != key.public_key().into() {
+    let public_key = if sender {
+        proof.context.first_pubkey
+    } else {
+        proof.context.second_pubkey
+    };
+    if public_key != key.public_key().into() {
         return Err(invalid());
     }
     let lo: ElGamalCiphertext = proof
         .context
         .grouped_ciphertext_lo
-        .try_extract_ciphertext(1)
+        .try_extract_ciphertext(usize::from(!sender))
         .map_err(|_| invalid())?
         .try_into()
         .map_err(|_| invalid())?;
     let hi: ElGamalCiphertext = proof
         .context
         .grouped_ciphertext_hi
-        .try_extract_ciphertext(1)
+        .try_extract_ciphertext(usize::from(!sender))
         .map_err(|_| invalid())?
         .try_into()
         .map_err(|_| invalid())?;

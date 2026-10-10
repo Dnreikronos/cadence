@@ -3,6 +3,12 @@ use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    #[error("audit scope not found")]
+    AuditNotFound,
+    #[error("audit service is unavailable")]
+    AuditUnavailable,
+    #[error("company administrator required")]
+    ForbiddenRole,
     #[error("unwrap request not found")]
     UnwrapNotFound,
     #[error("{0}")]
@@ -46,8 +52,12 @@ pub enum AppError {
 }
 
 impl AppError {
+    /// Map domain failures to HTTP status without exposing their internal details.
     pub fn status(&self) -> StatusCode {
         match self {
+            Self::AuditNotFound => StatusCode::NOT_FOUND,
+            Self::AuditUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Self::ForbiddenRole => StatusCode::FORBIDDEN,
             Self::UnwrapNotFound => StatusCode::NOT_FOUND,
             Self::UnwrapUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::UnwrapRateLimited => StatusCode::TOO_MANY_REQUESTS,
@@ -70,6 +80,7 @@ impl AppError {
 }
 
 impl IntoResponse for AppError {
+    /// Emit fixed public error codes, adding risk or retry metadata where required.
     fn into_response(self) -> axum::response::Response {
         if let Self::RevealRisk(risk) = self {
             return (
@@ -100,6 +111,9 @@ impl IntoResponse for AppError {
                 .into_response();
         }
         let code = match self {
+            Self::AuditNotFound => "audit_not_found",
+            Self::AuditUnavailable => "audit_unavailable",
+            Self::ForbiddenRole => "forbidden_role",
             Self::UnwrapNotFound => "unwrap_not_found",
             Self::UnwrapUnavailable(code) => code,
             Self::RunNotFound => "run_not_found",

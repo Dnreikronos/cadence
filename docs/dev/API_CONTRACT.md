@@ -970,6 +970,15 @@ shared by the tabs of the browser) until its outcome is final or it is released 
 
 An auditor with a grant on company A who asks for company B gets `404`.
 
+**Implemented auditor read (#59).** See [AUDIT_API.md](AUDIT_API.md) for
+`GET /audit/:company_id/payments`, its dedicated database role, one committed audit
+row per page, and admin grant create/list/revoke endpoints. This route returns
+finalized confidential payroll and standalone payments with UUID cursor
+pagination. Where recipient metadata is unavailable, `counterparty.id` is null
+and its name is the destination address; the current client schema must accept
+that before connecting this read. The email invitation routes below remain
+proposed; the implemented grant API acts on existing auditor identities.
+
 ### CSV export 🟡
 
 `GET /company/export.csv`, `GET /me/export.csv` and `GET /audit/:company_id/export.csv`

@@ -1,5 +1,6 @@
 pub mod audit {
     pub mod log;
+    pub mod store;
 }
 pub mod auth;
 pub mod config;
@@ -16,6 +17,7 @@ pub mod keys {
     pub mod vault;
 }
 pub mod routes {
+    pub mod audit;
     pub mod health;
     pub mod runs;
     mod runs_confirm;
@@ -48,18 +50,32 @@ pub struct AppState {
     pub build_sha: String,
 }
 
+/// Build health and payment routes with optional persistence services disabled.
 pub fn router(state: AppState) -> Router {
     router_with_wrap(state, None)
 }
 
+/// Enable wrap persistence while leaving authenticated payment services disabled.
 pub fn router_with_wrap(state: AppState, store: Option<Arc<wrap_store::WrapStore>>) -> Router {
     router_with_payments(state, store, None)
 }
 
+/// Build the payment API without enabling auditor access.
 pub fn router_with_payments(
     state: AppState,
     store: Option<Arc<wrap_store::WrapStore>>,
     transfer: Option<Arc<routes::transfer::Service>>,
+) -> Router {
+    router_with_audit(state, store, transfer, None)
+}
+
+/// Compose health and payment routes with separately configured auditor access.
+/// Passing `None` for an optional service retains its routes with unavailable errors.
+pub fn router_with_audit(
+    state: AppState,
+    store: Option<Arc<wrap_store::WrapStore>>,
+    transfer: Option<Arc<routes::transfer::Service>>,
+    audit: Option<Arc<routes::audit::Service>>,
 ) -> Router {
     let wrap = routes::wrap::router(state.rpc.clone(), store);
     let runs = routes::runs::router(state.rpc.clone(), transfer.clone());
@@ -72,4 +88,5 @@ pub fn router_with_payments(
         .merge(transfer)
         .merge(runs)
         .merge(unwrap)
+        .merge(routes::audit::router(audit))
 }
