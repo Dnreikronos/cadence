@@ -90,9 +90,21 @@ pub async fn load(
         )
         .await
         .map_err(|_| KeyStoreError::Unavailable)?;
-    let secret = Zeroizing::new(row.get::<_, Vec<u8>>(1));
+    key_from_row(&row)
+}
+
+/// Only call on rows returned by a committed, audited Vault accessor.
+pub(crate) fn key_from_row(row: &tokio_postgres::Row) -> Result<ViewingKey, KeyStoreError> {
+    let secret = Zeroizing::new(
+        row.try_get::<_, Vec<u8>>("secret")
+            .map_err(|_| KeyStoreError::InvalidKey)?,
+    );
     let key = ViewingKey::from_secret_bytes(&secret).map_err(|_| KeyStoreError::InvalidKey)?;
-    if key.public_key().to_bytes().as_slice() != row.get::<_, &[u8]>(0) {
+    if key.public_key().to_bytes().as_slice()
+        != row
+            .try_get::<_, &[u8]>("public_key")
+            .map_err(|_| KeyStoreError::InvalidKey)?
+    {
         return Err(KeyStoreError::InvalidKey);
     }
     Ok(key)
