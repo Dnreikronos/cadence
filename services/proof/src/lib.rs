@@ -1,5 +1,6 @@
 pub mod audit {
     pub mod log;
+    pub mod store;
 }
 pub mod auth;
 pub mod config;
