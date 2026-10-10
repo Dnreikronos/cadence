@@ -17,6 +17,7 @@ pub mod keys {
     pub mod vault;
 }
 pub mod routes {
+    pub mod audit;
     pub mod health;
     pub mod runs;
     mod runs_confirm;
@@ -62,6 +63,15 @@ pub fn router_with_payments(
     store: Option<Arc<wrap_store::WrapStore>>,
     transfer: Option<Arc<routes::transfer::Service>>,
 ) -> Router {
+    router_with_audit(state, store, transfer, None)
+}
+
+pub fn router_with_audit(
+    state: AppState,
+    store: Option<Arc<wrap_store::WrapStore>>,
+    transfer: Option<Arc<routes::transfer::Service>>,
+    audit: Option<Arc<routes::audit::Service>>,
+) -> Router {
     let wrap = routes::wrap::router(state.rpc.clone(), store);
     let runs = routes::runs::router(state.rpc.clone(), transfer.clone());
     let unwrap = routes::unwrap::router(state.rpc.clone(), transfer.clone());
@@ -73,4 +83,5 @@ pub fn router_with_payments(
         .merge(transfer)
         .merge(runs)
         .merge(unwrap)
+        .merge(routes::audit::router(audit))
 }
