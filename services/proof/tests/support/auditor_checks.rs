@@ -5,6 +5,7 @@ use crate::{
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 
+/// Exercise SQL permits directly so HTTP validation cannot mask commit, replay or grant failures.
 pub async fn permits(h: &Harness) {
     let auditor = h.auditor(AUDITOR_A).await;
     let permit: String = auditor
@@ -111,6 +112,7 @@ pub async fn permits(h: &Harness) {
     .await;
 }
 
+/// Move memberships to test historical scope, then force failures on either side of audit commit.
 pub async fn attribution_and_failures(h: &Harness) {
     let path = format!("/audit/{COMPANY_A}/payments");
     // Moving the payer's membership cannot move already attributed receipts.

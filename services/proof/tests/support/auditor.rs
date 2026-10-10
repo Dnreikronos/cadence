@@ -36,6 +36,7 @@ pub const AUDITOR_A: &str = "33333333-3333-4333-8333-333333333333";
 pub const AUDITOR_B: &str = "44444444-4444-4444-8444-444444444444";
 pub const UNGRANTED: &str = "55555555-5555-4555-8555-555555555555";
 
+/// Stand in for Auth with fixed test bearers so grant checks retain a stable identity.
 async fn user(headers: HeaderMap) -> Result<Json<Value>, StatusCode> {
     assert_eq!(headers["apikey"], "public-test-key");
     let id = match headers
@@ -59,6 +60,7 @@ pub struct Harness {
     tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 impl Drop for Harness {
+    /// Stop the fixture Auth server and database driver when the test releases its harness.
     fn drop(&mut self) {
         for task in &self.tasks {
             task.abort();
@@ -67,6 +69,8 @@ impl Drop for Harness {
 }
 
 impl Harness {
+    /// Apply migrations and seed two companies with separate audit and key logins.
+    /// Requires an empty disposable database prepared with `vault.sql`; tests remove keys.
     pub async fn new() -> Self {
         let url = std::env::var("AUDITOR_TEST_DATABASE_URL").unwrap();
         let (admin, driver) = tokio_postgres::connect(&url, NoTls).await.unwrap();
@@ -153,6 +157,7 @@ impl Harness {
         }
     }
 
+    /// Set a test identity on a dedicated-role connection for direct permit checks.
     pub async fn auditor(&self, user: &str) -> Session {
         let mut url = self.url.clone();
         url.set_username("cadence_audit_service").unwrap();
@@ -172,6 +177,8 @@ impl Harness {
         session
     }
 
+    /// Store a signed proof fixture as a payroll or standalone receipt with an enrolled key.
+    /// Status and slot are synthesized; no transaction is submitted to Solana.
     pub async fn receipt(&self, user: &str, index: u8, run: bool, status: &str) -> String {
         let mut f = fixture::Fixture::new();
         let sender = Address::new_from_array([index; 32]);
@@ -228,6 +235,7 @@ impl Harness {
         payment_id
     }
 
+    /// Count durable audit rows as an administrator for authorized and denied read comparisons.
     pub async fn audit_count(&self) -> i64 {
         self.admin
             .query_one("SELECT count(*) FROM public.decryption_audit_log", &[])

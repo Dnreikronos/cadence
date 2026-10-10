@@ -10,6 +10,7 @@ use axum::{
 use serde_json::{json, Value};
 use support::{Harness, ADMIN_A, ADMIN_B, AUDITOR_A, AUDITOR_B, COMPANY_A, UNGRANTED};
 
+/// Exercise the routed database fixture while checking cache policy and fixed errors.
 async fn request(
     h: &Harness,
     method: &str,
@@ -47,6 +48,8 @@ async fn request(
     (status, body)
 }
 
+/// Verify multiple-key pages share one durable audit row and the same bearer loses access on revoke.
+/// Uses real Vault with synthetic chain receipts in an empty disposable database.
 #[tokio::test]
 #[ignore = "requires AUDITOR_TEST_DATABASE_URL for an empty disposable Supabase instance with vault.sql applied"]
 async fn company_grants_bound_real_ciphertext_reads_and_durable_audit_records() {

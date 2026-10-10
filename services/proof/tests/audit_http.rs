@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use tower::ServiceExt;
 
+/// Assert response cache policy and reject amounts or reflected input in error bodies.
 async fn request(
     app: Router,
     method: &str,
@@ -50,6 +51,7 @@ async fn request(
     (status, value)
 }
 
+/// Reject privileged database connections and incomplete enabled authentication settings.
 #[test]
 fn audit_requires_its_own_database_role_and_verified_auth_configuration() {
     assert!(Service::parse(|_| None).unwrap().is_none());
@@ -75,6 +77,7 @@ fn audit_requires_its_own_database_role_and_verified_auth_configuration() {
     assert!(Service::parse(|name| config.get(name).map(|value| value.to_string())).is_err());
 }
 
+/// Keep every disabled audit route behind the same uncacheable unavailable response.
 #[tokio::test]
 async fn unconfigured_audit_routes_are_fixed_errors_and_never_cache() {
     let app = cadence_proof::routes::audit::router(None);
@@ -96,6 +99,7 @@ async fn unconfigured_audit_routes_are_fixed_errors_and_never_cache() {
     }
 }
 
+/// Prevent a valid ciphertext from being decoded under a foreign account, mint or key.
 #[test]
 fn sender_ciphertext_requires_the_correct_account_mint_and_viewing_key() {
     let f = fixture::Fixture::new();
