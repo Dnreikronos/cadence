@@ -102,7 +102,7 @@ impl RunStore {
         for p in payments {
             let count = client.execute(
                 "UPDATE public.payments SET attempt = attempt + 1, request_id = $4, transaction = $5, last_valid_block_height = $6, \
-                 status = $7, error = $8, signature = NULL, slot = NULL WHERE run_id = $1::text::uuid AND position = $2 AND attempt = $3 \
+                 status = $7, error = $8, signature = NULL, slot = NULL, submitted_signature = NULL WHERE run_id = $1::text::uuid AND position = $2 AND attempt = $3 \
                  AND status IN ('failed','expired','preparation_failed')",
                 &[&id, &p.position, &p.attempt, &p.request_id, &p.transaction, &p.last_valid_block_height, &p.status.name(), &p.error],
             ).await.map_err(|_| unavailable())?;
@@ -137,6 +137,34 @@ impl RunStore {
             && existing.signature == payment.signature
             && existing.slot == payment.slot
         {
+            Ok(())
+        } else {
+            Err(AppError::Conflict("payment_attempt_changed"))
+        }
+    }
+    pub async fn submitted(
+        &self,
+        user: &str,
+        id: &str,
+        p: &Payment,
+        signature: &str,
+    ) -> Result<(), AppError> {
+        let client = self.database.connect().await.map_err(|_| unavailable())?;
+        let count = client.execute(
+            "UPDATE public.payments p SET submitted_signature=$5 FROM public.runs r \
+             WHERE p.run_id=r.id AND r.id=$1::text::uuid AND r.user_id=$2::text::uuid AND p.position=$3 AND p.attempt=$4 \
+             AND p.status='prepared' AND p.submitted_signature IS NULL",
+            &[&id, &user, &p.position, &p.attempt, &signature],
+        ).await.map_err(|_| unavailable())?;
+        if count == 1 {
+            return Ok(());
+        }
+        let existing = client.query_opt(
+            "SELECT coalesce(p.submitted_signature,p.signature) FROM public.payments p JOIN public.runs r ON r.id=p.run_id \
+             WHERE r.id=$1::text::uuid AND r.user_id=$2::text::uuid AND p.position=$3 AND p.attempt=$4",
+            &[&id, &user, &p.position, &p.attempt],
+        ).await.map_err(|_| unavailable())?;
+        if existing.is_some_and(|r| r.get::<_, Option<String>>(0).as_deref() == Some(signature)) {
             Ok(())
         } else {
             Err(AppError::Conflict("payment_attempt_changed"))

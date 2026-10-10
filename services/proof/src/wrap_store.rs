@@ -5,7 +5,7 @@ use reqwest::{
     Client, Url,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{sync::Arc, time::Duration};
 
@@ -142,7 +142,7 @@ impl WrapStore {
     }
 
     pub async fn get(&self, id: &str) -> Result<PreparedWrap, AppError> {
-        let rows: Vec<PreparedWrap> = self
+        let rows: Vec<Value> = self
             .http
             .get(self.table.clone())
             .query(&[("id", format!("eq.{id}")), ("limit", "1".into())])
@@ -154,7 +154,50 @@ impl WrapStore {
             .json()
             .await
             .map_err(|_| AppError::StorageUnavailable)?;
-        rows.into_iter().next().ok_or(AppError::NotFound)
+        let row = rows.into_iter().next().ok_or(AppError::NotFound)?;
+        if row["status"] == "failed" {
+            return Err(AppError::Conflict("transaction_failed"));
+        }
+        serde_json::from_value(row).map_err(|_| AppError::StorageUnavailable)
+    }
+
+    pub async fn submitted(&self, record: &PreparedWrap, signature: &str) -> Result<(), AppError> {
+        crate::indexer::verify::submission(
+            &record.id,
+            &record.company_wallet,
+            &record.transaction,
+            signature,
+        )?;
+        let rows: Vec<Value> = self
+            .http
+            .patch(self.table.clone())
+            .query(&[
+                ("id", format!("eq.{}", record.id)),
+                ("signature", "is.null".into()),
+                (
+                    "or",
+                    format!("(submitted_signature.is.null,submitted_signature.eq.{signature})"),
+                ),
+            ])
+            .header("Prefer", "return=representation")
+            .json(&json!({"submitted_signature":signature}))
+            .send()
+            .await
+            .map_err(|_| AppError::StorageUnavailable)?
+            .error_for_status()
+            .map_err(|_| AppError::StorageUnavailable)?
+            .json()
+            .await
+            .map_err(|_| AppError::StorageUnavailable)?;
+        if rows.len() == 1 {
+            return Ok(());
+        }
+        let stored = self.get(&record.id).await?;
+        if stored.signature.as_deref() == Some(signature) {
+            Ok(())
+        } else {
+            Err(AppError::Conflict("wrap_already_confirmed"))
+        }
     }
 
     pub async fn confirm(&self, id: &str, signature: &str, slot: u64) -> Result<(), AppError> {

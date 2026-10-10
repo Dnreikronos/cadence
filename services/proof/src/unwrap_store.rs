@@ -40,7 +40,7 @@ impl UnwrapStore {
         let rows = self.database.connect().await.map_err(|_| unavailable())?.query(
             "SELECT payment_id::text, to_char(paid_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS paid_at, transaction \
              FROM (SELECT payment_id, coalesce(paid_at, created_at) AS paid_at, transaction FROM public.transfer_requests \
-                   WHERE destination = $1 AND signature IS NOT NULL \
+                   WHERE destination = $1 AND status = 'finalized' \
                    UNION ALL SELECT p.payment_id, coalesce(p.paid_at, r.created_at), p.transaction FROM public.payments p \
                    JOIN public.runs r ON r.id = p.run_id WHERE p.destination = $1 AND p.status = 'finalized') received \
              WHERE EXISTS (SELECT 1 FROM public.proof_wallets WHERE wallet = $2 AND user_id = $3::text::uuid) \
@@ -84,10 +84,39 @@ impl UnwrapStore {
 
     pub async fn get(&self, user: &str, id: &str) -> Result<PreparedUnwrap, AppError> {
         let row = self.database.connect().await.map_err(|_| unavailable())?.query_opt(
-            "SELECT id, wallet, source, destination, transaction, last_valid_block_height, signature, slot \
+            "SELECT id, wallet, source, destination, transaction, last_valid_block_height, signature, slot, status \
              FROM public.unwrap_requests WHERE id = $1 AND user_id = $2::text::uuid", &[&id, &user],
         ).await.map_err(|_| unavailable())?.ok_or(AppError::UnwrapNotFound)?;
+        if row.get::<_, &str>("status") == "failed" {
+            return Err(AppError::Conflict("transaction_failed"));
+        }
         record(row)
+    }
+
+    pub async fn submitted(
+        &self,
+        user: &str,
+        record: &PreparedUnwrap,
+        signature: &str,
+    ) -> Result<(), AppError> {
+        crate::indexer::verify::submission(
+            &record.id,
+            &record.wallet,
+            &record.transaction,
+            signature,
+        )?;
+        let client = self.database.connect().await.map_err(|_| unavailable())?;
+        let count = client.execute("UPDATE public.unwrap_requests SET submitted_signature=$3 WHERE id=$1 AND user_id=$2::text::uuid AND status='prepared' AND submitted_signature IS NULL", &[&record.id, &user, &signature])
+            .await.map_err(|_| unavailable())?;
+        if count == 1 {
+            return Ok(());
+        }
+        let row = client.query_opt("SELECT coalesce(submitted_signature,signature) FROM public.unwrap_requests WHERE id=$1 AND user_id=$2::text::uuid", &[&record.id, &user]).await.map_err(|_| unavailable())?;
+        if row.is_some_and(|r| r.get::<_, Option<String>>(0).as_deref() == Some(signature)) {
+            Ok(())
+        } else {
+            Err(AppError::Conflict("unwrap_already_confirmed"))
+        }
     }
 
     pub async fn confirm(

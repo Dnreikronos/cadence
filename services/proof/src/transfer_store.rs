@@ -110,14 +110,43 @@ impl TransferStore {
             .await?
             .query_opt(
                 "SELECT id, company_wallet, sender, destination, transaction, \
-                 last_valid_block_height, signature, slot FROM public.transfer_requests \
+                 last_valid_block_height, signature, slot, status FROM public.transfer_requests \
                  WHERE id = $1 AND user_id = $2::text::uuid",
                 &[&id, &user],
             )
             .await
             .map_err(|_| unavailable())?
             .ok_or(AppError::TransferNotFound)?;
+        if row.get::<_, &str>("status") == "failed" {
+            return Err(AppError::Conflict("transaction_failed"));
+        }
         record(row)
+    }
+
+    pub async fn submitted(
+        &self,
+        user: &str,
+        record: &PreparedTransfer,
+        signature: &str,
+    ) -> Result<(), AppError> {
+        crate::indexer::verify::submission(
+            &record.id,
+            &record.company_wallet,
+            &record.transaction,
+            signature,
+        )?;
+        let client = self.database.connect().await?;
+        let count = client.execute("UPDATE public.transfer_requests SET submitted_signature=$3 WHERE id=$1 AND user_id=$2::text::uuid AND status='prepared' AND submitted_signature IS NULL", &[&record.id, &user, &signature])
+            .await.map_err(|_| unavailable())?;
+        if count == 1 {
+            return Ok(());
+        }
+        let row = client.query_opt("SELECT coalesce(submitted_signature,signature) FROM public.transfer_requests WHERE id=$1 AND user_id=$2::text::uuid", &[&record.id, &user]).await.map_err(|_| unavailable())?;
+        if row.is_some_and(|r| r.get::<_, Option<String>>(0).as_deref() == Some(signature)) {
+            Ok(())
+        } else {
+            Err(AppError::Conflict("transfer_already_confirmed"))
+        }
     }
 
     pub async fn confirm(
