@@ -1,0 +1,68 @@
+{
+  "scenario": 2,
+  "companyId": "1119bdb3-ab9c-4ea4-aa11-ae6c68a54b51",
+  "auditorId": "cc6c6a5a-2f3c-4c09-8494-d71668727532",
+  "grantId": "4b648015-0460-4a54-ac55-dade60481542",
+  "credentialReused": "identical fixture auditor bearer; never refreshed or replaced",
+  "uiMapping": "audit_not_found currently renders the real generic payment-load error",
+  "authorizedSameBearer": {
+    "status": 200,
+    "cacheControl": "no-store",
+    "expectedPayment": true
+  },
+  "before": {
+    "auditCount": 5,
+    "grantCount": 1,
+    "receipt": {
+      "status": "finalized",
+      "company_id": "1119bdb3-ab9c-4ea4-aa11-ae6c68a54b51",
+      "signature": "46DAmvoGED98e8AjZ5tj42W3zTyboEHwrY3qMvep2bZgPoMkBjkeNq2x3bJ7it6w17Z2ExTjQLm4nPW3qYAJqfk5",
+      "slot": 509631000
+    }
+  },
+  "revoke": {
+    "status": 200,
+    "cacheControl": "no-store",
+    "body": {
+      "status": "revoked"
+    }
+  },
+  "firstDeniedRead": {
+    "status": 404,
+    "body": {
+      "error": "audit_not_found"
+    }
+  },
+  "reloadedDeniedRead": {
+    "status": 404,
+    "body": {
+      "error": "audit_not_found"
+    }
+  },
+  "sameCredential": {
+    "denied": {
+      "status": 404,
+      "cacheControl": "no-store",
+      "body": {
+        "error": "audit_not_found"
+      }
+    },
+    "auth": {
+      "status": 200,
+      "userId": "cc6c6a5a-2f3c-4c09-8494-d71668727532"
+    }
+  },
+  "adminReread": {
+    "fixtureGrantPresent": false
+  },
+  "after": {
+    "auditCount": 5,
+    "grantCount": 0,
+    "receipt": {
+      "status": "finalized",
+      "company_id": "1119bdb3-ab9c-4ea4-aa11-ae6c68a54b51",
+      "signature": "46DAmvoGED98e8AjZ5tj42W3zTyboEHwrY3qMvep2bZgPoMkBjkeNq2x3bJ7it6w17Z2ExTjQLm4nPW3qYAJqfk5",
+      "slot": 509631000
+    }
+  }
+}

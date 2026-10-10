@@ -1,0 +1,23 @@
+{
+  "rpc": "https://api.devnet.solana.com",
+  "commitment": "finalized",
+  "signature": "46DAmvoGED98e8AjZ5tj42W3zTyboEHwrY3qMvep2bZgPoMkBjkeNq2x3bJ7it6w17Z2ExTjQLm4nPW3qYAJqfk5",
+  "slot": 509631000,
+  "blockTime": 1791656944,
+  "version": 1,
+  "metaError": null,
+  "chainTransactionSha256": "a5b4ae4571838ce63d71c23827da75940aadd9ab923a579baeb7ae53d4ba77d9",
+  "accountKeys": [
+    "Cnmffc1cjh1s6qJZzuHtTGxdBrCx9VCBxzDDY6qaSLXf",
+    "D2kKkz72fvpWZZXLyZTpoWQpJjxQK6WLTt8RsZfCSyYq",
+    "DiPnFdgxSZNcPrbHR5PYhTbynndJMdW77bTbMS5oxx2Q",
+    "EX2sjSWzs9kWRCGSMhdaa7voPUsu4a8RpesBWvnhgWa9",
+    "GK7aNbfgnJiVAWfncfQguZ6vanu78a6wMJAUoRSoq34J",
+    "HmKG8Y2afPTzFGHXfnkKfFc3ushmGPteqekicsj3oLXD",
+    "11111111111111111111111111111111",
+    "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+    "ZkE1Gama1Proof11111111111111111111111111111",
+    "CGL4U4VC8arAEUDxLh7c6K4rJnZr1T6faK9QQRn2sYmb"
+  ],
+  "instructionCount": 10
+}
