@@ -193,7 +193,7 @@ async fn confirm(
     }))
 }
 
-pub(super) fn verify_confirmation(
+pub(crate) fn verify_confirmation(
     id: &str,
     wallet: &str,
     transaction: &str,

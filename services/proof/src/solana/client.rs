@@ -22,7 +22,7 @@ impl RpcClient {
         Ok(Self { url, http })
     }
 
-    async fn call(&self, method: &str, params: Value) -> Result<Value, AppError> {
+    pub(crate) async fn call(&self, method: &str, params: Value) -> Result<Value, AppError> {
         // Provider errors can echo credentials from the URL. Keep them out of errors.
         let response = self
             .http
