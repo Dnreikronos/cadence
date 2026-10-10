@@ -1,16 +1,26 @@
 use cadence_proof::{
-    config::Config, error::AppError, router_with_payments, routes::transfer::Service,
-    solana::client::RpcClient, wrap_store::WrapStore, AppState,
+    config::Config, error::AppError, indexer::Indexer, router_with_payments,
+    routes::transfer::Service, solana::client::RpcClient, wrap_store::WrapStore, AppState,
 };
 use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), AppError> {
     let config = Config::from_env()?;
-    let rpc = Arc::new(RpcClient::new(config.rpc_url, config.rpc_timeout)?);
+    let rpc = Arc::new(RpcClient::new(config.rpc_url.clone(), config.rpc_timeout)?);
     let wrap_store = WrapStore::from_env()?.map(Arc::new);
     let transfer = Service::from_env()?.map(Arc::new);
     let cors = cadence_proof::cors::from_env()?;
+    let indexer = Indexer::from_env(
+        rpc.clone(),
+        &config.rpc_url,
+        wrap_store.is_some() || transfer.is_some(),
+    )?
+    .map(Arc::new);
+    if let Some(indexer) = &indexer {
+        eprintln!("reconciling payment status before accepting requests");
+        indexer.backfill().await?;
+    }
 
     #[cfg(unix)]
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -39,6 +49,7 @@ async fn main() -> Result<(), AppError> {
     let cleanup = wrap_store
         .as_ref()
         .map(|store| store.clone().spawn_cleanup(rpc.clone()));
+    let indexer = indexer.map(|indexer| indexer.spawn());
     let result = axum::serve(
         listener,
         router_with_payments(
@@ -56,6 +67,9 @@ async fn main() -> Result<(), AppError> {
     .await;
     if let Some(cleanup) = cleanup {
         cleanup.abort();
+    }
+    if let Some(indexer) = indexer {
+        indexer.abort();
     }
     result?;
     Ok(())
