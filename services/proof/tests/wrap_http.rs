@@ -88,6 +88,33 @@ async fn fresh_wrap_roundtrip_and_idempotent_confirmation() {
 }
 
 #[tokio::test]
+async fn public_funding_confirms_without_confidential_setup() {
+    for existing in [false, true] {
+        let h = Harness::new(existing).await;
+        let mut request = h.request(false);
+        request["mode"] = json!("public");
+        let (status, prepared) = post(&h.app, "/wrap", request).await;
+        assert_eq!(status, StatusCode::OK, "{prepared}");
+        assert_eq!(prepared["deposit_state"], "public_after_confirmation");
+        let (tx, confirmation) = signed(&h, &prepared);
+        assert!(!tx
+            .message
+            .static_account_keys()
+            .contains(&solana_zk_elgamal_proof_interface::id()));
+        *h.backend.transaction.lock().unwrap() = chain(&tx);
+        let (status, confirmed) = post(&h.app, "/wrap/confirm", confirmation).await;
+        assert_eq!(status, StatusCode::OK, "{confirmed}");
+        assert_eq!(confirmed["status"], "finalized");
+        let mut invalid = h.request(false);
+        invalid["mode"] = json!("unknown");
+        assert_eq!(
+            post(&h.app, "/wrap", invalid).await.0,
+            StatusCode::BAD_REQUEST
+        );
+    }
+}
+
+#[tokio::test]
 async fn existing_account_needs_no_setup_and_prepare_retry_preserves_confirmation() {
     let h = Harness::new(true).await;
     let (status, prepared) = post(&h.app, "/wrap", h.request(false)).await;

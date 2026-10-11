@@ -188,3 +188,61 @@ fn prefunded_system_account_can_still_be_created() {
         6
     );
 }
+
+#[test]
+fn public_funding_needs_no_setup_or_proof_and_leaves_public_tokens() {
+    let wallet = Address::new_from_array([9; 32]);
+    let public = account(wallet, false);
+    let private = account(wallet, true);
+    let donated = RpcAccount {
+        lamports: 1,
+        owner: solana_system_interface::program::ID,
+        ..RpcAccount::default()
+    };
+    for (existing, count) in [
+        (None, 2),
+        (Some(&public), 1),
+        (Some(&private), 2),
+        (Some(&donated), 2),
+    ] {
+        let ix = wrap::instructions_for_mode(
+            &wallet,
+            1_000_000,
+            existing,
+            None,
+            wrap::FundingMode::Public,
+        )
+        .unwrap();
+        assert_eq!(ix.len(), count);
+        assert_eq!(ix.last().unwrap().program_id, token_wrap::PROGRAM);
+        assert!(!ix
+            .iter()
+            .any(|i| i.program_id == solana_zk_elgamal_proof_interface::id()));
+        assert!(!ix
+            .iter()
+            .any(|i| i.data.starts_with(&[27, 2]) || i.data.starts_with(&[27, 5])));
+        let tx = v0::compile_unsigned(&ix, &wallet, Hash::new_from_array([8; 32])).unwrap();
+        assert!(v1::serialize(&tx).unwrap().len() <= 1232);
+    }
+    let ix =
+        wrap::instructions_for_mode(&wallet, 1, Some(&private), None, wrap::FundingMode::Public)
+            .unwrap();
+    assert_eq!(&ix[0].data, &[27, 11]); // EnableNonConfidentialCredits
+    let wrong_owner = account(Address::new_from_array([8; 32]), false);
+    assert!(wrap::instructions_for_mode(
+        &wallet,
+        1,
+        Some(&wrong_owner),
+        None,
+        wrap::FundingMode::Public
+    )
+    .is_err());
+    assert!(wrap::instructions_for_mode(
+        &wallet,
+        1,
+        None,
+        Some(&setup()),
+        wrap::FundingMode::Public
+    )
+    .is_err());
+}

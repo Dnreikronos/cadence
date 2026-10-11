@@ -22,6 +22,23 @@ use std::num::NonZeroI8;
 pub const DECIMALS: u8 = 6;
 pub const MAX_DEPOSIT: u64 = (1 << 48) - 1;
 
+#[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FundingMode {
+    #[default]
+    Confidential,
+    Public,
+}
+
+impl FundingMode {
+    pub fn deposit_state(self) -> &'static str {
+        match self {
+            Self::Confidential => "pending_after_confirmation",
+            Self::Public => "public_after_confirmation",
+        }
+    }
+}
+
 /// Public artifacts produced using the wallet's enrolled confidential keys.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -110,8 +127,21 @@ pub fn instructions(
     existing: Option<&RpcAccount>,
     setup: Option<&Setup>,
 ) -> Result<Vec<Instruction>, AppError> {
+    instructions_for_mode(wallet, amount, existing, setup, FundingMode::Confidential)
+}
+
+pub fn instructions_for_mode(
+    wallet: &Address,
+    amount: u64,
+    existing: Option<&RpcAccount>,
+    setup: Option<&Setup>,
+    mode: FundingMode,
+) -> Result<Vec<Instruction>, AppError> {
     if !(1..=MAX_DEPOSIT).contains(&amount) {
         return Err(AppError::BadRequest("invalid_amount"));
+    }
+    if mode == FundingMode::Public && setup.is_some() {
+        return Err(AppError::BadRequest("invalid_request"));
     }
     let addresses = Addresses::for_usdc();
     let destination = destination(wallet);
@@ -163,7 +193,19 @@ pub fn instructions(
             &TOKEN_2022,
         ));
     }
-    if let Some(config) = extension {
+    if mode == FundingMode::Public {
+        if extension.is_some_and(|config| !bool::from(config.allow_non_confidential_credits)) {
+            result.push(
+                confidential_transfer::instruction::enable_non_confidential_credits(
+                    &TOKEN_2022,
+                    &destination,
+                    wallet,
+                    &[],
+                )
+                .map_err(|_| bad())?,
+            );
+        }
+    } else if let Some(config) = extension {
         config
             .valid_as_destination()
             .map_err(|_| AppError::Conflict("confidential_destination_unavailable"))?;
@@ -210,17 +252,19 @@ pub fn instructions(
         wallet,
         amount,
     ));
-    result.push(
-        confidential_transfer::instruction::deposit(
-            &TOKEN_2022,
-            &destination,
-            &addresses.wrapped_mint,
-            amount,
-            DECIMALS,
-            wallet,
-            &[],
-        )
-        .map_err(|_| bad())?,
-    );
+    if mode == FundingMode::Confidential {
+        result.push(
+            confidential_transfer::instruction::deposit(
+                &TOKEN_2022,
+                &destination,
+                &addresses.wrapped_mint,
+                amount,
+                DECIMALS,
+                wallet,
+                &[],
+            )
+            .map_err(|_| bad())?,
+        );
+    }
     Ok(result)
 }
