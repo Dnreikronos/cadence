@@ -4,7 +4,7 @@ use crate::{
     database::Database,
     error::AppError,
     keys::vault,
-    solana::{client::RpcClient, confidential, token_wrap::Addresses, v1, wrap},
+    solana::{client::RpcClient, confidential, fallback, token_wrap::Addresses, v1, wrap},
     transfer_store::{PreparedTransfer, TransferStore},
     wrap_store::request_id,
 };
@@ -135,6 +135,7 @@ struct TransferResponse {
     mint: String,
     recent_blockhash: String,
     last_valid_block_height: u64,
+    transparent: bool,
 }
 
 async fn prepare(
@@ -194,55 +195,69 @@ async fn prepare(
     {
         return Err(AppError::Forbidden);
     }
-    let permit = state
-        .proof_slots
-        .try_acquire_owned()
-        .map_err(|_| AppError::TransferRateLimited)?;
-    let sizes = confidential::CONTEXT_SIZES;
-    let (a, b, c) = tokio::try_join!(
-        state.rpc.minimum_balance(sizes[0]),
-        state.rpc.minimum_balance(sizes[1]),
-        state.rpc.minimum_balance(sizes[2])
-    )?;
-    let key_client = service
-        .keys
-        .connect()
+    let transparent = !fallback::available(&state.rpc).await?;
+    let (blockhash, last_valid_block_height) = state.rpc.blockhash_with_expiry().await?;
+    let transaction = if transparent {
+        fallback::build(&fallback::Transfer {
+            mint,
+            sender,
+            recipient,
+            wallet,
+            sender_account: &sender_account,
+            recipient_account: &recipient_account,
+            amount,
+            blockhash,
+        })?
+    } else {
+        let permit = state
+            .proof_slots
+            .try_acquire_owned()
+            .map_err(|_| AppError::TransferRateLimited)?;
+        let sizes = confidential::CONTEXT_SIZES;
+        let (a, b, c) = tokio::try_join!(
+            state.rpc.minimum_balance(sizes[0]),
+            state.rpc.minimum_balance(sizes[1]),
+            state.rpc.minimum_balance(sizes[2])
+        )?;
+        let key_client = service
+            .keys
+            .connect()
+            .await
+            .map_err(|_| AppError::TransferUnavailable("key_storage_unavailable"))?;
+        let key = vault::load(
+            &key_client,
+            &wallet,
+            &sender,
+            &user,
+            "generate confidential transfer proofs",
+        )
         .await
         .map_err(|_| AppError::TransferUnavailable("key_storage_unavailable"))?;
-    let key = vault::load(
-        &key_client,
-        &wallet,
-        &sender,
-        &user,
-        "generate confidential transfer proofs",
-    )
-    .await
-    .map_err(|_| AppError::TransferUnavailable("key_storage_unavailable"))?;
-    drop(key_client);
-    let (blockhash, last_valid_block_height) = state.rpc.blockhash_with_expiry().await?;
-    let transaction = tokio::task::spawn_blocking(move || {
-        // Keep this permit until CPU work ends, including after an HTTP timeout.
-        let _permit = permit;
-        confidential::build(
-            &confidential::Transfer {
-                mint,
-                sender,
-                recipient,
-                wallet,
-                mint_account: &mint_account,
-                sender_account: &sender_account,
-                recipient_account: &recipient_account,
-                amount,
-                aes_key: &aes,
-                blockhash,
-                context_rent: [a, b, c],
-            },
-            &key,
-        )
-    })
-    .await
-    .map_err(|_| AppError::Transaction("proof worker failed"))?
-    .map_err(proof_error)?;
+        drop(key_client);
+        tokio::task::spawn_blocking(move || {
+            // Keep this permit until CPU work ends, including after an HTTP timeout.
+            let _permit = permit;
+            confidential::build(
+                &confidential::Transfer {
+                    mint,
+                    sender,
+                    recipient,
+                    wallet,
+                    mint_account: &mint_account,
+                    sender_account: &sender_account,
+                    recipient_account: &recipient_account,
+                    amount,
+                    aes_key: &aes,
+                    blockhash,
+                    context_rent: [a, b, c],
+                },
+                &key,
+            )
+        })
+        .await
+        .map_err(|_| AppError::Transaction("proof worker failed"))?
+        .map_err(proof_error)?
+    };
     let bytes = v1::serialize(&transaction)?;
     let record = PreparedTransfer {
         id: request_id(&bytes),
@@ -253,6 +268,7 @@ async fn prepare(
         last_valid_block_height,
         signature: None,
         slot: None,
+        transparent,
     };
     service.store.prepare(&user, &record).await?;
     Ok(Json(TransferResponse {
@@ -265,6 +281,7 @@ async fn prepare(
         mint: mint.to_string(),
         recent_blockhash: blockhash.to_string(),
         last_valid_block_height,
+        transparent,
     }))
 }
 
@@ -280,6 +297,7 @@ struct ConfirmResponse {
     signature: String,
     slot: u64,
     status: &'static str,
+    transparent: bool,
 }
 
 async fn confirm(
@@ -346,6 +364,7 @@ async fn confirm(
         signature: request.signature,
         slot,
         status: "finalized",
+        transparent: record.transparent,
     }))
 }
 

@@ -17,6 +17,7 @@ pub struct PreparedTransfer {
     pub last_valid_block_height: u64,
     pub signature: Option<String>,
     pub slot: Option<u64>,
+    pub transparent: bool,
 }
 
 fn unavailable() -> AppError {
@@ -84,10 +85,10 @@ impl TransferStore {
         self.database.connect().await?
             .execute(
                 "INSERT INTO public.transfer_requests \
-                 (id, user_id, company_wallet, sender, destination, transaction, last_valid_block_height) \
-                 VALUES ($1, $2::text::uuid, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING",
+                 (id, user_id, company_wallet, sender, destination, transaction, last_valid_block_height, transparent) \
+                 VALUES ($1, $2::text::uuid, $3, $4, $5, $6, $7, $8) ON CONFLICT (id) DO NOTHING",
                 &[&record.id, &user, &record.company_wallet, &record.sender,
-                  &record.destination, &record.transaction, &height],
+                  &record.destination, &record.transaction, &height, &record.transparent],
             )
             .await
             .map_err(|_| unavailable())?;
@@ -97,6 +98,7 @@ impl TransferStore {
             || stored.sender != record.sender
             || stored.destination != record.destination
             || stored.last_valid_block_height != record.last_valid_block_height
+            || stored.transparent != record.transparent
         {
             return Err(unavailable());
         }
@@ -110,7 +112,7 @@ impl TransferStore {
             .await?
             .query_opt(
                 "SELECT id, company_wallet, sender, destination, transaction, \
-                 last_valid_block_height, signature, slot, status FROM public.transfer_requests \
+                 last_valid_block_height, signature, slot, status, transparent FROM public.transfer_requests \
                  WHERE id = $1 AND user_id = $2::text::uuid",
                 &[&id, &user],
             )
@@ -197,5 +199,6 @@ fn record(row: Row) -> Result<PreparedTransfer, AppError> {
             .map(u64::try_from)
             .transpose()
             .map_err(|_| unavailable())?,
+        transparent: row.try_get("transparent").map_err(|_| unavailable())?,
     })
 }

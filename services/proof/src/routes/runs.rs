@@ -116,6 +116,7 @@ struct PaymentResponse {
     signature: Option<String>,
     slot: Option<i64>,
     error: Option<String>,
+    transparent: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     transaction: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -160,6 +161,7 @@ pub(super) fn response(run: Run, transactions: bool) -> RunResponse {
                 signature: p.signature,
                 slot: p.slot,
                 error: p.error,
+                transparent: p.transparent,
                 transaction: if transactions && p.status == Status::Prepared {
                     p.transaction
                 } else {

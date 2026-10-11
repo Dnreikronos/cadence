@@ -30,6 +30,7 @@ async fn run_storage_is_private_atomic_and_preserves_attempts() {
         include_str!("../../../supabase/migrations/20260930000001_wrap_cleanup.sql"),
         include_str!("../../../supabase/migrations/20261004000000_unwrap_requests.sql"),
         include_str!("../../../supabase/migrations/20261010000000_chain_indexer.sql"),
+        include_str!("../../../supabase/migrations/20261010000003_transparent_fallback.sql"),
     ] {
         db.batch_execute(migration).await.unwrap();
     }
@@ -50,6 +51,7 @@ async fn run_storage_is_private_atomic_and_preserves_attempts() {
         signature: None,
         slot: None,
         error: None,
+        transparent: true,
     };
     let run = store
         .prepare(
@@ -79,6 +81,7 @@ async fn run_storage_is_private_atomic_and_preserves_attempts() {
     a.unwrap();
     b.unwrap();
     p.status = Status::Prepared;
+    p.transparent = false;
     p.request_id = Some("b".repeat(64));
     p.transaction = Some("AQ==".into());
     p.signature = None;
@@ -90,11 +93,20 @@ async fn run_storage_is_private_atomic_and_preserves_attempts() {
     );
     assert!(a.is_ok() ^ b.is_ok());
     let history = db
-        .query_one("SELECT status, signature FROM public.payment_attempts", &[])
+        .query_one(
+            "SELECT status, signature, transparent FROM public.payment_attempts",
+            &[],
+        )
         .await
         .unwrap();
     assert_eq!(history.get::<_, String>(0), "failed");
     assert_eq!(history.get::<_, String>(1), "4".repeat(88));
+    assert!(history.get::<_, bool>(2));
+    assert!(!store.get(USER, &run.id).await.unwrap().payments[0].transparent);
+    assert!(db
+        .batch_execute("UPDATE public.payments SET transparent = true")
+        .await
+        .is_err());
     p.attempt = 1;
     p.status = Status::Finalized;
     p.signature = Some("5".repeat(88));
@@ -122,6 +134,7 @@ async fn run_storage_is_private_atomic_and_preserves_attempts() {
         signature: None,
         slot: None,
         error: None,
+        transparent: false,
     };
     assert!(store
         .prepare(

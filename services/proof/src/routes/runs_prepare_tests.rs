@@ -48,6 +48,9 @@ async fn rpc(State(backend): State<Arc<Backend>>, Json(request): Json<Value>) ->
             json!({"value":value})
         }
         "getMinimumBalanceForRentExemption" => json!(3062400),
+        "getMultipleAccounts" => {
+            json!({"context":{"slot":100},"value":[{"executable":true},null,null]})
+        }
         "getLatestBlockhash" => {
             json!({"value":{"blockhash":solana_hash::Hash::new_from_array([5;32]).to_string(),"lastValidBlockHeight":500}})
         }

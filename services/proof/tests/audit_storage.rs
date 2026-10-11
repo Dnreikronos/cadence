@@ -56,7 +56,7 @@ async fn company_grants_bound_real_ciphertext_reads_and_durable_audit_records() 
     let h = Harness::new().await;
     let payroll = h.receipt(ADMIN_A, 3, true, "finalized").await;
     let standalone = h.receipt(ADMIN_A, 9, false, "finalized").await;
-    h.receipt(ADMIN_B, 10, true, "finalized").await;
+    let other = h.receipt(ADMIN_B, 10, true, "finalized").await;
     h.receipt(ADMIN_A, 11, false, "prepared").await;
     h.receipt(ADMIN_A, 12, false, "failed").await;
     let path = format!("/audit/{COMPANY_A}/payments");
@@ -244,4 +244,19 @@ async fn company_grants_bound_real_ciphertext_reads_and_durable_audit_records() 
 
     checks::permits(&h).await;
     checks::attribution_and_failures(&h).await;
+
+    // The previous check removed every viewing key. Public receipts still read.
+    let public_run = h.transparent_receipt(ADMIN_A, 20, true).await;
+    let public_transfer = h.transparent_receipt(ADMIN_A, 21, false).await;
+    let public_path = format!("/audit/{}/payments?cursor={other}", support::COMPANY_B);
+    let (status, page) = request(&h, "GET", &public_path, "auditor-b", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    assert_eq!(page["items"][0]["payment_id"], public_run);
+    assert_eq!(page["items"][1]["payment_id"], public_transfer);
+    let expected_amount = support::fixture::AMOUNT.to_string();
+    assert!(page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|p| p["transparent"] == true && p["amount"].as_str() == Some(&expected_amount)));
 }
