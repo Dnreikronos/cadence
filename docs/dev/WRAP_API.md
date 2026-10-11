@@ -80,7 +80,24 @@ authentication or wallet-signature verification.
 { "company_wallet": "<wallet public key>", "amount": "1000000" }
 ```
 
-For an unconfigured destination, include `setup`:
+Omitted `mode` defaults to `"confidential"`. To fund the visible payment reserve
+for [transparent fallback](FALLBACK.md), send:
+
+```json
+{ "company_wallet": "<wallet public key>", "amount": "1000000", "mode": "public" }
+```
+
+Public funding creates the ATA if needed and wraps USDC without confidential
+setup, proof verification, deposit or apply-pending instructions. An existing
+confidential account with public credits disabled is enabled by its owner in the
+same signed transaction. The amount remains in the public base balance, and the
+response uses `deposit_state: "public_after_confirmation"`. Supplying `setup` with
+public mode returns `400 invalid_request`. The company Deposit screen offers this
+choice and shares submission tracking with private funding. Both flows use the
+same amount bounds, source and destination validation, signer and confirmation
+checks. Existing encrypted funds are not withdrawn or converted.
+
+For confidential funding into an unconfigured destination, include `setup`:
 
 ```json
 {

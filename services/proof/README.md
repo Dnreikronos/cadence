@@ -325,7 +325,18 @@ require its migration and a dedicated `PROOF_INDEXER_DATABASE_URL`; optionally
 set `PROOF_RPC_WS_URL` for a separate subscription endpoint. Confirmations emit
 durable events in Postgres for the future notifier.
 
-`POST /runs` prepares ordered confidential payments with one unsigned v1
+Issue [#60](https://github.com/Dnreikronos/cadence/issues/60) adds
+[transparent fallback](../../docs/dev/FALLBACK.md) for standalone transfers,
+payroll preparations and safe retries. Startup and request-time checks select
+ordinary checked Token-2022 transfers during proof-program outages. Apply the
+fallback migration before deploying, fund a public wrapped-token reserve, and
+read the stored `transparent` flag to display payment privacy correctly.
+`POST /wrap` accepts `mode: "public"` to fund that reserve without confidential
+setup or proof instructions; omitted mode keeps the confidential deposit flow.
+Public funding returns `deposit_state: "public_after_confirmation"` and needs no
+apply-pending step. See the [wrap contract](../../docs/dev/WRAP_API.md).
+
+`POST /runs` prepares ordered payments with one unsigned v1
 transaction per buildable recipient. `POST /runs/:id/confirm` records each
 payment's verified success or failure independently. `GET /runs/:id` returns
 amount-free status, and `/runs/:id/retry` reconciles old attempts before

@@ -599,7 +599,7 @@ service-status notice when the service does not answer ("Can't reach Cadence"), 
 a 500 ("Cadence is having trouble") or answers `unavailable` ("Cadence can't reach
 Solana").
 
-### Wrap: public USDC to private ✅
+### Wrap: fund private USDC or a public reserve ✅
 
 `POST /wrap`, then `POST /wrap/confirm`. Used by the Deposit screen (#82).
 
@@ -607,7 +607,18 @@ Solana").
 { "company_wallet": "<wallet public key>", "amount": "1000000" }
 ```
 
-Add `setup` when the destination account is not configured yet, with the two
+For a public payment reserve (#60), add `mode: "public"`. This creates the wrapped
+Token-2022 ATA if needed and leaves the wrapped tokens in its public base balance.
+No `setup`, confidential deposit or apply-pending step is used. Prepare returns
+`deposit_state: "public_after_confirmation"`; the Deposit screen stops after the
+wrap confirms and shows the reserve separately. Public mode rejects `setup`.
+Omitting mode (or `mode: "confidential"`) keeps the existing private funding flow.
+Both choices share the viewer's persisted submission record and tab lock. Missing
+history stays held across reloads until the outcome is known or the person checks
+and releases it.
+
+For confidential funding, add `setup` when the destination account is not
+configured yet, with the two
 public activation artifacts (`pubkey_validity_proof`, `decryptable_zero_balance`,
 both base64). If the account is already configured, omit it.
 
@@ -621,7 +632,8 @@ apply, and says the deposit is private only after both. A deposit is public by
 design.
 
 The Deposit screen never sends `setup`, and no screen builds the two activation
-artifacts. A company wallet that is not configured yet therefore ends in
+artifacts. Private funding for a company wallet that is not configured yet
+therefore ends in
 `409 confidential_setup_required`, which the screen shows as "Your wallet needs
 activating first … that step isn't available from this screen yet", with no link to
 anywhere (see question 30). The screen checks the wallet's plain USDC against the
@@ -680,11 +692,13 @@ balance.
 > [finding 2](#design-review-findings-to-resolve-before-building) and
 > [Open questions](#open-questions).
 
-🟡 **Proposed, not implemented (#60).** A payment that falls back to an ordinary
-transfer would be flagged `transparent` in the read routes below, so the UI can
-show the "Transparent" badge. Nothing in `services/proof` implements a fallback
-today; the `transparent` fields in this document describe a proposal. See
-[finding 7](#design-review-findings-to-resolve-before-building) on consent.
+✅ **Implemented (#60).** The service checks ZK-program availability at startup
+and every payment preparation. During an outage it prepares ordinary Token-2022
+transfers from the public wrapped-token balance and persists `transparent` per
+attempt. Transfer responses, run responses and auditor receipts expose the mode
+for the existing badge. See the [fallback contract](FALLBACK.md) for funding
+constraints and deployment. The
+consent proposal in finding 7 remains a product question.
 
 ### Payroll run: one approval, many recipients ✅
 
@@ -1535,8 +1549,8 @@ Each points to the [open question](#open-questions) that asks it.
   a `Content-Type`. (Question 34.)
 - **CORS.** A `PUT` for the amount works against the real service, and `Retry-After`
   is readable. Neither is true today. (Question 23.)
-- **`transparent`.** A payment flagged `transparent` is shown with a badge; the flag
-  is assumed to exist even though no fallback is implemented. (Questions 9 and 17.)
+- **`transparent`.** Run responses carry the persisted flag for the badge. The
+  global preflight signal and explicit consent policy remain questions 9 and 17.
 
 ## Open questions
 

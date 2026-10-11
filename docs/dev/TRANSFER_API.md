@@ -1,11 +1,15 @@
 # Transfer API (#54)
 
-The proof service prepares one unsigned v1 confidential transfer. The user's
+The proof service prepares one unsigned v1 transfer, using confidential payments
+when proofs are available and [transparent fallback](FALLBACK.md) during a proof
+program outage. The user's
 wallet signs and submits it; the service verifies finalized confirmation.
-Amounts, AES balance keys, access tokens and wallet-link signatures are never
-written to a receipt or returned in an error. The source and destination must
-already be configured for confidential transfers, the sender's key must be
-enrolled in Vault, and credits must already be applied to its available balance.
+AES balance keys, access tokens and wallet-link signatures are never written
+to receipts or returned in an error. Amounts have no separate receipt column;
+transparent amounts are public in the stored transaction. Confidential payments
+require configured source and destination accounts, an enrolled sender key in
+Vault, and credits applied to the available balance. Fallback instead spends the public wrapped-token
+balance and requires the destination to allow non-confidential credits.
 
 ## Configuration
 
@@ -74,10 +78,12 @@ The browser never sends a wallet signing key to this service.
 
 A successful response contains `request_id`, base64 `transaction`,
 `transaction_version: 1`, `required_signers`, `sender`, `destination`, `mint`,
-`recent_blockhash` and `last_valid_block_height`. Decode and sign the exact
+`recent_blockhash`, `last_valid_block_height` and `transparent`. Decode and sign the exact
 wire bytes with a provider that supports v1. The transaction contains all three
 proof-context creations/verifications, the confidential transfer and all three
-closes. Its size is strictly below 4,096 bytes and only the company wallet signs.
+closes when `transparent` is false. When true, it contains an ordinary checked
+transfer with a public amount. Its size is strictly below 4,096 bytes and only
+the company wallet signs.
 
 After an expired blockhash or an account balance change, prepare again; never
 edit the returned message or combine it with extra instructions. Preparation
@@ -99,7 +105,7 @@ The RPC read uses base64, finalized commitment and
 `maxSupportedTransactionVersion: 1`. A receipt is recorded only when metadata
 reports success, the message exactly matches the prepared transaction, and the
 signature verifies against the sole expected wallet. Response fields are
-`request_id`, `signature`, `slot` and `status: "finalized"`.
+`request_id`, `signature`, `slot`, `status: "finalized"` and the stored `transparent` mode.
 Retry a not-yet-finalized transaction. Repeating a recorded confirmation returns
 its receipt without another chain read, but still verifies the user's token.
 Another user's request ID receives 404. Concurrent confirmations cannot replace
