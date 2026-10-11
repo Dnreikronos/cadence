@@ -81,7 +81,7 @@ signed-in shell polls `GET /health` for the [service status](#money-and-queries)
 | `/company/runs/new`                                    | New payroll run                                                             | admin     | people, `GET /company/people/amounts`, `GET /company/balance`, `GET /company/payments`, `GET /company/auditors`, `POST /company/people/:id/invite`, `POST /runs`, the per-payment `confirm` and `retry` | #83    |
 | `/company/runs/[id]`                                   | Run progress, retry, check again                                            | admin     | `GET /runs/:id` (polled every 5 s while a payment is open), people for names, the per-payment `confirm` and `retry`                                                                                     | #83    |
 | `/company/people`                                      | People: list, add, edit, remove, invite                                     | admin     | people (Supabase `people` table, or in memory in mock mode), `GET /company/people/amounts`, `PUT /company/people/:id/amount`, `POST /company/people/:id/invite`, `GET /company/auditors`                | #81    |
-| `/company/deposit`                                     | Receive USDC and make it private                                            | admin     | a chain read of the wallet's plain USDC, `GET /company/balance`, `POST /wrap` and `/confirm`, `POST /accounts/apply-pending` and `/confirm`, `GET /company/auditors`                                    | #82    |
+| `/company/deposit`                                     | Receive USDC, fund private payments or a public reserve                     | admin     | chain reads of plain USDC and the public wrapped-token reserve, `GET /company/balance`, `POST /wrap` and `/confirm`, `POST /accounts/apply-pending` and `/confirm`, `GET /company/auditors`             | #82    |
 | `/company/receipts`                                    | Payments, printable receipts, CSV                                           | admin     | `GET /company/payments`, `GET /company/export.csv`, `GET /company/auditors`                                                                                                                             | #84    |
 | `/company/auditors`                                    | Auditors: list, invite, revoke                                              | admin     | `GET /company/auditors`, `POST /company/auditors`, `POST /company/auditors/:id/revoke`                                                                                                                  | #85    |
 | `/me`                                                  | Balance, apply pending, recent payments                                     | recipient | `GET /me/status` (the gate), `GET /me/balance`, `GET /me/payments`, `POST /accounts/apply-pending` and `/confirm`                                                                                       | #86    |
@@ -636,3 +636,10 @@ be `real` with `NEXT_PUBLIC_PROOF_API_URL` set to an https URL, because mock mod
 refused on mainnet. Most routes the screens call do not exist on the proof service
 yet, and in real mode nothing can be signed until #78 and #80, so a `real` deploy does
 not work end to end today.
+
+Public funding on `/company/deposit` (#60) wraps USDC into a visible reserve with
+`POST /wrap` and `mode: "public"`. It needs no confidential activation or pending
+apply. Both funding choices share the deposit submission record, so an unknown
+transaction stays held across reloads until its outcome is known or the person
+checks and releases it. See
+[the fallback contract](../docs/dev/FALLBACK.md) for funding and deployment.

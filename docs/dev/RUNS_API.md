@@ -7,10 +7,12 @@ The [chain indexer](INDEXER.md) additionally requires its migration and dedicate
 database connection when running the payment-enabled service. Missing route
 configuration returns `503 run_storage_unavailable`.
 
-The company wallet is the sole signer. Source/recipients must be configured
+The company wallet is the sole signer. [Transparent fallback](FALLBACK.md) uses
+the sender's public wrapped-token balance during proof-program outages and
+persists the mode of every attempt. For confidential payments, source/recipients must be configured
 Token-2022 accounts for the devnet wrapped-USDC mint. The sender needs an enrolled
 viewing key and an applied available balance. Amounts and the 16-byte AES key
-remain transient. One audited source-key read covers each batch build, attributed
+remain transient. One audited source-key read covers each confidential batch build, attributed
 to the verified user. The backend never signs or submits transactions.
 
 ## Prepare
@@ -49,6 +51,7 @@ The response contains `run_id` (UUID), `company_wallet`, `sender`, `mint`,
   "signature": null,
   "slot": null,
   "error": null,
+  "transparent": false,
   "transaction": "<base64 unsigned v1 transaction>",
   "last_valid_block_height": 123
 }
@@ -56,7 +59,9 @@ The response contains `run_id` (UUID), `company_wallet`, `sender`, `mint`,
 
 The recent blockhash is in the serialized message. Every transaction is below
 4,096 bytes and contains atomic proof creation, verification, transfer and
-context closes. No response contains an amount or key. A missing/unusable
+context closes for confidential payments; transparent payments contain one
+ordinary checked-transfer instruction. No response contains a separate amount
+or key field. A missing/unusable
 recipient, individual RPC failure or proof failure returns `preparation_failed`
 for its position, with a fixed error and no transaction. Other payments prepare
 without debiting the predicted sender for the failed preparation.
@@ -114,7 +119,8 @@ before it appears in the response. Whole-run auth/read errors remain HTTP errors
 amounts or keys. Other users receive `404 run_not_found` on read, confirmation
 and retry. Aggregate status is `completed` when all payments finalized,
 `partial_failure` when any payment failed/expired/could not prepare, and otherwise
-`prepared`.
+`prepared`. Every payment includes its stored `transparent` flag on preparation,
+status, confirmation and retry responses.
 
 ## Retry unpaid positions
 

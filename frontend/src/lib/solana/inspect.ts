@@ -18,6 +18,7 @@ import {
   MAX_LOADED_ACCOUNTS_DATA_SIZE,
   MAX_PRIORITY_FEE_LAMPORTS,
   REALLOCATE,
+  TRANSFER_CHECKED,
   computeBudget,
   confidential,
   confidentialDataLength,
@@ -247,10 +248,17 @@ export type Expected =
       sender: string
       destination: string
       mint: string
+      transparent?: boolean
+      amount?: bigint
     }
   // Public USDC into the wallet's confidential account, and back out to its USDC
   // account, for the amount the person entered (integer base units).
-  | { flow: "wrap" | "unwrap"; accounts: WalletAccounts; amount: bigint }
+  | {
+      flow: "wrap" | "unwrap"
+      accounts: WalletAccounts
+      amount: bigint
+      mode?: "confidential" | "public"
+    }
   // Configure the wallet's confidential account; move its pending credits to available.
   | { flow: "configure" | "apply"; accounts: WalletAccounts }
 
@@ -268,6 +276,8 @@ type Kind =
   | "withdraw"
   | "applyPending"
   | "transfer"
+  | "publicTransfer"
+  | "enablePublicCredits"
   | "wrap"
   | "unwrap"
 
@@ -327,6 +337,26 @@ const flows: Record<
     once: ["applyPending"],
     proofs: [],
   },
+}
+
+const rulesFor = (expected: Expected) => {
+  if (expected.flow === "payment" && expected.transparent) {
+    return {
+      version: 1 as const,
+      kinds: ["publicTransfer"],
+      once: ["publicTransfer"],
+      proofs: [],
+    } as const
+  }
+  if (expected.flow === "wrap" && expected.mode === "public") {
+    return {
+      version: 0 as const,
+      kinds: ["budget", "createAccount", "enablePublicCredits", "wrap"],
+      once: ["wrap"],
+      proofs: [],
+    } as const
+  }
+  return flows[expected.flow]
 }
 
 // How many of a kind a transaction may hold: a payment's three proof contexts, one of
@@ -395,7 +425,7 @@ function kindOf(instruction: InspectedInstruction, context: Context): Kind {
   const { program, data } = instruction
   const named = addresses(instruction)
   const derived = walletAccountsOf(expected)
-  const amount = "amount" in expected ? expected.amount : null
+  const amount = "amount" in expected ? (expected.amount ?? null) : null
   switch (program) {
     case programs.computeBudget:
       return "budget"
@@ -417,7 +447,7 @@ function kindOf(instruction: InspectedInstruction, context: Context): Kind {
         bump(context.closed, named[0])
         return "closeContext"
       }
-      if (!flows[expected.flow].proofs.includes(data[0])) {
+      if (!(rulesFor(expected).proofs as readonly number[]).includes(data[0])) {
         return refuse("instruction")
       }
       // A proof verified in the instruction writes nothing. One verified into a context
@@ -463,6 +493,26 @@ function kindOf(instruction: InspectedInstruction, context: Context): Kind {
       return "createAccount"
     }
     case programs.token2022: {
+      if (data[0] === TRANSFER_CHECKED) {
+        if (
+          expected.flow !== "payment" ||
+          !expected.transparent ||
+          data.length !== 10 ||
+          data[9] !== 6
+        )
+          return refuse("transfer")
+        if (named[0] !== expected.sender) return refuse("sender")
+        if (named[1] !== expected.mint) return refuse("mint")
+        if (named[2] !== expected.destination) return refuse("destination")
+        if (named.length !== 4 || named[3] !== wallet) return refuse("transfer")
+        if (
+          expected.amount === undefined ||
+          expected.amount <= BigInt(0) ||
+          u64At(data, 1) !== expected.amount
+        )
+          return refuse("amount")
+        return "publicTransfer"
+      }
       if (data[0] === REALLOCATE) {
         // Room for the confidential extension on the wallet's own account.
         if (
@@ -526,6 +576,11 @@ function confidentialKind(
     return "transfer"
   }
   if (!derived) return refuse("instruction")
+  if (data[1] === confidential.enableNonConfidentialCredits) {
+    if (!sameList(named, [derived.confidential, wallet]))
+      return refuse("instruction")
+    return "enablePublicCredits"
+  }
   const accounts = {
     [confidential.configureAccount]: [
       derived.confidential,
@@ -644,7 +699,7 @@ export function checkFlow(tx: InspectedTransaction, expected: Expected) {
   const wallet =
     expected.flow === "payment" ? expected.wallet : expected.accounts.wallet
   checkAllowed(tx, wallet)
-  const rules = flows[expected.flow]
+  const rules = rulesFor(expected)
   if (rules.version !== undefined && tx.version !== rules.version) {
     refuse("version")
   }
@@ -665,7 +720,7 @@ export function checkFlow(tx: InspectedTransaction, expected: Expected) {
   const counts = new Map<Kind, number>()
   for (const instruction of tx.instructions) {
     const kind = kindOf(instruction, context)
-    if (!rules.kinds.includes(kind)) refuseKind(kind)
+    if (!(rules.kinds as readonly Kind[]).includes(kind)) refuseKind(kind)
     counts.set(kind, (counts.get(kind) ?? 0) + 1)
   }
   for (const [kind, count] of counts) {

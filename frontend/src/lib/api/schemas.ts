@@ -64,6 +64,7 @@ export type ConfirmRequest = z.infer<typeof confirmRequestSchema>
 export const wrapRequestSchema = z.strictObject({
   company_wallet: key,
   amount: unitsSchema,
+  mode: z.enum(["confidential", "public"]).optional(),
   setup: z
     .strictObject({
       pubkey_validity_proof: z.base64(),
@@ -76,7 +77,10 @@ export type WrapRequest = z.infer<typeof wrapRequestSchema>
 export const wrapPreparedSchema = preparedSchema.extend({
   destination: z.string().min(1),
   mint: z.string().min(1),
-  deposit_state: z.literal("pending_after_confirmation"),
+  deposit_state: z.enum([
+    "pending_after_confirmation",
+    "public_after_confirmation",
+  ]),
 })
 export type WrapPrepared = z.infer<typeof wrapPreparedSchema>
 
@@ -146,6 +150,7 @@ export function isKnownRunPaymentStatus(
 export const runStatuses = ["prepared", "partial_failure", "completed"] as const
 
 const runPaymentSchema = z.object({
+  transparent: z.boolean().optional(),
   position: z.number().int().nonnegative(),
   destination: z.string().min(1),
   attempt: z.number().int().nonnegative(),

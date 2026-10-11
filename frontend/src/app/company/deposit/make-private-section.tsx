@@ -13,6 +13,7 @@ import { WhoCanSee } from "@/components/ui/who-can-see"
 import { describeUsdc } from "@/lib/deposit/controller"
 import { otherTabMessage } from "@/lib/flow-lock"
 import { canRelease, heldMessage, releaseWarning } from "@/lib/deposit/held"
+import type { FundingMode } from "@/lib/deposit/make-private"
 import { confirmedMessage, doneMessage } from "@/lib/deposit/message"
 import { formatBaseUnits, toBaseUnits } from "@/lib/deposit/schema"
 import { makePrivateSteps, stepLabels } from "@/lib/deposit/types"
@@ -23,16 +24,19 @@ import {
   useCompanyBalance,
   useMakePrivate,
   usePublicUsdc,
+  usePublicReserve,
   type MakePrivateState,
 } from "@/lib/queries/deposit"
 import { cn } from "@/lib/utils"
 import { StorageNotice } from "@/components/app/storage-notice"
 import { StepHeading } from "./receive-section"
+import { FundingChoice } from "./funding-choice"
 
 export function MakePrivateSection({ wallet }: { wallet: string }) {
   const id = useId()
   const flow = useMakePrivate(wallet, useViewerScope())
   const publicUsdc = usePublicUsdc(wallet)
+  const publicReserve = usePublicReserve(wallet)
   const privateBalance = useCompanyBalance(wallet)
   const auditors = useAuditors()
   // Unknown (loading or failed) reads as the longer sentence, never "no auditor".
@@ -44,6 +48,9 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
   const statusRef = useRef<HTMLDivElement>(null)
   const alertRef = useRef<HTMLDivElement>(null)
   const { state } = flow
+  const [chosenMode, setMode] = useState<FundingMode>(
+    state.mode ?? "confidential",
+  )
 
   // Clear the field once a deposit goes through (not when only a pending credit
   // was applied: that leaves what the person typed alone), during render rather
@@ -83,6 +90,7 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
   // A failed attempt is resolved with Try again or Dismiss, and a held one with a check
   // or a release, not by starting another.
   const locked = isBusy || state.status === "failed" || state.status === "held"
+  const mode = locked ? (state.mode ?? "confidential") : chosenMode
   const publicUnits = publicUsdc.data ? BigInt(publicUsdc.data) : undefined
   const hasFunds = publicUnits !== undefined && publicUnits > 0n
   const pending = privateBalance.data ? BigInt(privateBalance.data.pending) : 0n
@@ -96,7 +104,7 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
       return
     }
     setError(undefined)
-    void flow.deposit(parsed.units.toString())
+    void flow.deposit(parsed.units.toString(), mode)
   }
 
   return (
@@ -106,10 +114,10 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
       className="rounded-xl border border-line bg-surface p-5"
     >
       <StepHeading n={2} id="private-heading">
-        Make it private
+        Fund payments
       </StepHeading>
 
-      <dl className="mt-4 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2">
+      <dl className="mt-4 grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-3">
         <Balance
           label="Public USDC"
           hint="Visible to anyone on-chain"
@@ -141,7 +149,19 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
             />
           }
         />
+        <Balance
+          label="Public payment reserve"
+          hint="Available for transparent payments"
+          units={publicReserve.data}
+          isPending={publicReserve.isPending}
+          isError={publicReserve.isError}
+          errorText="Couldn't load the reserve."
+          staleText="Couldn't refresh. This may be out of date."
+          onRetry={() => publicReserve.refetch()}
+        />
       </dl>
+
+      <FundingChoice mode={mode} onChange={setMode} disabled={locked} />
 
       {pending > 0n && !locked && (
         <div className="mt-4 flex flex-col gap-3 rounded-lg border border-line bg-surface-subtle p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -165,9 +185,9 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
       >
         <Eye aria-hidden className="mt-0.5 size-4 shrink-0" />
         <span>
-          This step is public. The amount you move to private USDC is visible
-          on-chain. What you pay out afterwards is encrypted on-chain; Cadence
-          and your auditors can read it.
+          {mode === "public"
+            ? "This reserve and payments made from it are visible to anyone on-chain. It can fund payments when confidential transfers are unavailable. Existing private funds stay encrypted."
+            : "This step is public. The amount you move to private USDC is visible on-chain. Confidential payments are encrypted; Cadence and your auditors can read them. During a privacy-service outage, payments use your public reserve and their amounts are visible."}
         </span>
       </p>
 
@@ -175,7 +195,9 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
 
       <form onSubmit={submit} noValidate className="mt-5 space-y-3">
         <label htmlFor={`${id}-amount`} className="text-ui font-medium">
-          Amount to make private (USDC)
+          {mode === "public"
+            ? "Amount to add to reserve (USDC)"
+            : "Amount to make private (USDC)"}
         </label>
         <div className="flex gap-2">
           <div className="relative min-w-0 flex-1">
@@ -230,7 +252,11 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
             {isBusy && (
               <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
             )}
-            {isBusy ? "Working…" : "Make private"}
+            {isBusy
+              ? "Working…"
+              : mode === "public"
+                ? "Fund public reserve"
+                : "Make private"}
           </button>
         </div>
         {error && (
@@ -263,7 +289,7 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
         className="outline-none"
       >
         {state.status === "running" && (
-          <Progress step={state.step} className="mt-4" />
+          <Progress step={state.step} mode={state.mode} className="mt-4" />
         )}
         {state.status === "checking" && <Checking otherTab={state.otherTab} />}
         {state.status === "other-tab" && <OtherTab onDismiss={flow.dismiss} />}
@@ -283,7 +309,12 @@ export function MakePrivateSection({ wallet }: { wallet: string }) {
 
       {state.status === "failed" && (
         <>
-          <Progress step={state.step} failed className="mt-4" />
+          <Progress
+            step={state.step}
+            mode={state.mode}
+            failed
+            className="mt-4"
+          />
           <Failure ref={alertRef} flow={flow} state={state} />
         </>
       )}
@@ -362,15 +393,20 @@ function Progress({
   step,
   failed = false,
   className,
+  mode = "confidential",
 }: {
   step: (typeof makePrivateSteps)[number]
   failed?: boolean
   className?: string
+  mode?: FundingMode
 }) {
-  const current = makePrivateSteps.indexOf(step)
+  const steps = makePrivateSteps.filter(
+    (name) => mode !== "public" || name !== "applying",
+  )
+  const current = steps.indexOf(step)
   return (
     <ol className={cn("space-y-1.5", className)}>
-      {makePrivateSteps.map((name, index) => {
+      {steps.map((name, index) => {
         const state =
           index < current
             ? "done"
@@ -456,7 +492,9 @@ function Done({
   return (
     <p className="mt-4 flex items-start gap-2 text-ui/normal text-ink">
       <Check aria-hidden className="mt-0.5 size-4 shrink-0 text-success-dot" />
-      {doneMessage(state)}
+      {state.mode === "public" && state.amount
+        ? `${describeUsdc(state.amount)} is now in your public payment reserve. This balance and payments from it are visible on-chain.`
+        : doneMessage(state)}
     </p>
   )
 }
@@ -478,7 +516,9 @@ function Resolved({
     <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 text-ui/normal text-ink">
       <p className="min-w-0">
         {state.outcome === "confirmed"
-          ? confirmedMessage(state.earlierPending)
+          ? state.mode === "public"
+            ? "Your last public deposit went through. The reserve is available for transparent payments."
+            : confirmedMessage(state.earlierPending)
           : resolvedText[state.outcome]}
       </p>
       <button

@@ -73,3 +73,7 @@
   execute SQL directly bypass the migration-version registry and cannot detect
   duplicate filename timestamps. Fetch main and check its migration versions
   before choosing a new one; keep fixture migration order consistent with it.
+
+- Adding receipt metadata also requires updating the indexer schema allowlist.
+  Run its disposable-database test after receipt migrations, and include the
+  rejected column in assertion failures so a schema mismatch is easy to trace.

@@ -7,7 +7,7 @@ use crate::{
     error::AppError,
     keys::vault,
     run_store::{Payment, Status},
-    solana::{batch, confidential, token_wrap::Addresses, v1, wrap},
+    solana::{batch, confidential, fallback, token_wrap::Addresses, v1, wrap},
     wrap_store::request_id,
 };
 use axum::{
@@ -321,55 +321,75 @@ async fn build(
         });
         account_errors.push(error);
     }
-    let sizes = confidential::CONTEXT_SIZES;
-    let (a, b, c) = tokio::try_join!(
-        state.rpc.minimum_balance(sizes[0]),
-        state.rpc.minimum_balance(sizes[1]),
-        state.rpc.minimum_balance(sizes[2])
-    )?;
+    let transparent = !fallback::available(&state.rpc).await?;
     let (blockhash, height) = state.rpc.blockhash_with_expiry().await?;
-    let permit = service
-        .proof_slots
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| AppError::TransferRateLimited)?;
-    let client = service
-        .keys
-        .connect()
-        .await
-        .map_err(|_| AppError::TransferUnavailable("key_storage_unavailable"))?;
-    let key = vault::load(
-        &client,
-        &wallet,
-        &sender,
-        user,
-        "generate confidential run proofs",
-    )
-    .await
-    .map_err(|_| AppError::TransferUnavailable("key_storage_unavailable"))?;
-    drop(client);
-    let results = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        batch::build(
-            &confidential::Transfer {
+    let results = if transparent {
+        fallback::build_batch(
+            &fallback::Transfer {
                 mint,
                 sender,
                 recipient: sender,
                 wallet,
-                mint_account: &mint_account,
                 sender_account: &source,
                 recipient_account: &source,
                 amount: 0,
-                aes_key: &aes,
                 blockhash,
-                context_rent: [a, b, c],
             },
             &payments,
-            &key,
         )
-    })
-    .await
-    .map_err(|_| AppError::Transaction("proof worker failed"))?;
+    } else {
+        let sizes = confidential::CONTEXT_SIZES;
+        let (a, b, c) = tokio::try_join!(
+            state.rpc.minimum_balance(sizes[0]),
+            state.rpc.minimum_balance(sizes[1]),
+            state.rpc.minimum_balance(sizes[2])
+        )?;
+        let permit = service
+            .proof_slots
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| AppError::TransferRateLimited)?;
+        let client = service
+            .keys
+            .connect()
+            .await
+            .map_err(|_| AppError::TransferUnavailable("key_storage_unavailable"))?;
+        let key = vault::load(
+            &client,
+            &wallet,
+            &sender,
+            user,
+            "generate confidential run proofs",
+        )
+        .await
+        .map_err(|_| AppError::TransferUnavailable("key_storage_unavailable"))?;
+        drop(client);
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            batch::build(
+                &confidential::Transfer {
+                    mint,
+                    sender,
+                    recipient: sender,
+                    wallet,
+                    mint_account: &mint_account,
+                    sender_account: &source,
+                    recipient_account: &source,
+                    amount: 0,
+                    aes_key: &aes,
+                    blockhash,
+                    context_rent: [a, b, c],
+                },
+                &payments,
+                &key,
+            )
+        })
+        .await
+        .map_err(|_| AppError::Transaction("proof worker failed"))?
+        .into_iter()
+        .map(|result| result.map_err(proof_error))
+        .collect()
+    };
     let height = i64::try_from(height).map_err(|_| AppError::RpcUnavailable)?;
     entries
         .into_iter()
@@ -387,6 +407,7 @@ async fn build(
                 signature: None,
                 slot: None,
                 error: None,
+                transparent,
             };
             match result {
                 Ok(tx) => {
@@ -399,7 +420,7 @@ async fn build(
                 Err(error) => {
                     p.error = Some(
                         account_error
-                            .unwrap_or_else(|| runs::error_code(&proof_error(error)))
+                            .unwrap_or_else(|| runs::error_code(&error))
                             .into(),
                     );
                 }

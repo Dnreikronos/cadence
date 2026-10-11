@@ -12,9 +12,11 @@ import {
   sentApplyMessage,
   type Resume,
   type SentApply,
+  type FundingMode,
 } from "./make-private"
 import {
   doneToast,
+  describeUsdc,
   earlierFromBalance,
   earlierFromRecord,
   earlierToRecord,
@@ -27,7 +29,7 @@ export const SUBMISSION_KIND = "wrap"
 
 const noLease: Lease = { release: () => {} }
 
-export type MakePrivateState =
+export type MakePrivateState = (
   | { status: "idle" }
   | { status: "running"; step: MakePrivateStep }
   // Finding out what became of a wrap sent earlier, before anything new is sent.
@@ -68,6 +70,7 @@ export type MakePrivateState =
       signature: string | null
       earlierPending?: EarlierPending
     }
+) & { mode?: FundingMode }
 
 export type Deps = {
   wallet: string
@@ -110,6 +113,7 @@ export class MakePrivateController {
   private abort: AbortController | null = null
   // The amount of the deposit in flight, for a retry of its wrap step.
   private amount = ""
+  private mode: FundingMode = "confidential"
   // What was already pending when that deposit started.
   private earlierPending: EarlierPending = null
   private record: Submission | null = null
@@ -121,9 +125,15 @@ export class MakePrivateController {
   constructor(private readonly getDeps: () => Deps) {
     // A wrap sent earlier and not seen through blocks a new one until it is.
     const earlier = this.getDeps().store.read()
+    if (earlier?.wallet === this.getDeps().wallet) {
+      this.mode = earlier.funding_mode ?? "confidential"
+    }
     this.state =
       earlier && earlier.wallet === this.getDeps().wallet
-        ? { status: "checking" }
+        ? {
+            status: "checking",
+            ...(this.mode === "public" ? { mode: this.mode } : {}),
+          }
         : { status: "idle" }
   }
 
@@ -157,13 +167,20 @@ export class MakePrivateController {
     )
   }
 
-  deposit(units: string) {
+  deposit(units: string, mode: FundingMode = "confidential") {
+    if (!this.canChangeFunding()) return this.begin("wrap")
+    this.mode = mode
     this.amount = units
-    this.earlierPending = earlierFromBalance(this.getDeps().pendingUnits?.())
+    this.earlierPending =
+      mode === "public"
+        ? null
+        : earlierFromBalance(this.getDeps().pendingUnits?.())
     return this.begin("wrap")
   }
 
   applyPending() {
+    if (!this.canChangeFunding()) return
+    this.mode = "confidential"
     this.amount = ""
     this.earlierPending = undefined
     return this.begin("apply")
@@ -239,7 +256,11 @@ export class MakePrivateController {
         amount: this.amount || undefined,
         earlierPending: this.amount ? this.earlierPending : undefined,
       }
-      deps.toast(doneToast(done))
+      deps.toast(
+        this.mode === "public"
+          ? `${describeUsdc(this.amount)} added to your public payment reserve`
+          : doneToast(done),
+      )
       this.set({ status: "done", ...done })
     } catch {
       if (!this.live(generation) || abort.signal.aborted) return
@@ -344,8 +365,22 @@ export class MakePrivateController {
     ) {
       return
     }
-    this.state = state
+    this.state = {
+      ...state,
+      ...(this.mode === "public" ? { mode: this.mode } : {}),
+    }
     for (const listener of [...this.listeners]) listener()
+  }
+
+  private canChangeFunding() {
+    const { store, wallet } = this.getDeps()
+    return (
+      !this.running &&
+      this.state.status !== "checking" &&
+      this.state.status !== "held" &&
+      !this.sentApply &&
+      store.read()?.wallet !== wallet
+    )
   }
 
   private begin(from: "wrap" | "apply") {
@@ -477,6 +512,7 @@ export class MakePrivateController {
     try {
       await runMakePrivate({
         from,
+        mode: this.mode,
         amount: this.amount,
         wallet: deps.wallet,
         api: deps.api,
@@ -493,6 +529,7 @@ export class MakePrivateController {
             last_valid_block_height: wrap.last_valid_block_height,
             wallet: deps.wallet,
             earlier_pending: earlierToRecord(this.earlierPending),
+            ...(this.mode === "public" ? { funding_mode: this.mode } : {}),
             at: (deps.now ?? Date.now)(),
           })
           // A record that could not be kept stops the wrap before it is sent.
@@ -517,7 +554,11 @@ export class MakePrivateController {
         amount: this.amount || undefined,
         earlierPending: this.amount ? this.earlierPending : undefined,
       }
-      deps.toast(doneToast(done))
+      deps.toast(
+        this.mode === "public"
+          ? `${describeUsdc(this.amount)} added to your public payment reserve`
+          : doneToast(done),
+      )
       this.set({ status: "done", ...done })
     } catch (error) {
       if (!this.live(generation) || abort.signal.aborted) return
@@ -569,6 +610,7 @@ export class MakePrivateController {
         this.set({ status: "idle" })
         return
       }
+      this.mode = current.funding_mode ?? "confidential"
       const outcome = await reconcileWrap({
         record: current,
         api: deps.api,

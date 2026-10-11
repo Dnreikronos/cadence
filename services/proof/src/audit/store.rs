@@ -2,11 +2,11 @@ use crate::{
     database::{Database, Session},
     error::AppError,
     keys::vault,
-    solana::{reveal_risk, token_wrap::Addresses},
+    solana::{fallback, reveal_risk, token_wrap::Addresses},
 };
 use serde::Serialize;
 use tokio_postgres::Row;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 pub struct AuditStore {
     database: Database,
@@ -204,18 +204,30 @@ fn grant(row: Row) -> Grant {
 /// Decode an audited finalized receipt with its bound sender key and wrapped mint.
 /// Missing recipient metadata falls back to the destination address and a null ID.
 fn payment(row: Row) -> Result<Payment, AppError> {
-    let key = vault::key_from_row(&row).map_err(|_| AppError::AuditUnavailable)?;
     let sender = row
         .get::<_, &str>("sender")
         .parse()
         .map_err(|_| AppError::AuditUnavailable)?;
-    let amount = reveal_risk::sent_amount(
-        row.get("transaction"),
-        &sender,
-        &Addresses::for_usdc().wrapped_mint,
-        &key,
-    )
-    .map_err(|_| AppError::AuditUnavailable)?;
+    let public = fallback::transfer(row.get("transaction"));
+    let transparent = public.is_some();
+    let amount = if let Some(public) = public {
+        if public.sender != sender
+            || public.mint != Addresses::for_usdc().wrapped_mint
+            || public.destination.to_string() != row.get::<_, &str>("destination")
+        {
+            return Err(AppError::AuditUnavailable);
+        }
+        Zeroizing::new(public.amount)
+    } else {
+        let key = vault::key_from_row(&row).map_err(|_| AppError::AuditUnavailable)?;
+        reveal_risk::sent_amount(
+            row.get("transaction"),
+            &sender,
+            &Addresses::for_usdc().wrapped_mint,
+            &key,
+        )
+        .map_err(|_| AppError::AuditUnavailable)?
+    };
     Ok(Payment {
         payment_id: row.get("payment_id"),
         run_id: row.get("run_id"),
@@ -227,7 +239,7 @@ fn payment(row: Row) -> Result<Payment, AppError> {
         },
         amount: amount.to_string(),
         status: "confirmed",
-        transparent: false,
+        transparent,
         paid_at: row.get("paid_at"),
         signature: row.get("signature"),
     })

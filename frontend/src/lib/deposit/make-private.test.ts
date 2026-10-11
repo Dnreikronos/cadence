@@ -640,6 +640,66 @@ describe("failureMessage", () => {
   })
 })
 
+describe("public reserve funding", () => {
+  it("confirms one wrap and never applies confidential pending credits", async () => {
+    const { api, wallet, steps, confirmed, run } = setup()
+    api.wrap.prepare.mockResolvedValue({
+      ...prepared(
+        "a",
+        await mockAccountTransaction({
+          kind: "wrap",
+          wallet: COMPANY_WALLET,
+          n: 1,
+          amount: BigInt("2500000000"),
+          mode: "public",
+        }),
+      ),
+      destination: "dest",
+      mint: "mint",
+      deposit_state: "public_after_confirmation",
+    } as never)
+    await run({ mode: "public" })
+    expect(api.wrap.prepare).toHaveBeenCalledWith(
+      { company_wallet: COMPANY_WALLET, amount: "2500000000", mode: "public" },
+      { signal: undefined },
+    )
+    expect(wallet.submit).toHaveBeenCalledTimes(1)
+    expect(api.accounts.applyPending).not.toHaveBeenCalled()
+    expect(api.accounts.confirmApplyPending).not.toHaveBeenCalled()
+    expect(steps).toEqual(["preparing", "signing", "confirming"])
+    expect(confirmed).toEqual(["wrap"])
+  })
+
+  it("does not sign a confidential wrap returned for a public request", async () => {
+    const { run, wallet } = setup()
+    const error = await failure(run({ mode: "public" }))
+    expect(error).toMatchObject({ step: "preparing", resume: "wrap" })
+    expect(wallet.submit).not.toHaveBeenCalled()
+  })
+
+  it("does not sign a public wrap returned for a private request", async () => {
+    const { api, run, wallet } = setup()
+    api.wrap.prepare.mockResolvedValue({
+      ...prepared(
+        "a",
+        await mockAccountTransaction({
+          kind: "wrap",
+          wallet: COMPANY_WALLET,
+          n: 1,
+          amount: BigInt("2500000000"),
+          mode: "public",
+        }),
+      ),
+      destination: "dest",
+      mint: "mint",
+      deposit_state: "public_after_confirmation",
+    } as never)
+    const error = await failure(run())
+    expect(error).toMatchObject({ step: "preparing", resume: "wrap" })
+    expect(wallet.submit).not.toHaveBeenCalled()
+  })
+})
+
 describe("canRetry", () => {
   it("is false for anything that is not a flow failure", () => {
     expect(canRetry(new Error("x"))).toBe(false)

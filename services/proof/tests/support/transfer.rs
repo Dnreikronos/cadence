@@ -122,6 +122,9 @@ async fn rpc(State(state): State<Arc<Backend>>, Json(request): Json<Value>) -> J
             json!({"value": {"blockhash": solana_hash::Hash::new_from_array([5;32]).to_string(), "lastValidBlockHeight": 500}})
         }
         "getMinimumBalanceForRentExemption" => json!(3_062_400),
+        "getMultipleAccounts" => {
+            json!({"context":{"slot":100}, "value":request["params"][0].as_array().unwrap().iter().map(|address| state.accounts.lock().unwrap().get(address.as_str().unwrap()).cloned().unwrap_or(Value::Null)).collect::<Vec<_>>()})
+        }
         "getAccountInfo" => {
             json!({"value": state.accounts.lock().unwrap().get(request["params"][0].as_str().unwrap()).cloned().unwrap_or(Value::Null)})
         }
@@ -172,6 +175,7 @@ impl Harness {
             include_str!("../../../../supabase/migrations/20261003000001_runs.sql"),
             include_str!("../../../../supabase/migrations/20261004000000_unwrap_requests.sql"),
             include_str!("../../../../supabase/migrations/20261010000000_chain_indexer.sql"),
+            include_str!("../../../../supabase/migrations/20261010000003_transparent_fallback.sql"),
         ] {
             admin.batch_execute(migration).await.unwrap();
         }
@@ -215,6 +219,10 @@ impl Harness {
         }
         {
             let mut accounts = backend.accounts.lock().unwrap();
+            accounts.insert(
+                solana_zk_elgamal_proof_interface::ID.to_string(),
+                json!({"executable":true}),
+            );
             accounts.insert(addresses.wrapped_mint.to_string(), encoded(&mint));
             accounts.insert(sender.to_string(), encoded(&source));
             accounts.insert(

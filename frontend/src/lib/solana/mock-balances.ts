@@ -8,9 +8,24 @@ export async function mockPublicUsdc(
   wallet: string,
   signal?: AbortSignal,
 ): Promise<string> {
+  return mockBalance(wallet, "publicUsdc", signal)
+}
+
+export function mockPublicReserve(
+  wallet: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  return mockBalance(wallet, "publicReserve", signal)
+}
+
+async function mockBalance(
+  wallet: string,
+  balance: "publicUsdc" | "publicReserve",
+  signal?: AbortSignal,
+): Promise<string> {
   await new Promise((resolve) => setTimeout(resolve, 250))
   signal?.throwIfAborted()
   // The real read fails with a TypeError when it cannot reach the node.
   if (scenarios.has("rpc-down")) throw new TypeError("Failed to fetch")
-  return wallet === COMPANY_WALLET ? db.publicUsdc.toString() : "0"
+  return wallet === COMPANY_WALLET ? db[balance].toString() : "0"
 }

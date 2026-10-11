@@ -16,6 +16,7 @@ import type { MakePrivateStep } from "./types"
 // is already pending available; "check" starts nothing, because a transaction
 // went out and its outcome is unknown: sending another could deposit twice.
 export type Resume = "wrap" | "apply" | "check"
+export type FundingMode = "confidential" | "public"
 
 // An apply that went out and was not seen through: what the screen needs to ask the
 // service about it again without preparing anything. `signature` is null when `submit`
@@ -42,6 +43,7 @@ export class MakePrivateError extends Error {
 type Input = {
   // Start at the apply step when the wrapped amount is already pending.
   from: "wrap" | "apply"
+  mode?: FundingMode
   // Integer base units. Unused when `from` is "apply".
   amount: string
   wallet: string
@@ -71,6 +73,7 @@ const lostForGood = new Set(["transaction_failed"])
 // never sent twice.
 export async function runMakePrivate({
   from,
+  mode = "confidential",
   amount,
   wallet,
   api,
@@ -90,12 +93,26 @@ export async function runMakePrivate({
   let applyPast = false
   let applySignature: string | null = null
   try {
+    if (mode === "public" && from === "apply") {
+      throw new ApiError(400, "invalid_request")
+    }
     if (!wrapped) {
       onStep(step)
       const prepared = await api.wrap.prepare(
-        { company_wallet: wallet, amount },
+        {
+          company_wallet: wallet,
+          amount,
+          ...(mode === "public" ? { mode } : {}),
+        },
         { signal },
       )
+      const expectedState =
+        mode === "public"
+          ? "public_after_confirmation"
+          : "pending_after_confirmation"
+      if (prepared.deposit_state !== expectedState) {
+        throw new ApiError(502, "invalid_response")
+      }
       await signAndConfirm(
         prepared,
         (signature) =>
@@ -122,12 +139,14 @@ export async function runMakePrivate({
         {
           signal,
           onSubmitted,
-          check: flowCheck(wallet, { flow: "wrap", amount }),
+          check: flowCheck(wallet, { flow: "wrap", amount, mode }),
         },
       )
       wrapped = true
       onConfirmed?.("wrap")
     }
+
+    if (mode === "public") return
 
     step = "applying"
     onStep(step)

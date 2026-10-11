@@ -26,6 +26,7 @@ export type MockRequest = {
   kind: string
   wallet: string
   amount?: bigint
+  fundingMode?: "confidential" | "public"
   // How many confirm calls have asked so far.
   polls: number
   receipt?: Receipt
@@ -213,6 +214,7 @@ function seed() {
     // Plain USDC in the company wallet, read from the chain rather than the service.
     // A confirmed wrap spends it.
     publicUsdc: 12_500_000_000n,
+    publicReserve: 0n,
     me: { available: 8_000_000_000n, pending: 0n } as Ledger,
     payments,
     amounts: new Map<string, bigint>([

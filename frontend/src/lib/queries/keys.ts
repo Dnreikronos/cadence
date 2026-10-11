@@ -48,6 +48,8 @@ export const queryKeys = {
     all: deposit,
     publicUsdc: (wallet: string) =>
       [...deposit, "public-usdc", wallet] as const,
+    publicReserve: (wallet: string) =>
+      [...deposit, "public-reserve", wallet] as const,
   },
   payments: {
     all: payments,

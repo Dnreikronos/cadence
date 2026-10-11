@@ -56,6 +56,9 @@ repo's paths instead of these.
 
 - [Payment runs](dev/RUNS_API.md) — #55. The implemented `POST /runs`, `/runs/:id/confirm`, `/runs/:id/retry` and `GET /runs/:id`: ordered batches of token-account payments, receipts per position, retries that never start a second run. Its shape differs from the one the web app's client and mock use.
 
+- [Transparent payment fallback](dev/FALLBACK.md) — #60. Availability detection,
+  public wrapped-token reserves, stored privacy modes, deployment and verification.
+
 ## Web app
 
 - [Cadence web app](../frontend/README.md) — how to run it, the screens and the routes they use, the API client and its mock, the demo viewer, the wallet, queries, activation, the route guard and sign-in, and deploys.

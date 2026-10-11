@@ -222,6 +222,7 @@ async fn authenticated_withdrawal_warns_before_preparing_and_confirms_immutably(
         .unwrap();
     let runs = RunStore::new(receipts_url.as_str()).unwrap();
     let mut payment = Payment {
+        transparent: false,
         position: 0,
         destination: source.to_string(),
         attempt: 0,
@@ -262,6 +263,7 @@ async fn authenticated_withdrawal_warns_before_preparing_and_confirms_immutably(
         .get(0);
     assert!(stamped);
     let mut retry_payment = Payment {
+        transparent: false,
         position: 0,
         destination: source.to_string(),
         attempt: 0,

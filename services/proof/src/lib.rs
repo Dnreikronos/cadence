@@ -31,6 +31,7 @@ pub mod solana {
     pub mod batch;
     pub mod client;
     pub mod confidential;
+    pub mod fallback;
     pub mod reveal_risk;
     pub mod token_client;
     pub mod token_wrap;

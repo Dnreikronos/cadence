@@ -13,7 +13,7 @@ use cadence_proof::{
     database::{Database, Session},
     keys::{elgamal::ViewingKey, vault},
     routes::audit::Service,
-    solana::{confidential, token_wrap::Addresses, v1},
+    solana::{confidential, fallback, token_wrap::Addresses, v1},
 };
 use serde_json::{json, Value};
 use solana_address::Address;
@@ -97,6 +97,7 @@ impl Harness {
                 "../../../../supabase/migrations/20261010000001_indexer_scan_checkpoints.sql"
             ),
             include_str!("../../../../supabase/migrations/20261010000002_auditor_grants.sql"),
+            include_str!("../../../../supabase/migrations/20261010000003_transparent_fallback.sql"),
         ] {
             admin.batch_execute(migration).await.unwrap();
         }
@@ -180,6 +181,21 @@ impl Harness {
     /// Store a signed proof fixture as a payroll or standalone receipt with an enrolled key.
     /// Status and slot are synthesized; no transaction is submitted to Solana.
     pub async fn receipt(&self, user: &str, index: u8, run: bool, status: &str) -> String {
+        self.receipt_mode(user, index, run, status, false).await
+    }
+
+    pub async fn transparent_receipt(&self, user: &str, index: u8, run: bool) -> String {
+        self.receipt_mode(user, index, run, "finalized", true).await
+    }
+
+    async fn receipt_mode(
+        &self,
+        user: &str,
+        index: u8,
+        run: bool,
+        status: &str,
+        transparent: bool,
+    ) -> String {
         let mut f = fixture::Fixture::new();
         let sender = Address::new_from_array([index; 32]);
         let signature = f.wallet.sign_message(&ViewingKey::signing_message(&sender));
@@ -195,21 +211,48 @@ impl Harness {
             .unwrap();
         config.elgamal_pubkey = f.key.public_key().into();
         config.available_balance = f.key.public_key().encrypt(fixture::BALANCE).into();
-        let mut keys = self.url.clone();
-        keys.set_username("cadence_key_service").unwrap();
-        keys.set_password(Some("audit59-test-only")).unwrap();
-        let key_session = Database::new(keys.as_str(), "cadence_key_service")
-            .unwrap()
-            .connect()
-            .await
-            .unwrap();
-        vault::enroll(&key_session, &f.wallet.pubkey(), &sender, &signature)
-            .await
-            .unwrap();
+        if !transparent {
+            let mut keys = self.url.clone();
+            keys.set_username("cadence_key_service").unwrap();
+            keys.set_password(Some("audit59-test-only")).unwrap();
+            let key_session = Database::new(keys.as_str(), "cadence_key_service")
+                .unwrap()
+                .connect()
+                .await
+                .unwrap();
+            vault::enroll(&key_session, &f.wallet.pubkey(), &sender, &signature)
+                .await
+                .unwrap();
+        }
+        if transparent {
+            let mut source = StateWithExtensionsMut::<Account>::unpack(&mut f.sender.data).unwrap();
+            source.base.amount = fixture::BALANCE;
+            source.pack_base();
+            let mut destination =
+                StateWithExtensionsMut::<Account>::unpack(&mut f.recipient.data).unwrap();
+            destination
+                .get_extension_mut::<ConfidentialTransferAccount>()
+                .unwrap()
+                .allow_non_confidential_credits = true.into();
+        }
         let mut transfer = f.transfer();
         transfer.mint = Addresses::for_usdc().wrapped_mint;
         transfer.sender = sender;
-        let tx = confidential::build(&transfer, &f.key).unwrap();
+        let tx = if transparent {
+            fallback::build(&fallback::Transfer {
+                mint: transfer.mint,
+                sender,
+                recipient: transfer.recipient,
+                wallet: transfer.wallet,
+                sender_account: transfer.sender_account,
+                recipient_account: transfer.recipient_account,
+                amount: transfer.amount,
+                blockhash: transfer.blockhash,
+            })
+            .unwrap()
+        } else {
+            confidential::build(&transfer, &f.key).unwrap()
+        };
         let encoded = STANDARD.encode(v1::serialize(&tx).unwrap());
         let chain_signature = f.wallet.sign_message(&tx.message.serialize()).to_string();
         let id = format!("{index:064x}");
@@ -228,9 +271,9 @@ impl Harness {
         let slot = signature.as_ref().map(|_| 42_i64);
         if run {
             let run_id: String = self.admin.query_one("INSERT INTO public.runs (user_id, company_wallet, sender) VALUES ($1::text::uuid, $2, $3) RETURNING id::text", &[&user, &wallet, &source]).await.unwrap().get(0);
-            self.admin.execute("INSERT INTO public.payments (run_id,position,destination,request_id,transaction,last_valid_block_height,status,signature,slot,payment_id) VALUES ($1::text::uuid,0,$2,$3,$4,500,$5,$6,$7,$8::text::uuid)", &[&run_id, &destination, &id, &encoded, &status, &signature, &slot, &payment_id]).await.unwrap();
+            self.admin.execute("INSERT INTO public.payments (run_id,position,destination,request_id,transaction,last_valid_block_height,status,signature,slot,payment_id,transparent) VALUES ($1::text::uuid,0,$2,$3,$4,500,$5,$6,$7,$8::text::uuid,$9)", &[&run_id, &destination, &id, &encoded, &status, &signature, &slot, &payment_id, &transparent]).await.unwrap();
         } else {
-            self.admin.execute("INSERT INTO public.transfer_requests (id,user_id,company_wallet,sender,destination,transaction,last_valid_block_height,status,signature,slot,payment_id) VALUES ($1,$2::text::uuid,$3,$4,$5,$6,500,$7,$8,$9,$10::text::uuid)", &[&id, &user, &wallet, &source, &destination, &encoded, &status, &signature, &slot, &payment_id]).await.unwrap();
+            self.admin.execute("INSERT INTO public.transfer_requests (id,user_id,company_wallet,sender,destination,transaction,last_valid_block_height,status,signature,slot,payment_id,transparent) VALUES ($1,$2::text::uuid,$3,$4,$5,$6,500,$7,$8,$9,$10::text::uuid,$11)", &[&id, &user, &wallet, &source, &destination, &encoded, &status, &signature, &slot, &payment_id, &transparent]).await.unwrap();
         }
         payment_id
     }

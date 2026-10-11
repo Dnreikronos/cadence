@@ -183,6 +183,7 @@ pub(super) async fn reconcile(
         signature: Some(value.into()),
         slot,
         error,
+        transparent: p.transparent,
     };
     state
         .service

@@ -47,6 +47,8 @@ struct WrapRequest {
     company_wallet: String,
     amount: String,
     setup: Option<wrap::Setup>,
+    #[serde(default)]
+    mode: wrap::FundingMode,
 }
 
 #[derive(Serialize)]
@@ -93,11 +95,12 @@ async fn prepare(
         &wallet,
         amount,
     )?;
-    let instructions = wrap::instructions(
+    let instructions = wrap::instructions_for_mode(
         &wallet,
         amount,
         destination_account.as_ref(),
         request.setup.as_ref(),
+        request.mode,
     )?;
     let (blockhash, last_valid_block_height) = state.rpc.blockhash_with_expiry().await?;
     let tx = v0::compile_unsigned(&instructions, &wallet, blockhash)?;
@@ -121,7 +124,7 @@ async fn prepare(
         mint: addresses.wrapped_mint.to_string(),
         recent_blockhash: blockhash.to_string(),
         last_valid_block_height,
-        deposit_state: "pending_after_confirmation",
+        deposit_state: request.mode.deposit_state(),
     }))
 }
 

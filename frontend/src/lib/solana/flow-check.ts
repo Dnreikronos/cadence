@@ -10,7 +10,12 @@ import {
 // wallet, never read from what the service answered.
 export type FlowRequest =
   // Integer base units, as the person entered them.
-  { flow: "wrap" | "unwrap"; amount: string } | { flow: "configure" | "apply" }
+  | {
+      flow: "wrap" | "unwrap"
+      amount: string
+      mode?: "confidential" | "public"
+    }
+  | { flow: "configure" | "apply" }
 
 export type TransactionCheck = (
   transaction: InspectedTransaction,
@@ -32,6 +37,7 @@ export function flowCheck(
       flow: request.flow,
       accounts,
       amount: BigInt(request.amount),
+      ...(request.flow === "wrap" ? { mode: request.mode } : {}),
     })
   }
 }

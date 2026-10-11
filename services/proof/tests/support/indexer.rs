@@ -186,6 +186,7 @@ impl Harness {
             include_str!(
                 "../../../../supabase/migrations/20261010000001_indexer_scan_checkpoints.sql"
             ),
+            include_str!("../../../../supabase/migrations/20261010000003_transparent_fallback.sql"),
         ] {
             db.batch_execute(migration).await.unwrap();
         }

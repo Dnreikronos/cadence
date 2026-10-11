@@ -34,6 +34,7 @@ pub struct Payment {
     pub signature: Option<String>,
     pub slot: Option<i64>,
     pub error: Option<String>,
+    pub transparent: bool,
 }
 pub struct Run {
     pub id: String,
@@ -76,9 +77,9 @@ impl RunStore {
         ).await.map_err(|_| unavailable())?.get(0);
         for p in payments {
             client.execute(
-                "INSERT INTO public.payments (run_id, position, destination, request_id, transaction, last_valid_block_height, status, error) \
-                 VALUES ($1::text::uuid,$2,$3,$4,$5,$6,$7,$8)",
-                &[&id, &p.position, &p.destination, &p.request_id, &p.transaction, &p.last_valid_block_height, &p.status.name(), &p.error],
+                "INSERT INTO public.payments (run_id, position, destination, request_id, transaction, last_valid_block_height, status, error, transparent) \
+                 VALUES ($1::text::uuid,$2,$3,$4,$5,$6,$7,$8,$9)",
+                &[&id, &p.position, &p.destination, &p.request_id, &p.transaction, &p.last_valid_block_height, &p.status.name(), &p.error, &p.transparent],
             ).await.map_err(|_| unavailable())?;
         }
         client
@@ -102,9 +103,9 @@ impl RunStore {
         for p in payments {
             let count = client.execute(
                 "UPDATE public.payments SET attempt = attempt + 1, request_id = $4, transaction = $5, last_valid_block_height = $6, \
-                 status = $7, error = $8, signature = NULL, slot = NULL, submitted_signature = NULL WHERE run_id = $1::text::uuid AND position = $2 AND attempt = $3 \
+                 status = $7, error = $8, transparent = $9, signature = NULL, slot = NULL, submitted_signature = NULL WHERE run_id = $1::text::uuid AND position = $2 AND attempt = $3 \
                  AND status IN ('failed','expired','preparation_failed')",
-                &[&id, &p.position, &p.attempt, &p.request_id, &p.transaction, &p.last_valid_block_height, &p.status.name(), &p.error],
+                &[&id, &p.position, &p.attempt, &p.request_id, &p.transaction, &p.last_valid_block_height, &p.status.name(), &p.error, &p.transparent],
             ).await.map_err(|_| unavailable())?;
             if count != 1 {
                 return Err(AppError::Conflict("payment_attempt_changed"));
@@ -213,5 +214,6 @@ fn payment(row: Row) -> Result<Payment, AppError> {
         signature: row.get("signature"),
         slot: row.get("slot"),
         error: row.get("error"),
+        transparent: row.get("transparent"),
     })
 }
