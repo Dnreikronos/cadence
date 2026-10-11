@@ -303,6 +303,7 @@ export function NewRunScreen({ viewer }: { viewer: ViewerScope }) {
                 made.request.payments.map((p, position) => [
                   position,
                   p.recipient,
+                  p.amount,
                 ]),
               ),
               lease,

@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react"
 import { PenLine, RotateCw } from "lucide-react"
+import { TransparentBadge } from "@/components/ui/transparent-badge"
 import { AvatarPerson } from "@/components/ui/avatar-person"
 import { buttonVariants } from "@/components/ui/button"
 import { ErrorState } from "@/components/ui/error-state"
@@ -113,6 +114,12 @@ export function RunProgress({
         )}
       </p>
 
+      {data.payments.some((payment) => payment.transparent) && (
+        <p className="text-ui/normal text-ink-muted">
+          Payments marked Transparent use your public reserve, and their amounts
+          are visible on-chain.
+        </p>
+      )}
       <ul className="overflow-hidden rounded-xl border border-line bg-surface">
         {rows.map(({ payment, key, person, row }) => {
           const name = people ? (person?.name ?? unknownPerson) : undefined
@@ -121,6 +128,7 @@ export function RunProgress({
             <PaymentRow
               key={key}
               name={name}
+              transparent={payment.transparent ?? false}
               status={
                 <RunStatusPill
                   status={row.status}
@@ -237,6 +245,7 @@ export function RunProgress({
               retryPeople.map(({ position, person }) => [
                 position,
                 person.tokenAccount,
+                person.amount ?? undefined,
               ]),
             ),
           )
@@ -280,6 +289,7 @@ function RowButton({
 
 function PaymentRow({
   name,
+  transparent,
   status,
   message,
   danger,
@@ -287,6 +297,7 @@ function PaymentRow({
   children,
 }: {
   name: string | undefined
+  transparent: boolean
   status: React.ReactNode
   message: string | null
   danger: boolean
@@ -314,7 +325,10 @@ function PaymentRow({
           </>
         )}
       </span>
-      <span className="flex flex-wrap items-center gap-1.5">{status}</span>
+      <span className="flex flex-wrap items-center gap-1.5">
+        {transparent && <TransparentBadge />}
+        {status}
+      </span>
       {children}
       {checking && (
         <p className="basis-full text-caption/normal text-ink-muted">

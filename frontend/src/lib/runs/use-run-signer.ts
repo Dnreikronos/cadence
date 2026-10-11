@@ -126,9 +126,18 @@ export function useRunSigner(viewer: Viewer) {
   const [approvals] = useState(() => new Map<string, Payees>())
   const approve = useCallback(
     (runId: string, payees: Payees) => {
+      const previous = approvals.get(runId) ?? nobody
       const merged = approvedPayees([
-        ...(approvals.get(runId) ?? []),
-        ...payees,
+        ...Array.from(
+          previous,
+          ([position, account]) =>
+            [position, account, previous.amounts.get(position)] as const,
+        ),
+        ...Array.from(
+          payees,
+          ([position, account]) =>
+            [position, account, payees.amounts.get(position)] as const,
+        ),
       ])
       approvals.set(runId, merged)
       return merged

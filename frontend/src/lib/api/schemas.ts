@@ -146,6 +146,7 @@ export function isKnownRunPaymentStatus(
 export const runStatuses = ["prepared", "partial_failure", "completed"] as const
 
 const runPaymentSchema = z.object({
+  transparent: z.boolean().optional(),
   position: z.number().int().nonnegative(),
   destination: z.string().min(1),
   attempt: z.number().int().nonnegative(),

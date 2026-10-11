@@ -11,6 +11,7 @@ import type { TransactionCheck } from "@/lib/solana/flow-check"
 import {
   UnexpectedTransactionError,
   checkConfidentialTransfer,
+  checkFlow,
 } from "@/lib/solana/inspect"
 import {
   ResponseMismatchError,
@@ -45,6 +46,7 @@ type SignAndConfirm = ((
     | "destination"
     | "position"
     | "request_id"
+    | "transparent"
   >,
   confirm: (signature: string) => Promise<Receipt>,
   onStep?: (step: SignStep) => void,
@@ -68,20 +70,28 @@ type SignChecked = (
 // `approvedPayees` makes one.
 export type Payees = ReadonlyMap<number, string> & {
   readonly approved: unique symbol
+  readonly amounts: ReadonlyMap<number, string>
 }
 
 // `[position, account]` pairs as the admin approved them, a later pair for a position
 // replacing an earlier one. An account approved for two positions approves nothing:
 // every payment of the run is then refused, unsent.
 export function approvedPayees(
-  entries: Iterable<readonly [number, string | null | undefined]>,
+  entries: Iterable<readonly [number, string | null | undefined, string?]>,
 ): Payees {
   const payees = new Map<number, string>()
-  for (const [position, account] of entries) {
-    if (account) payees.set(position, account)
+  const amounts = new Map<number, string>()
+  for (const [position, account, amount] of entries) {
+    if (account) {
+      payees.set(position, account)
+      if (amount === undefined) amounts.delete(position)
+      else amounts.set(position, amount)
+    }
   }
   const unique = new Set(payees.values()).size === payees.size
-  return (unique ? payees : new Map()) as ReadonlyMap<number, string> as Payees
+  return Object.assign(unique ? payees : new Map<number, string>(), {
+    amounts: unique ? amounts : new Map<number, string>(),
+  }) as unknown as Payees
 }
 
 // What a run's payments may do: move money in the wrapped mint from the company's account
@@ -123,12 +133,20 @@ export function checkedSign(
         ) {
           throw new UnexpectedTransactionError("destination")
         }
-        checkConfidentialTransfer(transaction, {
-          wallet,
-          sender,
-          destination,
-          mint,
-        })
+        const accounts = { wallet, sender, destination, mint }
+        if (prepared.transparent) {
+          const amount = payees.amounts.get(position)
+          if (!amount || !/^\d{1,20}$/.test(amount))
+            throw new UnexpectedTransactionError("amount")
+          checkFlow(transaction, {
+            flow: "payment",
+            ...accounts,
+            transparent: true,
+            amount: BigInt(amount),
+          })
+        } else {
+          checkConfidentialTransfer(transaction, accounts)
+        }
         passed.add(key)
       },
     })
