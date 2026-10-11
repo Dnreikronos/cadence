@@ -24,6 +24,7 @@ export const CREATE_ACCOUNT_WITH_SEED = 3
 // instruction's data has one fixed length (spl-token-2022 `confidential_transfer`
 // instruction data, with the proofs elsewhere).
 export const CONFIDENTIAL_TRANSFER_EXTENSION = 27
+export const TRANSFER_CHECKED = 12
 export const REALLOCATE = 29
 // `ExtensionType::ConfidentialTransferAccount`, the one extension a reallocate adds.
 export const CONFIDENTIAL_TRANSFER_ACCOUNT_EXTENSION = 5
@@ -33,8 +34,10 @@ export const confidential = {
   withdraw: 6,
   transfer: 7,
   applyPendingBalance: 8,
+  enableNonConfidentialCredits: 11,
 } as const
 export const confidentialDataLength: Record<number, number> = {
+  [confidential.enableNonConfidentialCredits]: 2,
   // Decryptable zero balance (36), max pending credits (u64), proof offset (i8).
   [confidential.configureAccount]: 2 + 36 + 8 + 1,
   // Amount (u64), decimals (u8).

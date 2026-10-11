@@ -26,6 +26,7 @@ import {
   CREATE_IDEMPOTENT,
   INSTRUCTIONS_SYSVAR,
   REALLOCATE,
+  TRANSFER_CHECKED,
   confidential,
   confidentialDataLength,
   programs,
@@ -282,6 +283,40 @@ export async function mockTransferTransaction({
   })
 }
 
+export function mockPublicTransferTransaction({
+  wallet,
+  source,
+  destination,
+  mint,
+  amount,
+  n,
+}: {
+  wallet: string
+  source: string
+  destination: string
+  mint: string
+  amount: bigint
+  n: number
+}) {
+  return mockTransaction({
+    version: 1,
+    wallet,
+    n,
+    instructions: [
+      {
+        program: programs.token2022,
+        accounts: [
+          [source, true, false],
+          [mint, false, false],
+          [destination, true, false],
+          [wallet, false, true],
+        ],
+        data: Uint8Array.from([TRANSFER_CHECKED, ...u64(amount), 6]),
+      },
+    ],
+  })
+}
+
 // ---- The wallet's own accounts: wrap, unwrap, configure, apply pending -----------
 
 // `CreateIdempotent` of the wallet's associated account, paid by the wallet.
@@ -374,12 +409,14 @@ export async function mockAccountTransaction({
   n,
   amount = BigInt(1),
   setup = false,
+  mode = "confidential",
 }: {
   kind: "wrap" | "unwrap" | "configure" | "apply-pending"
   wallet: string
   n: number
   amount?: bigint
   setup?: boolean
+  mode?: "confidential" | "public"
 }) {
   const own = await walletAccounts(wallet)
   const tokenWrapStep = (
@@ -392,7 +429,26 @@ export async function mockAccountTransaction({
   })
   const instructions: Record<typeof kind, MockInstruction[]> = {
     wrap: [
-      ...(setup ? configureSteps(own, n) : []),
+      ...(mode === "public"
+        ? [
+            createAccount(
+              wallet,
+              own.confidential,
+              own.wrappedMint,
+              programs.token2022,
+            ),
+            confidentialStep(
+              confidential.enableNonConfidentialCredits,
+              [
+                [own.confidential, true, false],
+                [wallet, false, true],
+              ],
+              n,
+            ),
+          ]
+        : setup
+          ? configureSteps(own, n)
+          : []),
       tokenWrapStep(tokenWrap.wrap, [
         [own.confidential, true, false],
         [own.wrappedMint, true, false],
@@ -453,6 +509,13 @@ export async function mockAccountTransaction({
         n,
       ),
     ],
+  }
+  if (kind === "wrap" && mode === "public") {
+    instructions.wrap = instructions.wrap.filter(
+      (ix) =>
+        ix.data[0] !== CONFIDENTIAL_TRANSFER_EXTENSION ||
+        ix.data[1] !== confidential.deposit,
+    )
   }
   return mockTransaction({
     version: kind === "wrap" ? 0 : 1,
