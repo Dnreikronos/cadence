@@ -173,13 +173,17 @@ function prepared(
 async function preparedFor(
   kind: Parameters<typeof mockAccountTransaction>[0]["kind"],
   wallet: string,
-  { amount, setup }: { amount?: bigint; setup?: boolean } = {},
+  {
+    amount,
+    setup,
+    mode,
+  }: { amount?: bigint; setup?: boolean; mode?: s.WrapRequest["mode"] } = {},
 ) {
   const n = nextId()
   return prepared(
     wallet,
     n,
-    await mockAccountTransaction({ kind, wallet, n, amount, setup }),
+    await mockAccountTransaction({ kind, wallet, n, amount, setup, mode }),
     kind === "wrap" ? 0 : 1,
   )
 }
@@ -209,8 +213,9 @@ function remember(
   p: ReturnType<typeof prepared>,
   wallet: string,
   amount?: bigint,
+  fundingMode?: s.WrapRequest["mode"],
 ) {
-  db.requests.set(p.request_id, { kind, wallet, amount, polls: 0 })
+  db.requests.set(p.request_id, { kind, wallet, amount, fundingMode, polls: 0 })
 }
 
 const notFoundCode: Record<string, string> = {
@@ -253,7 +258,12 @@ async function confirmHandler(request: Request, kind: string) {
   }
   record.polls += 1
   if (stillPending(record.polls)) return fail(409, "transaction_not_finalized")
-  const rejected = applyEffect(kind, record.wallet, record.amount)
+  const rejected = applyEffect(
+    kind,
+    record.wallet,
+    record.amount,
+    record.fundingMode === "public",
+  )
   if (rejected) return rejected
   record.receipt = receiptFor(data.request_id, data.signature)
   recordOnMockChain(data.signature, "finalized")
@@ -268,11 +278,17 @@ async function confirmHandler(request: Request, kind: string) {
 
 // What a finalized transaction does to the ledgers. A ledger never goes
 // negative: a confirm that would is refused, and changes nothing.
-function applyEffect(kind: string, wallet: string, amount?: bigint) {
+function applyEffect(
+  kind: string,
+  wallet: string,
+  amount?: bigint,
+  publicFunding = false,
+) {
   if (kind === "wrap" && amount) {
     if (amount > db.publicUsdc) return fail(409, "insufficient_usdc")
     db.publicUsdc -= amount
-    db.company.pending += amount
+    if (publicFunding) db.publicReserve += amount
+    else db.company.pending += amount
   } else if (kind === "accounts/configure" && wallet !== COMPANY_WALLET) {
     // Configuring needs a linked wallet, so it links one too. The company's
     // wallet is not the recipient whose status is reported.
@@ -577,7 +593,13 @@ export const handlers = [
     if (stopped) return stopped
     const { data, error } = await parse(request, s.wrapRequestSchema)
     if (error) return error
-    if (scenarios.has("setup-required") && !data.setup) {
+    if (data.mode === "public" && data.setup)
+      return fail(400, "invalid_request")
+    if (
+      data.mode !== "public" &&
+      scenarios.has("setup-required") &&
+      !data.setup
+    ) {
       return fail(409, "confidential_setup_required")
     }
     // Like the real service, refuse what the USDC account cannot cover. Confirm
@@ -588,13 +610,23 @@ export const handlers = [
     const p = await preparedFor("wrap", data.company_wallet, {
       amount: BigInt(data.amount),
       setup: Boolean(data.setup),
+      mode: data.mode,
     })
-    remember("wrap", p, data.company_wallet, BigInt(data.amount))
+    remember(
+      "wrap",
+      p,
+      data.company_wallet,
+      BigInt(data.amount),
+      data.mode ?? "confidential",
+    )
     return HttpResponse.json({
       ...p,
       destination: (await walletAccounts(data.company_wallet)).confidential,
       mint: MINT,
-      deposit_state: "pending_after_confirmation",
+      deposit_state:
+        data.mode === "public"
+          ? "public_after_confirmation"
+          : "pending_after_confirmation",
     })
   }),
   http.post(at("/wrap/confirm"), ({ request }) =>

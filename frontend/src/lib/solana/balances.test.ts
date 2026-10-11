@@ -27,6 +27,8 @@ vi.mock("@/lib/api/mode", () => ({
 import {
   associatedTokenAddress,
   fetchPublicUsdc,
+  fetchPublicReserve,
+  readPublicReserve,
   readPublicUsdc,
   usdcMints,
 } from "./balances"
@@ -136,6 +138,33 @@ describe("fetchPublicUsdc", () => {
   it("refuses a wallet that is not an address", async () => {
     const { rpc } = rpcAnswering(null)
     await expect(fetchPublicUsdc("not-an-address", { rpc })).rejects.toThrow()
+  })
+})
+
+describe("public wrapped reserve", () => {
+  it("reads the Token-2022 ATA and only its public amount", async () => {
+    const { rpc, sent } = rpcAnswering(tokenAccount("1500000"))
+    await expect(fetchPublicReserve(OWNER, { rpc })).resolves.toBe("1500000")
+    expect(sent[0].params[0]).toBe(
+      "AizofrS3mU7qNqticdrAprkuLKFz2XiSCDDxX9C6Mn8C",
+    )
+  })
+
+  it("funds the reserve without creating a confidential pending credit", async () => {
+    scenarios.set("instant", "setup-required")
+    const pending = db.company.pending
+    const prepared = await api.wrap.prepare({
+      company_wallet: COMPANY_WALLET,
+      amount: "1500000",
+      mode: "public",
+    })
+    expect(prepared.deposit_state).toBe("public_after_confirmation")
+    await expect(readPublicReserve(OWNER)).resolves.toBe("0")
+    await api.wrap.confirm({ request_id: prepared.request_id, signature: SIG })
+    await api.wrap.confirm({ request_id: prepared.request_id, signature: SIG })
+    await expect(readPublicReserve(OWNER)).resolves.toBe("1500000")
+    expect(db.company.pending).toBe(pending)
+    expect(db.publicUsdc).toBe(12_498_500_000n)
   })
 })
 

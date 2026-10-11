@@ -3,6 +3,8 @@ import { apiConfig } from "@/lib/api/mode"
 import { sumUnits } from "@/lib/money"
 import { associatedTokenAddress, usdcMints } from "./accounts"
 import { cluster } from "./cluster"
+import { programs } from "./programs"
+import { wrapAccounts } from "./accounts"
 import { createRpc } from "./rpc"
 
 export { associatedTokenAddress, usdcMints } from "./accounts"
@@ -25,6 +27,7 @@ export type TokenBalanceRpc = {
 type Options = {
   rpc?: TokenBalanceRpc
   mint?: string
+  tokenProgram?: string
   signal?: AbortSignal
 }
 
@@ -44,15 +47,45 @@ function amountOf(data: unknown): string {
 // base units. "0" when the account does not exist yet.
 export async function fetchPublicUsdc(
   wallet: string,
-  { rpc = createRpc(), mint = usdcMints[cluster.name], signal }: Options = {},
+  {
+    rpc = createRpc(),
+    mint = usdcMints[cluster.name],
+    tokenProgram = programs.token,
+    signal,
+  }: Options = {},
 ): Promise<string> {
   const { value } = await rpc
-    .getAccountInfo(await associatedTokenAddress(wallet, mint), {
+    .getAccountInfo(await associatedTokenAddress(wallet, mint, tokenProgram), {
       encoding: "jsonParsed",
     })
     .send({ abortSignal: signal })
   // Reads the digits through the same strict check as every other amount.
   return value ? sumUnits([amountOf(value.data)]) : "0"
+}
+
+export async function fetchPublicReserve(
+  wallet: string,
+  options: Options = {},
+): Promise<string> {
+  return fetchPublicUsdc(wallet, {
+    ...options,
+    mint: (await wrapAccounts()).wrappedMint,
+    tokenProgram: programs.token2022,
+  })
+}
+
+export async function readPublicReserve(
+  wallet: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (
+    process.env.NEXT_PUBLIC_API_MODE !== "real" &&
+    apiConfig.mode === "mock"
+  ) {
+    const { mockPublicReserve } = await import("./mock-balances")
+    return mockPublicReserve(wallet, signal)
+  }
+  return fetchPublicReserve(wallet, { signal })
 }
 
 // The public USDC balance of a wallet: the chain in real mode, a stand-in in

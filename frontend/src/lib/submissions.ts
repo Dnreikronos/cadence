@@ -27,6 +27,7 @@ export const submissionSchema = z.object({
     .string()
     .regex(/^\d{1,20}$/)
     .optional(),
+  funding_mode: z.enum(["confidential", "public"]).optional(),
 })
 export type Submission = z.infer<typeof submissionSchema>
 

@@ -1,4 +1,13 @@
-import { clearMock, navLink, setMock, sidebar, signInAs } from "./support/demo"
+import { viewerScopeId } from "../src/lib/submissions"
+import { DEMO_COMPANY_ID } from "../src/lib/demo/viewer"
+import {
+  clearMock,
+  countFetches,
+  navLink,
+  setMock,
+  sidebar,
+  signInAs,
+} from "./support/demo"
 import { expect, test } from "./support/test"
 import type { Page } from "@playwright/test"
 
@@ -10,9 +19,9 @@ async function openDeposit(page: Page) {
   await navLink(page, "Deposit").click()
   await expect(page).toHaveURL("/company/deposit")
   await expect(
-    page.getByRole("heading", { name: "Make it private" }),
+    page.getByRole("heading", { name: "Fund payments" }),
   ).toBeVisible()
-  const section = page.getByRole("region", { name: "Make it private" })
+  const section = page.getByRole("region", { name: "Fund payments" })
   await expect(section).toContainText("$12,500.00")
   return section
 }
@@ -35,6 +44,74 @@ test("making USDC private moves the balances and updates the sidebar", async ({
   await expect(section.getByLabel("Amount to make private (USDC)")).toHaveValue(
     "",
   )
+})
+
+test("public reserve funding needs no activation and stops after the wrap", async ({
+  page,
+}) => {
+  const wraps = await countFetches(page, "/wrap")
+  const applies = await countFetches(page, "/accounts/apply-pending")
+  const section = await openDeposit(page)
+  await setMock(page, "instant", "setup-required")
+  await section.getByRole("radio", { name: /Public payment reserve/ }).check()
+  await expect(section).toContainText("visible to anyone on-chain")
+  await section.getByLabel("Amount to add to reserve (USDC)").fill("1000")
+  await section.getByRole("button", { name: "Fund public reserve" }).click()
+  await expect(section.getByRole("status")).toContainText(
+    "1000 USDC is now in your public payment reserve",
+  )
+  await expect(section).toContainText("$11,500.00")
+  const reserve = section
+    .locator("dl > div")
+    .filter({ has: page.getByText("Public payment reserve", { exact: true }) })
+  await expect(reserve).toContainText("$1,000.00")
+  await expect(sidebar(page)).toContainText("$84,000.00")
+  expect(await wraps()).toBe(1)
+  expect(await applies()).toBe(0)
+})
+
+test("an unknown public deposit stays locked after a reload", async ({
+  page,
+  watch,
+}) => {
+  watch.allowStatus(404, /\/wrap\/confirm$/)
+  const wraps = await countFetches(page, "/wrap")
+  await openDeposit(page)
+  const storageKey = `cadence:submission:wrap:${viewerScopeId({ email: "ana@solaris.test", company: "Solaris", companyId: DEMO_COMPANY_ID })}`
+  await page.evaluate(
+    (key) =>
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          kind: "wrap",
+          request_id: "a".repeat(64),
+          signature: "5SigMockSignature1111111111111111111111111111",
+          last_valid_block_height: 1,
+          wallet: "4egAZELoLKWqJwHwAwaZwS2su9rewh7is3ukCagHnSQ5",
+          at: Date.now() - 120_000,
+          funding_mode: "public",
+        }),
+      ),
+    storageKey,
+  )
+  await page.reload()
+  const section = page.getByRole("region", { name: "Fund payments" })
+  await expect(section).toContainText("checked both balances", {
+    timeout: 15000,
+  })
+  await expect(
+    section.getByRole("radio", { name: /Public payment reserve/ }),
+  ).toBeChecked()
+  await expect(
+    section.getByRole("radio", { name: /Private balance/ }),
+  ).toBeDisabled()
+  await expect(
+    section.getByRole("button", { name: "Fund public reserve" }),
+  ).toHaveAttribute("aria-disabled", "true")
+  expect(await wraps()).toBe(0)
+  expect(
+    await page.evaluate((key) => localStorage.getItem(key), storageKey),
+  ).not.toBeNull()
 })
 
 test("asks for a valid amount before sending anything", async ({ page }) => {

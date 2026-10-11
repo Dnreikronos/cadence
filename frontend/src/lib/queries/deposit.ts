@@ -18,7 +18,8 @@ import {
   SUBMISSION_KIND,
   type Deps,
 } from "@/lib/deposit/controller"
-import { readPublicUsdc } from "@/lib/solana/balances"
+import type { FundingMode } from "@/lib/deposit/make-private"
+import { readPublicUsdc, readPublicReserve } from "@/lib/solana/balances"
 import { submissionStore } from "@/lib/submissions"
 import { useSignAndConfirm } from "@/lib/wallet/context"
 import { invalidateBalances } from "./invalidate"
@@ -35,6 +36,15 @@ export function usePublicUsdc(wallet: string) {
   return useQuery({
     queryKey: queryKeys.deposit.publicUsdc(wallet),
     queryFn: ({ signal }) => readPublicUsdc(wallet, signal),
+    enabled: wallet !== "",
+    refetchInterval: 20_000,
+  })
+}
+
+export function usePublicReserve(wallet: string) {
+  return useQuery({
+    queryKey: queryKeys.deposit.publicReserve(wallet),
+    queryFn: ({ signal }) => readPublicReserve(wallet, signal),
     enabled: wallet !== "",
     refetchInterval: 20_000,
   })
@@ -114,7 +124,8 @@ export function useMakePrivate(wallet: string, viewer: ViewerScope) {
   return {
     state,
     // `units` is an integer base-unit string, already validated.
-    deposit: (units: string) => controller.deposit(units),
+    deposit: (units: string, mode?: FundingMode) =>
+      controller.deposit(units, mode),
     applyPending: () => controller.applyPending(),
     retry: () => controller.retry(),
     check: () => controller.check(),

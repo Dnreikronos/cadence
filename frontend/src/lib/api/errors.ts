@@ -112,6 +112,12 @@ const messages: Record<string, string> = {
   wrap_rate_limited: "Too many deposits at once. Wait a moment.",
   internal_error: "Something went wrong on our side. Try again.",
   insufficient_usdc: "There isn't enough USDC for that.",
+  insufficient_public_balance:
+    "Fund your public payment reserve from Deposit before trying again.",
+  non_confidential_credits_disabled:
+    "The recipient's account doesn't accept public payments.",
+  token_account_frozen:
+    "This token account is frozen and can't send or receive payments.",
   wrap_already_confirmed: "This deposit was already confirmed.",
   invalid_wallet: "That wallet address isn't valid.",
   invalid_account: "That account isn't valid.",

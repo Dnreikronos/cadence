@@ -15,7 +15,7 @@ export default function DepositPage() {
       <PageHeader
         eyebrow="Company"
         title="Deposit"
-        description="Fund your company with USDC, then make it private to pay people."
+        description="Fund private payments or keep a public reserve for service outages."
       />
       <DepositScreen />
     </div>

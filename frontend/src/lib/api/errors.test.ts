@@ -41,6 +41,9 @@ describe("messageFor", () => {
 
   const newCodes = [
     "insufficient_usdc",
+    "insufficient_public_balance",
+    "non_confidential_credits_disabled",
+    "token_account_frozen",
     "wrap_already_confirmed",
     "invalid_wallet",
     "invalid_account",

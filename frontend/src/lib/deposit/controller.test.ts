@@ -1507,3 +1507,108 @@ describe("MakePrivateController: releasing a hold on a stale view", () => {
     expect(storeB.read()).not.toBeNull()
   })
 })
+
+const publicWrapBytes = await mockAccountTransaction({
+  kind: "wrap",
+  wallet: COMPANY_WALLET,
+  n: 1,
+  amount: BigInt(1_000_000),
+  mode: "public",
+})
+
+describe("public reserve controller", () => {
+  const publicPrepared = {
+    ...prepared("a", publicWrapBytes),
+    destination: "dest",
+    mint: "mint",
+    deposit_state: "public_after_confirmation" as const,
+  }
+
+  it("retains the original mode and amount while another funding action is blocked", async () => {
+    const held = gate()
+    const test = setup({
+      signAndConfirm: async (_p, confirm, onStep) => {
+        onStep?.("signing")
+        await held.wait()
+        return confirm(SIG)
+      },
+    })
+    test.api.wrap.prepare.mockResolvedValue(publicPrepared as never)
+    const running = test.controller.deposit("1000000", "public")
+    await Promise.resolve()
+    await test.controller.deposit("9000000")
+    await test.controller.applyPending()
+    held.release()
+    await running
+    expect(test.api.wrap.prepare).toHaveBeenCalledTimes(1)
+    expect(test.api.accounts.applyPending).not.toHaveBeenCalled()
+    expect(test.controller.getState()).toMatchObject({
+      status: "done",
+      mode: "public",
+      amount: "1000000",
+    })
+    expect(test.toast).toHaveBeenCalledWith(
+      "1 USDC added to your public payment reserve",
+    )
+    expect(test.refresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("remembers public funding across uncertain submission and reload", async () => {
+    const test = setup()
+    test.api.wrap.prepare.mockResolvedValue(publicPrepared as never)
+    test.api.wrap.confirm.mockRejectedValue(new ConfirmTimeoutError(SIG))
+    await test.controller.deposit("1000000", "public")
+    expect(test.saved()).toMatchObject({
+      funding_mode: "public",
+      signature: SIG,
+    })
+    await test.controller.deposit("2000000")
+    expect(test.api.wrap.prepare).toHaveBeenCalledTimes(1)
+    const revisited = test.revisit()
+    expect(revisited.getState()).toMatchObject({
+      status: "checking",
+      mode: "public",
+    })
+    test.api.wrap.confirm.mockRejectedValue(
+      new ApiError(503, "rpc_unavailable"),
+    )
+    await revisited.check()
+    expect(revisited.getState()).toMatchObject({
+      status: "held",
+      mode: "public",
+    })
+    await revisited.deposit("2000000")
+    await revisited.applyPending()
+    expect(test.api.wrap.prepare).toHaveBeenCalledTimes(1)
+    expect(test.saved()).toMatchObject({ funding_mode: "public" })
+    test.api.wrap.confirm.mockResolvedValue(receipt("a"))
+    await revisited.check()
+    expect(revisited.getState()).toMatchObject({
+      status: "resolved",
+      mode: "public",
+      outcome: "confirmed",
+    })
+    expect(test.api.accounts.applyPending).not.toHaveBeenCalled()
+    expect(test.saved()).toBeNull()
+  })
+
+  it("retries a refused public prepare in the same mode", async () => {
+    const test = setup()
+    test.api.wrap.prepare.mockRejectedValueOnce(
+      new ApiError(503, "rpc_unavailable"),
+    )
+    test.api.wrap.prepare.mockResolvedValue(publicPrepared as never)
+    await test.controller.deposit("1000000", "public")
+    expect(test.controller.getState()).toMatchObject({
+      status: "failed",
+      mode: "public",
+      retryable: true,
+    })
+    await test.controller.retry()
+    expect(test.api.wrap.prepare).toHaveBeenLastCalledWith(
+      { company_wallet: COMPANY_WALLET, amount: "1000000", mode: "public" },
+      expect.anything(),
+    )
+    expect(test.api.accounts.applyPending).not.toHaveBeenCalled()
+  })
+})
