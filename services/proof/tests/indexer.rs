@@ -315,9 +315,11 @@ async fn backfill_subscriptions_events_permissions_and_restart() {
         "kind",
         "scan_head",
         "scan_before",
+        "transparent",
     ];
     for row in h.db.query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name IN ('runs','payments','payment_attempts','wrap_requests','transfer_requests','unwrap_requests','payment_events','indexer_cursors')",&[]).await.unwrap() {
-        assert!(allowed.contains(&row.get::<_,&str>(0)));
+        let column = row.get::<_, &str>(0);
+        assert!(allowed.contains(&column), "unexpected receipt column {column}");
     }
     let events =
         h.db.query(
