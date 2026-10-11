@@ -11,6 +11,10 @@ async fn main() -> Result<(), AppError> {
     let rpc = Arc::new(RpcClient::new(config.rpc_url.clone(), config.rpc_timeout)?);
     let wrap_store = WrapStore::from_env()?.map(Arc::new);
     let transfer = Service::from_env()?.map(Arc::new);
+    if transfer.is_some() {
+        let available = cadence_proof::solana::fallback::available(&rpc).await?;
+        eprintln!("ZK proof program available: {available}");
+    }
     let audit = cadence_proof::routes::audit::Service::from_env()?.map(Arc::new);
     let cors = cadence_proof::cors::from_env()?;
     let indexer = Indexer::from_env(

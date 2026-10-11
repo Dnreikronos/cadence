@@ -104,6 +104,17 @@ fn transfer_amount(
     sender: bool,
 ) -> Result<Zeroizing<u64>, AppError> {
     let invalid = || AppError::TransferUnavailable("reveal_history_unavailable");
+    if let Some(public) = super::fallback::transfer(encoded) {
+        let expected = if sender {
+            public.sender
+        } else {
+            public.destination
+        };
+        if expected != *account || public.mint != *mint {
+            return Err(invalid());
+        }
+        return Ok(Zeroizing::new(public.amount));
+    }
     let bytes = STANDARD.decode(encoded).map_err(|_| invalid())?;
     let tx: VersionedTransaction = wincode::deserialize(&bytes).map_err(|_| invalid())?;
     let VersionedMessage::V1(message) = tx.message else {
