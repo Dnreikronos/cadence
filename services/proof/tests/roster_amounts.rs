@@ -47,6 +47,22 @@ async fn roster_amounts_remain_encrypted_and_require_attributed_company_access()
     let (secret_id, ciphertext, secrets) = stored(&h.admin).await;
     assert!(!ciphertext.contains(ORIGINAL));
     expect_write(&app, PERSON, Some("test-user"), UPDATED, StatusCode::OK).await;
+    let before = h.audit_count().await;
+    let (status, saved) = request(
+        &app,
+        Method::POST,
+        &format!("/company/people/{}/amount", PERSON.to_uppercase()),
+        Some("test-user"),
+        Some(json!({"amount":format!("0{UPDATED}")})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved, json!({"person_id":PERSON,"amount":UPDATED}));
+    assert_eq!(
+        h.audit_count().await,
+        before,
+        "writes must not decrypt stored amounts"
+    );
     let (updated_id, updated_ciphertext, updated_secrets) = stored(&h.admin).await;
     assert_eq!(secret_id, updated_id);
     assert_eq!(

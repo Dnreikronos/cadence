@@ -94,6 +94,13 @@ pub async fn expect_write(
     )
     .await;
     assert_eq!(status, expected, "{body}");
+    if status == StatusCode::OK {
+        let person_id = uuid::Uuid::parse_str(person).unwrap().to_string();
+        assert_eq!(
+            body,
+            serde_json::json!({"person_id":person_id,"amount":amount})
+        );
+    }
     body
 }
 
