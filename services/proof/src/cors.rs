@@ -1,6 +1,6 @@
 use crate::error::AppError;
 use axum::http::{
-    header::{AUTHORIZATION, CONTENT_TYPE},
+    header::{AUTHORIZATION, CONTENT_TYPE, RETRY_AFTER},
     HeaderValue, Method,
 };
 use std::time::Duration;
@@ -14,8 +14,9 @@ pub fn from_env() -> Result<CorsLayer, AppError> {
 pub fn policy(configured: Option<&str>) -> Result<CorsLayer, AppError> {
     let configured = Some(configured.unwrap_or("*"));
     let base = CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST])
+        .allow_methods([Method::GET, Method::POST, Method::PUT])
         .allow_headers([CONTENT_TYPE, AUTHORIZATION])
+        .expose_headers([RETRY_AFTER])
         .max_age(Duration::from_secs(600));
     if configured.is_some_and(|value| value.trim() == "*") {
         return Ok(base.allow_origin(tower_http::cors::Any));

@@ -23,7 +23,23 @@ use spl_token_2022_interface::{
 use support::Harness;
 use tower::ServiceExt;
 
-async fn request(app: &Router, path: &str, body: Option<Value>) -> (StatusCode, Value) {
+async fn request(app: &Router, path: &str, mut body: Option<Value>) -> (StatusCode, Value) {
+    if path == "/runs" {
+        if let Some(body) = body.as_mut().and_then(Value::as_object_mut) {
+            static KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+            body.entry("idempotency_key").or_insert_with(|| {
+                json!(format!(
+                    "63000000-0000-4000-8000-{:012x}",
+                    KEY.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                ))
+            });
+        }
+    }
+    if path == "/runs" || path == "/transfer" || path.ends_with("/retry") {
+        if let Some(body) = body.as_mut().and_then(Value::as_object_mut) {
+            body.entry("allow_transparent").or_insert(json!(true));
+        }
+    }
     let builder = if body.is_some() {
         Request::post(path)
     } else {
@@ -123,6 +139,10 @@ async fn proof_outage_completes_public_payroll_and_preserves_retry_privacy() {
     h.backend.accounts.lock().unwrap().insert(fallback::DISABLE.to_string(),json!({"owner":"Feature111111111111111111111111111111111111","executable":false,"data":[STANDARD.encode(feature),"base64"]}));
     h.backend.calls.lock().unwrap().clear();
     let retry = format!("/runs/{}/retry", initial["run_id"].as_str().unwrap());
+    let (status, denied) = request(&app, &retry, Some(json!({"aes_key":h.request()["aes_key"],"allow_transparent":false,"payments":[{"position":0,"amount":"1000000"}]}))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(denied, json!({"error":"transparent_consent_required"}));
+    assert_eq!(h.audit_count().await, 1);
     let (status, rebuilt) = request(&app,&retry,Some(json!({"aes_key":h.request()["aes_key"],"payments":[{"position":0,"amount":"1000000"}]}))).await;
     assert_eq!(status, StatusCode::OK, "{rebuilt}");
     assert_eq!(rebuilt["payments"][0]["transparent"], true);
@@ -206,6 +226,11 @@ async fn proof_outage_completes_public_payroll_and_preserves_retry_privacy() {
             && p.get("transaction").is_none()));
     assert_eq!(h.audit_count().await, 1);
 
+    let mut denied_body = h.request();
+    denied_body["allow_transparent"] = json!(false);
+    let (status, denied) = request(&app, "/transfer", Some(denied_body)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(denied, json!({"error":"transparent_consent_required"}));
     let (status, standalone) = request(&app, "/transfer", Some(h.request())).await;
     assert_eq!(status, StatusCode::OK, "{standalone}");
     assert_eq!(standalone["transparent"], true);

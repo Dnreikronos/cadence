@@ -7,6 +7,7 @@ pub enum Kind {
     Wrap,
     Transfer,
     Unwrap,
+    Account,
 }
 impl Kind {
     pub fn name(self) -> &'static str {
@@ -15,6 +16,7 @@ impl Kind {
             Self::Wrap => "wrap",
             Self::Transfer => "transfer",
             Self::Unwrap => "unwrap",
+            Self::Account => "account",
         }
     }
     fn table(self) -> &'static str {
@@ -23,6 +25,7 @@ impl Kind {
             Self::Wrap => "wrap_requests",
             Self::Transfer => "transfer_requests",
             Self::Unwrap => "unwrap_requests",
+            Self::Account => "account_requests",
         }
     }
 }
@@ -71,7 +74,8 @@ impl Store {
              FROM public.payments p JOIN public.runs r ON r.id=p.run_id WHERE p.status='prepared' \
              UNION ALL SELECT 'wrap',id,company_wallet,transaction,submitted_signature,last_valid_block_height FROM public.wrap_requests WHERE status='prepared' \
              UNION ALL SELECT 'transfer',id,company_wallet,transaction,submitted_signature,last_valid_block_height FROM public.transfer_requests WHERE status='prepared' \
-             UNION ALL SELECT 'unwrap',id,wallet,transaction,submitted_signature,last_valid_block_height FROM public.unwrap_requests WHERE status='prepared') pending \
+             UNION ALL SELECT 'unwrap',id,wallet,transaction,submitted_signature,last_valid_block_height FROM public.unwrap_requests WHERE status='prepared' \
+             UNION ALL SELECT 'account',id,wallet,transaction,submitted_signature,last_valid_block_height FROM public.account_requests WHERE status='prepared') pending \
              WHERE ($1::text IS NULL OR id=$1) AND ($2::text IS NULL OR wallet=$2) AND ($3::bigint IS NULL OR last_valid_block_height >= $3)",
             &[&id, &wallet, &minimum_expiry],
         ).await.map_err(|_| AppError::StorageUnavailable)?;
@@ -83,6 +87,7 @@ impl Store {
                         "wrap" => Kind::Wrap,
                         "transfer" => Kind::Transfer,
                         "unwrap" => Kind::Unwrap,
+                        "account" => Kind::Account,
                         _ => return Err(AppError::StorageUnavailable),
                     },
                     id: row
@@ -116,6 +121,7 @@ impl Store {
         let slot = i64::try_from(slot).map_err(|_| AppError::RpcUnavailable)?;
         let status = if failed { "failed" } else { "finalized" };
         let sql = match p.kind {
+            Kind::Account => "UPDATE public.account_requests SET status=$2,signature=$3,slot=$4,submitted_signature=$3 WHERE id=$1 AND status='prepared' AND (submitted_signature IS NULL OR submitted_signature=$3)".into(),
             Kind::Run => "UPDATE public.payments SET status=$2,signature=$3,slot=$4,error=CASE WHEN $2='failed' THEN 'transaction_failed' ELSE NULL END \
                           WHERE request_id=$1 AND status='prepared' AND (submitted_signature IS NULL OR submitted_signature=$3)".into(),
             kind => format!("UPDATE public.{} SET status=$2,signature=$3,slot=$4 WHERE id=$1 AND status='prepared' AND (submitted_signature IS NULL OR submitted_signature=$3)", kind.table()),

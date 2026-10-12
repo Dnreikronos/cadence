@@ -37,7 +37,7 @@ async fn allowed_preflight_and_error_response_carry_cors_headers() {
     );
     assert_eq!(
         preflight.headers()[ACCESS_CONTROL_ALLOW_METHODS],
-        "GET,POST"
+        "GET,POST,PUT"
     );
     assert_eq!(
         preflight.headers()[ACCESS_CONTROL_ALLOW_HEADERS],
@@ -60,6 +60,10 @@ async fn allowed_preflight_and_error_response_carry_cors_headers() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response.headers()[ACCESS_CONTROL_EXPOSE_HEADERS],
+        "retry-after"
+    );
     assert_eq!(
         response.headers()[ACCESS_CONTROL_ALLOW_ORIGIN],
         "https://app.example.com"

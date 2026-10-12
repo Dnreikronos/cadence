@@ -9,12 +9,12 @@ use crate::{
     solana::{client::RpcClient, token_wrap::Addresses},
 };
 use axum::{
-    extract::{DefaultBodyLimit, Path, State},
+    extract::{rejection::QueryRejection, DefaultBodyLimit, Path, Query, State},
     http::HeaderMap,
     routing::{get, post},
     Json, Router,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use solana_address::Address;
 use std::{collections::HashSet, str::FromStr, sync::Arc};
 
@@ -46,11 +46,22 @@ impl RunState {
 pub fn router(rpc: Arc<RpcClient>, service: Option<Arc<Service>>) -> Router {
     let limits = Arc::new(Limits::new());
     Router::new()
-        .route("/runs", post(runs_prepare::prepare))
+        .route("/runs", post(runs_prepare::prepare).get(list))
+        .route("/runs/by-key/{key}", get(recover_key))
         .route("/runs/{id}", get(status))
+        .route("/runs/{id}/prepared", get(recover))
         .route("/runs/{id}/confirm", post(runs_confirm::confirm))
         .route("/runs/{id}/retry", post(runs_prepare::retry))
         .layer(DefaultBodyLimit::max(32768))
+        .layer(axum::middleware::map_response(
+            |mut response: axum::response::Response| async move {
+                response.headers_mut().insert(
+                    axum::http::header::CACHE_CONTROL,
+                    axum::http::HeaderValue::from_static("no-store"),
+                );
+                response
+            },
+        ))
         .layer(axum::middleware::from_fn_with_state(
             limits.clone(),
             wrap_limits::enforce_transfer,
@@ -60,6 +71,61 @@ pub fn router(rpc: Arc<RpcClient>, service: Option<Arc<Service>>) -> Router {
             service,
             limits,
         })
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PageQuery {
+    limit: Option<i32>,
+    cursor: Option<String>,
+}
+#[derive(Serialize)]
+struct RunPage {
+    items: Vec<RunResponse>,
+    next_cursor: Option<String>,
+}
+async fn list(
+    State(state): State<RunState>,
+    headers: HeaderMap,
+    query: Result<Query<PageQuery>, QueryRejection>,
+) -> Result<Json<RunPage>, AppError> {
+    let Query(query) = query.map_err(|_| AppError::BadRequest("invalid_request"))?;
+    let limit = query.limit.unwrap_or(20);
+    if !(1..=100).contains(&limit) {
+        return Err(AppError::BadRequest("invalid_request"));
+    }
+    if let Some(cursor) = &query.cursor {
+        valid_id(cursor)?;
+    }
+    let (service, user) = state.authenticate(&headers).await?;
+    let (runs, next_cursor) = service
+        .runs
+        .list(&user, limit, query.cursor.as_deref())
+        .await?;
+    Ok(Json(RunPage {
+        items: runs.into_iter().map(|run| response(run, false)).collect(),
+        next_cursor,
+    }))
+}
+async fn recover(
+    State(state): State<RunState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<RunResponse>, AppError> {
+    valid_id(&id)?;
+    let (service, user) = state.authenticate(&headers).await?;
+    Ok(Json(response(service.runs.get(&user, &id).await?, true)))
+}
+async fn recover_key(
+    State(state): State<RunState>,
+    Path(key): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<RunResponse>, AppError> {
+    valid_id(&key)?;
+    let (service, user) = state.authenticate(&headers).await?;
+    Ok(Json(response(
+        service.runs.by_key(&user, &key).await?,
+        true,
+    )))
 }
 async fn status(
     State(state): State<RunState>,

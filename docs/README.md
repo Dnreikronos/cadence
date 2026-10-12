@@ -46,7 +46,11 @@ repo's paths instead of these.
 
 - [Auditor payments and grants](dev/AUDIT_API.md) — #59. Authenticated company payment reads and admin grant creation/revocation; deployment configuration and local verification.
 
-- [API contract for the web app](dev/API_CONTRACT.md) — #63. What the web app builds and mocks against: authentication, the prepare-sign-confirm pattern, errors that never carry an amount, and every route, marked implemented or proposed (the payroll `/runs` routes are implemented, in a different shape from the one the client uses), plus the design review findings to resolve before building. Synced with the client and the mock on 2026-10-04: it now lists the mock's deviations from a real service and what the screens assume from the backend. Status: working draft, open questions 1 to 37 for the backend owner.
+- [Backend contract decisions](plans/2026-10-11-063-backend-implementation.md) — accepted implementation scope. [API reconciliation](plans/2026-10-11-063-api-contract.md) records the earlier review; [validation](plans/2026-10-12-063-backend-validation.md) separates final-branch checks from earlier devnet and browser results.
+
+- [Backend APIs for web integration](dev/WEB3_API.md) — authenticated enrollment, account updates, private reads, payroll recovery and CSV. [Frontend handoff](dev/WEB3_INTEGRATION_HANDOFF.md) records nullable values and signing requirements.
+
+- [API contract for the web app](dev/API_CONTRACT.md) — current backend shapes and recorded frontend expectations for #63. Shared sign-off and mock alignment remain open.
 
 - [Chain indexer](dev/INDEXER.md) — #58. Finalized payment recovery, runtime setup and durable payment events.
 

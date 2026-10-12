@@ -5,87 +5,82 @@ use solana_account::Account;
 use solana_address::Address;
 use solana_hash::Hash;
 use std::{str::FromStr, time::Duration};
+use tokio::time::{sleep, timeout_at, Instant};
+
+#[path = "rpc_read.rs"]
+mod rpc_read;
+
+#[cfg(test)]
+#[path = "rpc_read_tests.rs"]
+mod rpc_read_tests;
 
 #[derive(Clone)]
 pub struct RpcClient {
     url: reqwest::Url,
     http: reqwest::Client,
+    timeout: Duration,
 }
 
 impl RpcClient {
     pub fn new(url: reqwest::Url, timeout: Duration) -> Result<Self, AppError> {
         let http = reqwest::Client::builder()
             .timeout(timeout)
+            .retry(reqwest::retry::never())
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|_| AppError::RpcUnavailable)?;
-        Ok(Self { url, http })
+        Ok(Self { url, http, timeout })
     }
 
     pub(crate) async fn call(&self, method: &str, params: Value) -> Result<Value, AppError> {
-        let envelope = self.envelope(method, params, 0).await?;
-        if envelope.get("error").is_some_and(|error| !error.is_null()) {
-            return Err(AppError::RpcUnavailable);
-        }
-        envelope
-            .get("result")
-            .cloned()
-            .ok_or(AppError::RpcUnavailable)
+        self.read(method, params)
+            .await
+            .map_err(|_| AppError::RpcUnavailable)
     }
 
-    async fn envelope(&self, method: &str, params: Value, retries: u32) -> Result<Value, AppError> {
-        for attempt in 0..=retries {
-            // Provider errors can echo credentials from the URL. Keep them out of errors.
-            let response = self
-                .http
-                .post(self.url.clone())
-                .json(&json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }))
-                .send()
-                .await
-                .map_err(|_| AppError::RpcUnavailable)?;
-            if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < retries {
-                let seconds = response
-                    .headers()
-                    .get(reqwest::header::RETRY_AFTER)
-                    .and_then(|value| value.to_str().ok())
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .unwrap_or(5 << attempt);
-                if seconds > 60 {
-                    return Err(AppError::RpcUnavailable);
-                }
-                tokio::time::sleep(Duration::from_secs(seconds)).await;
-                continue;
+    async fn read(&self, method: &str, params: Value) -> Result<Value, rpc_read::Failure> {
+        let deadline = Instant::now() + self.timeout;
+        let attempts = if rpc_read::read_method(method) {
+            rpc_read::MAX_ATTEMPTS
+        } else {
+            1
+        };
+        let payload = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
+        for attempt in 1..=attempts {
+            let failure = match timeout_at(
+                deadline,
+                rpc_read::request(&self.http, &self.url, &payload),
+            )
+            .await
+            {
+                Ok(Ok(value)) => return Ok(value),
+                Ok(Err(failure)) => failure,
+                Err(_) => rpc_read::Failure::deadline(),
+            };
+            let wait = failure.delay(attempt).filter(|wait| {
+                attempt < attempts && *wait < deadline.saturating_duration_since(Instant::now())
+            });
+            eprintln!("{}", failure.diagnostic(method, attempt, wait.is_some()));
+            let Some(wait) = wait else {
+                return Err(failure);
+            };
+            if timeout_at(deadline, sleep(wait)).await.is_err() {
+                eprintln!(
+                    "{}",
+                    rpc_read::Failure::deadline().diagnostic(method, attempt, false)
+                );
+                return Err(rpc_read::Failure::deadline());
             }
-            let envelope: Value = response
-                .error_for_status()
-                .map_err(|_| AppError::RpcUnavailable)?
-                .json()
-                .await
-                .map_err(|_| AppError::RpcUnavailable)?;
-            if envelope["jsonrpc"] != "2.0" || envelope["id"] != 1 {
-                return Err(AppError::RpcUnavailable);
-            }
-            if envelope["error"]["code"] == 429 && attempt < retries {
-                tokio::time::sleep(Duration::from_secs(5 << attempt)).await;
-                continue;
-            }
-            return Ok(envelope);
         }
-        Err(AppError::RpcUnavailable)
+        Err(rpc_read::Failure::deadline())
     }
 
     pub(crate) async fn finalized_height_at(&self, slot: u64) -> Result<Option<u64>, AppError> {
-        let envelope = self.envelope("getBlock", json!([slot, {"commitment":"finalized","transactionDetails":"none","rewards":false,"maxSupportedTransactionVersion":1}]), 2).await?;
-        if matches!(
-            envelope["error"]["code"].as_i64(),
-            Some(-32001 | -32007 | -32009)
-        ) {
-            return Ok(None);
-        }
-        if envelope.get("error").is_some_and(|e| !e.is_null()) {
-            return Err(AppError::RpcUnavailable);
-        }
-        let result = envelope.get("result").ok_or(AppError::RpcUnavailable)?;
+        let result = match self.read("getBlock", json!([slot, {"commitment":"finalized","transactionDetails":"none","rewards":false,"maxSupportedTransactionVersion":1}])).await {
+            Ok(result) => result,
+            Err(failure) if failure.unavailable_block() => return Ok(None),
+            Err(_) => return Err(AppError::RpcUnavailable),
+        };
         if result.is_null() {
             return Ok(None);
         }
@@ -183,6 +178,31 @@ impl RpcClient {
                 ]),
             )
             .await?;
+        Self::parse_account(&result)
+    }
+
+    pub async fn finalized_account(
+        &self,
+        address: &Address,
+        min_slot: Option<u64>,
+    ) -> Result<(u64, Option<Account>), AppError> {
+        let mut config = json!({"encoding":"base64","commitment":"finalized"});
+        if let Some(slot) = min_slot {
+            config["minContextSlot"] = json!(slot);
+        }
+        let result = self
+            .call("getAccountInfo", json!([address.to_string(), config]))
+            .await?;
+        let slot = result["context"]["slot"]
+            .as_u64()
+            .ok_or(AppError::RpcUnavailable)?;
+        if min_slot.is_some_and(|min| slot < min) {
+            return Err(AppError::RpcUnavailable);
+        }
+        Ok((slot, Self::parse_account(&result)?))
+    }
+
+    fn parse_account(result: &Value) -> Result<Option<Account>, AppError> {
         let value = result.get("value").ok_or(AppError::RpcUnavailable)?;
         if value.is_null() {
             return Ok(None);
@@ -244,11 +264,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn header_reads_retry_throttling_but_other_reads_keep_their_deadline() {
+    async fn header_reads_retry_throttling_within_the_request_deadline() {
         for (header, failures, delay, expected_calls, success) in [
             (true, 1, 1, 2, true),
             (true, 3, 0, 3, false),
-            (false, 1, 0, 1, false),
+            (false, 1, 0, 2, false),
             (true, 1, 61, 1, false),
         ] {
             let state = Arc::new((AtomicUsize::new(0), failures, delay));

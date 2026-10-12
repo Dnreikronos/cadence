@@ -44,6 +44,7 @@ pub const OTHER: &str = "22222222-2222-4222-8222-222222222222";
 #[derive(Default)]
 pub struct Backend {
     pub accounts: Mutex<HashMap<String, Value>>,
+    pub finalized_accounts: Mutex<HashMap<String, Value>>,
     pub transaction: Mutex<Value>,
     pub transactions: Mutex<HashMap<String, Value>>,
     pub finalized_height: AtomicU64,
@@ -126,7 +127,27 @@ async fn rpc(State(state): State<Arc<Backend>>, Json(request): Json<Value>) -> J
             json!({"context":{"slot":100}, "value":request["params"][0].as_array().unwrap().iter().map(|address| state.accounts.lock().unwrap().get(address.as_str().unwrap()).cloned().unwrap_or(Value::Null)).collect::<Vec<_>>()})
         }
         "getAccountInfo" => {
-            json!({"value": state.accounts.lock().unwrap().get(request["params"][0].as_str().unwrap()).cloned().unwrap_or(Value::Null)})
+            let address = request["params"][0].as_str().unwrap();
+            let finalized = if request["params"][1]["commitment"] == "finalized" {
+                state
+                    .finalized_accounts
+                    .lock()
+                    .unwrap()
+                    .get(address)
+                    .cloned()
+            } else {
+                None
+            };
+            let value = finalized.unwrap_or_else(|| {
+                state
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .get(address)
+                    .cloned()
+                    .unwrap_or(Value::Null)
+            });
+            json!({"context":{"slot":100},"value":value})
         }
         "getBlockHeight" => json!(state.finalized_height.load(Ordering::SeqCst)),
         "getTransaction" => state
@@ -165,6 +186,12 @@ impl Harness {
             .unwrap();
         admin
             .batch_execute(include_str!(
+                "../../../../supabase/migrations/20261001000000_tenancy.sql"
+            ))
+            .await
+            .unwrap();
+        admin
+            .batch_execute(include_str!(
                 "../../../../supabase/migrations/20261003000000_transfer_requests.sql"
             ))
             .await
@@ -173,13 +200,20 @@ impl Harness {
             include_str!("../../../../supabase/migrations/20260929000001_wrap_requests.sql"),
             include_str!("../../../../supabase/migrations/20260930000001_wrap_cleanup.sql"),
             include_str!("../../../../supabase/migrations/20261003000001_runs.sql"),
+            include_str!("../../../../supabase/migrations/20261011000000_run_recovery.sql"),
             include_str!("../../../../supabase/migrations/20261004000000_unwrap_requests.sql"),
             include_str!("../../../../supabase/migrations/20261010000000_chain_indexer.sql"),
+            include_str!("../../../../supabase/migrations/20261010000002_auditor_grants.sql"),
             include_str!("../../../../supabase/migrations/20261010000003_transparent_fallback.sql"),
+            include_str!(
+                "../../../../supabase/migrations/20261011000001_confidential_accounts.sql"
+            ),
+            include_str!("../../../../supabase/migrations/20261011000002_owner_reads.sql"),
         ] {
             admin.batch_execute(migration).await.unwrap();
         }
         admin.batch_execute("ALTER ROLE cadence_key_service LOGIN PASSWORD 'transfer54-test-only'; ALTER ROLE cadence_transfer_service LOGIN PASSWORD 'transfer54-test-only'; INSERT INTO auth.users (id) VALUES ('11111111-1111-4111-8111-111111111111'), ('22222222-2222-4222-8222-222222222222');").await.unwrap();
+        admin.batch_execute("INSERT INTO public.companies (id,name) VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','Contract fixture'); INSERT INTO public.memberships (user_id,company_id,role) VALUES ('11111111-1111-4111-8111-111111111111','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','admin'), ('22222222-2222-4222-8222-222222222222','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','recipient');").await.unwrap();
         let mut keys: reqwest::Url = url.parse().unwrap();
         keys.set_username("cadence_key_service").unwrap();
         keys.set_password(Some("transfer54-test-only")).unwrap();

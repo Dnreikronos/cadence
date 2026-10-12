@@ -137,6 +137,7 @@ async fn recipient_reads_are_bounded_and_do_not_need_a_proof_slot() {
         Address::new_from_array([3; 32]),
         Zeroizing::new(AeKey::new_rand()),
         entries,
+        false,
     )
     .await;
     server.abort();

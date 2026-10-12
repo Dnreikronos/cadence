@@ -35,6 +35,14 @@ may use plaintext. Connection/query timeouts are five seconds; HTTP work is
 limited to thirty seconds. Each key read uses its own autocommit connection.
 TLS-terminating Postgres proxies must preserve the configured database role.
 
+## Public payment consent
+
+`allow_transparent` defaults to false. During a proof-program outage, omitted or
+false consent returns `409 transparent_consent_required` before a public
+transaction is built or stored. Explicit true permits the existing public-balance
+fallback. Wallet ownership is authorized before charging the wallet quota.
+[WEB3_API.md](WEB3_API.md) documents the account enrollment and read APIs.
+
 ## POST /transfer
 
 Send `Authorization: Bearer <Supabase access token>` and JSON:
@@ -46,7 +54,8 @@ Send `Authorization: Bearer <Supabase access token>` and JSON:
   "recipient": "<destination Token-2022 account>",
   "amount": "<integer base units>",
   "aes_key": "<base64 16-byte AES balance key>",
-  "wallet_signature": "<base58 wallet association signature, first request only>"
+  "wallet_signature": "<base58 wallet association signature, first request only>",
+  "allow_transparent": false
 }
 ```
 
@@ -122,7 +131,7 @@ including unknown fields and oversize bodies, cannot echo request values.
 | 401    | `authentication_required`                                                                                                                                                                                                                                                   |
 | 403    | `wallet_access_denied`                                                                                                                                                                                                                                                      |
 | 404    | `transfer_not_found`                                                                                                                                                                                                                                                        |
-| 409    | `wallet_link_required`, `transfer_requires_devnet`, `sender_account_missing`, `recipient_account_missing`, `invalid_confidential_state`, `proof_generation_failed`, `transaction_not_finalized`, `transaction_failed`, `transaction_mismatch`, `transfer_already_confirmed` |
+| 409    | `wallet_link_required`, `transfer_requires_devnet`, `sender_account_missing`, `recipient_account_missing`, `invalid_confidential_state`, `proof_generation_failed`, `transaction_not_finalized`, `transaction_failed`, `transaction_mismatch`, `transfer_already_confirmed`, `transparent_consent_required` |
 | 429    | `transfer_rate_limited`, with `Retry-After: 60`                                                                                                                                                                                                                             |
 | 503    | `transfer_unavailable`, `auth_unavailable`, `key_storage_unavailable`, `transfer_storage_unavailable`, `rpc_unavailable`, `transfer_timeout`                                                                                                                                |
 | 500    | `internal_error`                                                                                                                                                                                                                                                            |

@@ -1,3 +1,4 @@
+pub mod account_store;
 pub mod audit {
     pub mod log;
     pub mod store;
@@ -8,6 +9,7 @@ pub mod cors;
 pub mod database;
 pub mod error;
 pub mod indexer;
+pub mod owner_reads;
 pub mod run_store;
 pub mod transfer_store;
 pub mod unwrap_store;
@@ -17,8 +19,11 @@ pub mod keys {
     pub mod vault;
 }
 pub mod routes {
+    pub mod accounts;
     pub mod audit;
+    pub mod exports;
     pub mod health;
+    pub mod reads;
     pub mod runs;
     mod runs_confirm;
     mod runs_prepare;
@@ -28,6 +33,7 @@ pub mod routes {
     mod wrap_limits;
 }
 pub mod solana {
+    pub mod accounts;
     pub mod batch;
     pub mod client;
     pub mod confidential;
@@ -81,6 +87,9 @@ pub fn router_with_audit(
     let wrap = routes::wrap::router(state.rpc.clone(), store);
     let runs = routes::runs::router(state.rpc.clone(), transfer.clone());
     let unwrap = routes::unwrap::router(state.rpc.clone(), transfer.clone());
+    let accounts = routes::accounts::router(state.rpc.clone(), transfer.clone());
+    let reads = routes::reads::router(state.rpc.clone(), transfer.clone());
+    let exports = routes::exports::router(state.rpc.clone(), transfer.clone());
     let transfer = routes::transfer::router(state.rpc.clone(), transfer);
     Router::new()
         .route("/health", get(routes::health::health))
@@ -89,5 +98,8 @@ pub fn router_with_audit(
         .merge(transfer)
         .merge(runs)
         .merge(unwrap)
+        .merge(accounts)
+        .merge(reads)
+        .merge(exports)
         .merge(routes::audit::router(audit))
 }

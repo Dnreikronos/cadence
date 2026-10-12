@@ -6,6 +6,9 @@ use crate::audit::log::{key_read_permit, AuditEntry, AuditError};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use solana_address::Address;
 use solana_signature::Signature;
+use solana_zk_sdk::encryption::{
+    auth_encryption::AeKey, derivation::derive_confidential_keys_from_signature,
+};
 use tokio_postgres::Client;
 use zeroize::Zeroizing;
 
@@ -24,7 +27,7 @@ pub enum KeyStoreError {
 }
 
 // Check before transmitting a plaintext key, including on pooled/SET ROLE connections.
-async fn check_logging(client: &Client) -> Result<(), KeyStoreError> {
+pub(crate) async fn check_logging(client: &Client) -> Result<(), KeyStoreError> {
     let row = client
         .query_one(
             "SELECT (current_setting('log_parameter_max_length') = '0' OR (\
@@ -69,6 +72,83 @@ pub async fn enroll(
         .await
         .map_err(|_| KeyStoreError::Unavailable)?;
     Ok(public)
+}
+
+pub async fn metadata(
+    client: &Client,
+    wallet: &Address,
+    account: &Address,
+) -> Result<Option<([u8; 32], bool)>, KeyStoreError> {
+    client
+        .query_opt(
+            "SELECT * FROM cadence_private.account_key_metadata($1,$2)",
+            &[&wallet.to_string(), &account.to_string()],
+        )
+        .await
+        .map_err(|_| KeyStoreError::Unavailable)?
+        .map(|row| {
+            let public: Vec<u8> = row.get(0);
+            Ok((
+                public.try_into().map_err(|_| KeyStoreError::InvalidKey)?,
+                row.get(1),
+            ))
+        })
+        .transpose()
+}
+
+/// Stores both derived keys as Vault ciphertext in one database statement.
+pub async fn enroll_account(
+    client: &Client,
+    wallet: &Address,
+    account: &Address,
+    signature: &Signature,
+) -> Result<[u8; 32], KeyStoreError> {
+    check_logging(client).await?;
+    let key = ViewingKey::derive(wallet, account, signature)?;
+    let (_, aes) = derive_confidential_keys_from_signature(signature)
+        .map_err(|_| KeyStoreError::InvalidKey)?;
+    let aes = Zeroizing::new(aes);
+    let public = key.public_key().to_bytes();
+    let secret = Zeroizing::new(STANDARD.encode(key.secret_bytes()));
+    let bytes = Zeroizing::new(<[u8; 16]>::from(&*aes));
+    let balance = Zeroizing::new(STANDARD.encode(*bytes));
+    client
+        .query_one(
+            "SELECT cadence_private.store_account_keys($1,$2,$3,$4,$5)",
+            &[
+                &wallet.to_string(),
+                &account.to_string(),
+                &&public[..],
+                &secret.as_str(),
+                &balance.as_str(),
+            ],
+        )
+        .await
+        .map_err(|_| KeyStoreError::Unavailable)?;
+    Ok(public)
+}
+
+pub async fn load_account(
+    client: &Client,
+    wallet: &Address,
+    account: &Address,
+    actor: &str,
+    reason: &str,
+) -> Result<(ViewingKey, Zeroizing<AeKey>), KeyStoreError> {
+    let account = account.to_string();
+    let entry = AuditEntry::new(actor, reason, &account)?;
+    let permit = key_read_permit(client, &entry).await?;
+    let row = client
+        .query_one(
+            "SELECT * FROM cadence_private.read_account_keys($1,$2,$3)",
+            &[&wallet.to_string(), &account, &permit],
+        )
+        .await
+        .map_err(|_| KeyStoreError::Unavailable)?;
+    let bytes = Zeroizing::new(row.get::<_, Vec<u8>>("balance_key"));
+    let aes =
+        Zeroizing::new(AeKey::try_from(bytes.as_slice()).map_err(|_| KeyStoreError::InvalidKey)?);
+    Ok((key_from_row(&row)?, aes))
 }
 
 /// Each attempt persists attribution before Vault can decrypt. No decrypted cache.

@@ -242,6 +242,59 @@ async fn company_grants_bound_real_ciphertext_reads_and_durable_audit_records() 
         "grant administration decrypts nothing"
     );
 
+    let before = h.audit_count().await;
+    use tower::ServiceExt;
+    let csv = h
+        .app
+        .clone()
+        .oneshot(
+            Request::get(format!("/audit/{COMPANY_A}/export.csv"))
+                .header("authorization", "Bearer auditor-a")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(csv.status(), StatusCode::OK);
+    assert_eq!(csv.headers()["cache-control"], "no-store");
+    assert_eq!(csv.headers()["content-type"], "text/csv; charset=utf-8");
+    let csv = String::from_utf8(to_bytes(csv.into_body(), 65536).await.unwrap().to_vec()).unwrap();
+    assert_eq!(csv.lines().count(), 3);
+    assert!(csv.contains(",4.200000,confirmed,"));
+    assert_eq!(h.audit_count().await, before + 1);
+    let denied = h
+        .app
+        .clone()
+        .oneshot(
+            Request::get(format!("/audit/{COMPANY_A}/export.csv"))
+                .header("authorization", "Bearer auditor-b")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::NOT_FOUND);
+    assert_eq!(h.audit_count().await, before + 1);
+    let session = h.auditor(AUDITOR_A).await;
+    let permit: String = session
+        .query_one(
+            "SELECT cadence_private.audit_company_export($1)",
+            &[&COMPANY_A],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    h.admin.execute("UPDATE cadence_private.company_read_permits SET payment_ids=(SELECT array_agg(gen_random_uuid()) FROM generate_series(1,10001)) WHERE id=$1::text::uuid", &[&permit]).await.unwrap();
+    let error = session
+        .query(
+            "SELECT * FROM cadence_private.read_company_export($1,$2)",
+            &[&COMPANY_A, &permit],
+        )
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.code().unwrap().code(), "CD413");
+
     checks::permits(&h).await;
     checks::attribution_and_failures(&h).await;
 

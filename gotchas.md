@@ -77,3 +77,32 @@
 - Adding receipt metadata also requires updating the indexer schema allowlist.
   Run its disposable-database test after receipt migrations, and include the
   rejected column in assertion failures so a schema mismatch is easy to trace.
+
+- Private balance reads need the canonical AES key as well as the ElGamal key.
+  Store both only as audited Vault ciphertext. An apply credit-counter mismatch
+  must block reads instead of presenting a stale AES balance as available funds.
+
+- Backend/web3 work owns proof routes, chain behavior, migrations and API docs.
+  Preserve nullable roster amounts and counterparty IDs, and describe those
+  values for client owners. Validate signing through isolated devnet protocols
+  when the product wallet is unavailable; keep that evidence separate from E2E.
+
+- Retain the original request ID and submission signature through an RPC outage.
+  Retry allowlisted reads within one total deadline, preserving commitment and
+  minimum context slot. Missing history cannot authorize another payment.
+  Diagnostics must exclude provider URLs, messages, parameters, keys and amounts.
+
+- Isolate database roles as well as schemas between storage test suites. Apply
+  receipt-view migrations in order, with auditor grants before public fallback,
+  so a later view replacement cannot drop transparent metadata. Direct fixture
+  connections need the same explicit loopback transport policy as the harness.
+
+- SQL boolean short-circuiting does not skip permission checks while planning an
+  expression. Put role-specific protected-table queries in separate PL/pgSQL
+  branches rather than granting a role extra access to satisfy a shared OR.
+  Run the tenant suite after changing a trigger used by existing service roles.
+
+- An owner creation lock spans proof generation, which can exceed the ordinary
+  five-second query timeout on CI or a busy server. Bound only the lock wait by
+  the HTTP budget, restore query limits after acquisition, and test a deliberately
+  slow owner plus cancelled waiters. Passing on a fast local machine misses this.

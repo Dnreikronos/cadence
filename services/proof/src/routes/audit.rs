@@ -58,6 +58,7 @@ impl Service {
 pub fn router(service: Option<Arc<Service>>) -> Router {
     Router::new()
         .route("/audit/{company}/payments", get(payments))
+        .route("/audit/{company}/export.csv", get(export))
         .route("/company/auditor-grants", get(grants).post(create_grant))
         .route("/company/auditor-grants/{id}/revoke", post(revoke_grant))
         .layer(DefaultBodyLimit::max(8192))
@@ -119,7 +120,7 @@ async fn payments(
         .map_err(|_| AppError::BadRequest("invalid_request"))?
         .0
         .validate()?;
-    let _permit = service
+    let permit = service
         .slots
         .clone()
         .try_acquire_owned()
@@ -127,9 +128,28 @@ async fn payments(
     Ok(Json(
         service
             .store
-            .payments(&user, &company, limit, cursor.as_deref())
+            .payments(&user, &company, limit, cursor.as_deref(), permit)
             .await?,
     ))
+}
+
+async fn export(
+    State(service): State<Option<Arc<Service>>>,
+    headers: HeaderMap,
+    Path(company): Path<String>,
+    query: Result<Query<super::exports::ExportQuery>, axum::extract::rejection::QueryRejection>,
+) -> Result<Response, AppError> {
+    query.map_err(|_| AppError::BadRequest("invalid_request"))?;
+    let service = service.ok_or(AppError::AuditUnavailable)?;
+    let user = service.auth.user(&headers).await?;
+    let company = uuid(&company)?;
+    let permit = service
+        .slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| AppError::AuditUnavailable)?;
+    let payments = service.store.export(&user, &company, permit).await?;
+    super::exports::csv_response(&payments)
 }
 
 /// Return grant metadata for the verified admin's company without decrypting.
