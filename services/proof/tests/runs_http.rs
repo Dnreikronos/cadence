@@ -27,8 +27,19 @@ async fn request(
     app: &Router,
     path: &str,
     token: &str,
-    body: Option<Value>,
+    mut body: Option<Value>,
 ) -> (StatusCode, Value) {
+    if path == "/runs" {
+        if let Some(body) = body.as_mut().and_then(Value::as_object_mut) {
+            static KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+            body.entry("idempotency_key").or_insert_with(|| {
+                json!(format!(
+                    "63000000-0000-4000-8000-{:012x}",
+                    KEY.fetch_add(1, Ordering::SeqCst)
+                ))
+            });
+        }
+    }
     let builder = if body.is_some() {
         Request::post(path)
     } else {
@@ -414,12 +425,28 @@ async fn three_recipient_run_recovers_partial_failure_without_repaying_successes
     assert_eq!(resolved["payments"][0]["status"], "finalized");
     assert!(resolved["payments"][0].get("transaction").is_none());
     assert_eq!(resolved["payments"][2]["attempt"], 1);
+    let isolated_recipients = (40..43)
+        .map(|i| Address::new_from_array([i; 32]).to_string())
+        .collect::<Vec<_>>();
+    let destination = h.backend.accounts.lock().unwrap()[&recipients[0]].clone();
+    for recipient in &isolated_recipients {
+        h.backend
+            .accounts
+            .lock()
+            .unwrap()
+            .insert(recipient.clone(), destination.clone());
+    }
+    let mut isolated_body = body.clone();
+    isolated_body["payments"] = json!(isolated_recipients
+        .iter()
+        .map(|r| json!({"recipient":r,"amount":"1000000"}))
+        .collect::<Vec<_>>());
     h.backend
         .unavailable_accounts
         .lock()
         .unwrap()
-        .insert(recipients[1].clone());
-    let (_, isolated) = request(&h.app(), "/runs", "test-user", Some(body.clone())).await;
+        .insert(isolated_recipients[1].clone());
+    let (_, isolated) = request(&h.app(), "/runs", "test-user", Some(isolated_body)).await;
     assert_eq!(isolated["payments"][1]["status"], "preparation_failed");
     assert_eq!(isolated["payments"][1]["error"], "rpc_unavailable");
     assert_eq!(isolated["payments"][2]["status"], "prepared");

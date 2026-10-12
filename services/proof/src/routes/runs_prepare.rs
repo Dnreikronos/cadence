@@ -31,6 +31,7 @@ pub(super) struct RunRequest {
     sender: String,
     aes_key: String,
     wallet_signature: Option<String>,
+    idempotency_key: String,
     payments: Vec<Recipient>,
 }
 #[derive(Deserialize)]
@@ -107,6 +108,11 @@ pub(super) async fn prepare(
 ) -> Result<Json<RunResponse>, AppError> {
     let Json(request) = body.map_err(|_| AppError::BadRequest("invalid_request"))?;
     count(request.payments.len())?;
+    runs::valid_id(&request.idempotency_key)
+        .map_err(|_| AppError::BadRequest("invalid_idempotency_key"))?;
+    if uuid::Uuid::parse_str(&request.idempotency_key).map_or(true, |id| id.is_nil()) {
+        return Err(AppError::BadRequest("invalid_idempotency_key"));
+    }
     let wallet = runs::address(&request.company_wallet)?;
     if !wallet.is_on_curve() {
         return Err(AppError::BadRequest("invalid_wallet"));
@@ -132,17 +138,54 @@ pub(super) async fn prepare(
         .collect::<Result<Vec<_>, AppError>>()?;
     let aes = aes(&request.aes_key)?;
     let (service, user) = state.authenticate(&headers).await?;
-    if !state.limits.wallet(wallet) {
-        return Err(AppError::TransferRateLimited);
-    }
+    service.runs.require_admin(&user).await?;
     service
         .store
         .authorize_wallet(&user, &wallet, request.wallet_signature.as_deref())
         .await?;
+    let (creation, existing) = service
+        .runs
+        .creation(&user, &request.idempotency_key)
+        .await?;
+    if let Some(run) = existing {
+        if run.company_wallet != request.company_wallet
+            || run.sender != request.sender
+            || run.payments.len() != entries.len()
+            || run
+                .payments
+                .iter()
+                .zip(&entries)
+                .any(|(p, e)| p.destination != e.recipient.to_string())
+        {
+            return Err(AppError::Conflict("idempotency_conflict"));
+        }
+        return Ok(Json(runs::response(run, true)));
+    }
+    service
+        .runs
+        .outstanding(
+            &creation,
+            &user,
+            &entries
+                .iter()
+                .map(|e| e.recipient.to_string())
+                .collect::<Vec<_>>(),
+        )
+        .await?;
+    if !state.limits.wallet(wallet) {
+        return Err(AppError::TransferRateLimited);
+    }
     let payments = build(&state, &user, wallet, sender, aes, entries).await?;
     let run = service
         .runs
-        .prepare(&user, &wallet.to_string(), &sender.to_string(), &payments)
+        .prepare_in(
+            &creation,
+            &user,
+            &wallet.to_string(),
+            &sender.to_string(),
+            &payments,
+            Some(&request.idempotency_key),
+        )
         .await?;
     Ok(Json(runs::response(run, true)))
 }
@@ -165,8 +208,10 @@ pub(super) async fn retry(
         }
     }
     let (service, user) = state.authenticate(&headers).await?;
+    service.runs.require_admin(&user).await?;
     let mut run = service.runs.get(&user, &id).await?;
     let wallet = runs::address(&run.company_wallet)?;
+    service.store.authorize_wallet(&user, &wallet, None).await?;
     if !state.limits.wallet(wallet) {
         return Err(AppError::TransferRateLimited);
     }
