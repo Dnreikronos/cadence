@@ -35,9 +35,9 @@ Pending credit count is metadata, not an amount. Read actual units through
 
 | Response field | Meaning of null | Client behavior |
 | --- | --- | --- |
-| `/company/people/amounts.items[].amount` | No roster amount was set. | Accept `string | null`; show “Not set”; omit unset values from totals. Keep unknown/loading/error separate from unset. |
+| `/company/people/amounts.items[].amount` | No roster amount was set. | Accept `string \| null`; show “Not set”; omit unset values from totals. Keep unknown/loading/error separate from unset. |
 | `/company/people/amounts.items[].token_account` and `/company/people/accounts.items[].token_account` | Recipient readiness has not been verified. | Keep the person visible and exclude their unmapped account from signing requests. |
-| `/me/payments` and `/company/payments` `items[].counterparty.id` | The receipt has no linked person/company identity, including legacy or standalone receipts. | Accept `UUID | null`; display the returned counterparty name and use `payment_id` for receipt identity. |
+| `/me/payments` and `/company/payments` `items[].counterparty.id` | The receipt has no linked person/company identity, including legacy or standalone receipts. | Accept `UUID \| null`; display the returned counterparty name and use `payment_id` for receipt identity. |
 | `items[].run_id` | Standalone payment. | Accept null and retain the receipt. |
 
 Amounts that exist remain decimal base-unit strings. A successful amount write
