@@ -154,14 +154,18 @@ The corresponding `/confirm` endpoints take `{request_id, signature}` and return
 submission before asking RPC, verifies the exact finalized message, and checks
 the account snapshot at or after the receipt slot. The chain indexer also
 recovers successful or failed account requests, including wallet-history
-discovery when the confirmation request was lost.
+discovery when the confirmation request was lost. Configure confirmation also
+verifies finalized readiness and activates the linked person when the indexer
+saved the receipt first; the receipt alone does not establish account readiness.
 
 Apply with no pending credits returns `409 nothing_to_apply`. A finalized apply
 whose actual and expected credit counters disagree is recorded before returning
-`409 credit_counter_mismatch`; confirming the same signature again returns the
-stored receipt. Private balance reads and another apply fail closed on that
-counter mismatch, rather than presenting the potentially stale AES balance as
-the actual available balance. A verified failed transaction returns
+`409 credit_counter_mismatch`. The first finalized counter check is stored once;
+confirming the same signature returns that same conflict, including after an
+indexer receipt or a later account update. Matching checks return the stored
+success receipt on retries. Private balance reads and another apply fail closed
+while the current account counters disagree, protecting against a stale AES
+balance. A verified failed transaction returns
 `409 transaction_failed` and can be prepared again. Missing history leaves the
 original operation unresolved.
 
