@@ -114,23 +114,31 @@ CREATE TABLE public.account_requests (
     transaction text NOT NULL CHECK (length(transaction) BETWEEN 1 AND 5464),
     last_valid_block_height bigint NOT NULL CHECK (last_valid_block_height>=0),
     expected_counter bigint CHECK (expected_counter>=0),
+    counter_match boolean,
     signature text UNIQUE CHECK (signature ~ '^[1-9A-HJ-NP-Za-km-z]{64,88}$'),
     submitted_signature text UNIQUE CHECK (submitted_signature ~ '^[1-9A-HJ-NP-Za-km-z]{64,88}$'),
     slot bigint CHECK (slot>=0),
     status text NOT NULL DEFAULT 'prepared' CHECK (status IN ('prepared','finalized','failed')),
     FOREIGN KEY (wallet,user_id) REFERENCES public.proof_wallets(wallet,user_id),
     CHECK ((signature IS NULL) = (slot IS NULL)),
-    CHECK ((status='prepared') = (signature IS NULL))
+    CHECK ((status='prepared') = (signature IS NULL)),
+    CHECK (counter_match IS NULL OR (status='finalized' AND kind='apply_pending' AND expected_counter IS NOT NULL))
 );
 ALTER TABLE public.account_requests ENABLE ROW LEVEL SECURITY;
 CREATE UNIQUE INDEX one_prepared_account_update ON public.account_requests(user_id,kind) WHERE status='prepared';
 REVOKE ALL ON public.account_requests FROM PUBLIC, anon, authenticated, service_role;
 GRANT SELECT, INSERT ON public.account_requests TO cadence_transfer_service;
-GRANT UPDATE (signature,submitted_signature,slot,status) ON public.account_requests TO cadence_transfer_service;
+GRANT UPDATE (signature,submitted_signature,slot,status,counter_match) ON public.account_requests TO cadence_transfer_service;
 CREATE POLICY account_requests_service ON public.account_requests TO cadence_transfer_service USING (true) WITH CHECK (true);
 CREATE FUNCTION public.guard_account_request() RETURNS trigger LANGUAGE plpgsql SET search_path='' AS $$
 BEGIN
     IF NEW IS NOT DISTINCT FROM OLD THEN RETURN NEW; END IF;
+    -- The first finalized apply validation is durable; its receipt stays immutable.
+    IF OLD.status='finalized' AND OLD.kind='apply_pending' AND OLD.counter_match IS NULL
+        AND NEW.counter_match IS NOT NULL
+        AND (to_jsonb(NEW)-'counter_match')=(to_jsonb(OLD)-'counter_match') THEN
+        RETURN NEW;
+    END IF;
     IF OLD.status <> 'prepared' OR NEW.id<>OLD.id OR NEW.user_id<>OLD.user_id
         OR NEW.wallet<>OLD.wallet OR NEW.token_account<>OLD.token_account OR NEW.kind<>OLD.kind
         OR NEW.transaction<>OLD.transaction OR NEW.last_valid_block_height<>OLD.last_valid_block_height

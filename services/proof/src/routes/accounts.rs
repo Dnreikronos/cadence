@@ -407,6 +407,7 @@ async fn prepare(
             .map(i64::try_from)
             .transpose()
             .map_err(|_| AppError::RpcUnavailable)?,
+        counter_match: None,
         signature: None,
         slot: None,
         status: "prepared".into(),
@@ -458,6 +459,7 @@ async fn confirm(
     if record.status == "failed" {
         return Err(AppError::Conflict("transaction_failed"));
     }
+    let mut checked_config = None;
     let slot = if let Some(slot) = record.slot {
         if record.signature.as_deref() != Some(&request.signature) {
             return Err(AppError::Conflict("account_already_confirmed"));
@@ -497,7 +499,7 @@ async fn confirm(
                 .await?;
             return Err(AppError::Conflict("transaction_failed"));
         }
-        let config = verified_config(&state, &service, &record, slot).await?;
+        checked_config = Some(verified_config(&state, &service, &record, slot).await?);
         service
             .accounts
             .finish(
@@ -509,15 +511,33 @@ async fn confirm(
             )
             .await?;
         service.accounts.ready(&user, &record.token_account).await?;
-        if let Some(expected) = record.expected_counter {
-            if u64::from(config.expected_pending_balance_credit_counter) != expected as u64
-                || u64::from(config.actual_pending_balance_credit_counter) != expected as u64
-            {
-                return Err(AppError::Conflict("credit_counter_mismatch"));
-            }
-        }
         slot
     };
+    if let Some(expected) = record.expected_counter {
+        let matches = match record.counter_match {
+            Some(matches) => matches,
+            None => {
+                let config = match checked_config {
+                    Some(config) => config,
+                    None => {
+                        let config = verified_config(&state, &service, &record, slot).await?;
+                        service.accounts.ready(&user, &record.token_account).await?;
+                        config
+                    }
+                };
+                let matches = u64::from(config.expected_pending_balance_credit_counter)
+                    == expected as u64
+                    && u64::from(config.actual_pending_balance_credit_counter) == expected as u64;
+                service
+                    .accounts
+                    .counter_match(&user, &record, &request.signature, matches)
+                    .await?
+            }
+        };
+        if !matches {
+            return Err(AppError::Conflict("credit_counter_mismatch"));
+        }
+    }
     Ok(Json(
         json!({"request_id":record.id,"signature":request.signature,"slot":slot,"status":"finalized"}),
     ))

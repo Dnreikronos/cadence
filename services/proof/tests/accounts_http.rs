@@ -1,3 +1,5 @@
+#[path = "support/apply_confirmation.rs"]
+mod apply_confirmation;
 #[path = "support/account_confirmation.rs"]
 mod confirmation;
 #[path = "support/transfer.rs"]
@@ -349,6 +351,7 @@ async fn recipient_enrolls_configures_and_applies_with_durable_receipts() {
             .0,
         StatusCode::FORBIDDEN
     );
+    apply_confirmation::mismatch_is_durable(&h, &wallet, &mut chain).await;
     assert!(h
         .backend
         .calls

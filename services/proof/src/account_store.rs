@@ -21,6 +21,7 @@ pub struct PreparedAccount {
     pub transaction: String,
     pub last_valid_block_height: i64,
     pub expected_counter: Option<i64>,
+    pub counter_match: Option<bool>,
     pub signature: Option<String>,
     pub slot: Option<i64>,
     pub status: String,
@@ -127,6 +128,7 @@ impl AccountStore {
             transaction: r.get("transaction"),
             last_valid_block_height: r.get("last_valid_block_height"),
             expected_counter: r.get("expected_counter"),
+            counter_match: r.get("counter_match"),
             signature: r.get("signature"),
             slot: r.get("slot"),
             status: r.get("status"),
@@ -150,6 +152,18 @@ impl AccountStore {
         } else {
             Err(AppError::Conflict("account_already_confirmed"))
         }
+    }
+    /// Keep the first finalized apply check, including when confirmations race.
+    pub async fn counter_match(
+        &self,
+        user: &str,
+        r: &PreparedAccount,
+        signature: &str,
+        matches: bool,
+    ) -> Result<bool, AppError> {
+        let client = self.session().await?;
+        client.execute("UPDATE public.account_requests SET counter_match=$4 WHERE user_id=$1::text::uuid AND id=$2 AND signature=$3 AND status='finalized' AND kind='apply_pending' AND counter_match IS NULL", &[&user,&r.id,&signature,&matches]).await.map_err(|_|unavailable())?;
+        client.query_opt("SELECT counter_match FROM public.account_requests WHERE user_id=$1::text::uuid AND id=$2 AND signature=$3 AND status='finalized' AND kind='apply_pending'", &[&user,&r.id,&signature]).await.map_err(|_|unavailable())?.and_then(|row|row.get::<_,Option<bool>>(0)).ok_or_else(unavailable)
     }
     pub async fn finish(
         &self,
