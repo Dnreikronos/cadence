@@ -22,7 +22,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 pub fn router(rpc: Arc<RpcClient>, service: Option<Arc<Service>>) -> Router {
     let limits = Arc::new(Limits::new());
@@ -224,15 +224,25 @@ impl Drop for AmountRequest {
         self.amount.zeroize();
     }
 }
+#[derive(Serialize)]
+struct SavedAmount {
+    person_id: String,
+    amount: String,
+}
+impl Drop for SavedAmount {
+    fn drop(&mut self) {
+        self.amount.zeroize();
+    }
+}
 async fn set_amount(
     State(state): State<AccountState>,
     headers: HeaderMap,
     Path(person): Path<String>,
     body: Result<Json<AmountRequest>, JsonRejection>,
-) -> Result<Json<Value>, AppError> {
+) -> Result<Json<SavedAmount>, AppError> {
     let person = uuid(&person)?;
     let Json(body) = body.map_err(|_| AppError::BadRequest("invalid_request"))?;
-    crate::solana::wrap::amount(&body.amount)?;
+    let amount = Zeroizing::new(crate::solana::wrap::amount(&body.amount)?);
     let (service, user) = state.authenticate(&headers).await?;
     service.runs.require_admin(&user).await?;
     let _permit = service
@@ -241,8 +251,12 @@ async fn set_amount(
         .try_acquire_owned()
         .map_err(|_| AppError::TransferRateLimited)?;
     let client = service.keys.connect().await?;
-    owner_reads::set_amount(&client, &user, &person, &body.amount).await?;
-    Ok(Json(json!({"status":"saved"})))
+    let saved = SavedAmount {
+        person_id: person,
+        amount: amount.to_string(),
+    };
+    owner_reads::set_amount(&client, &user, &saved.person_id, &saved.amount).await?;
+    Ok(Json(saved))
 }
 async fn people_accounts(
     State(state): State<AccountState>,
