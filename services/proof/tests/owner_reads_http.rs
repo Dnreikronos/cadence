@@ -1,3 +1,5 @@
+#[path = "support/roster_limit.rs"]
+mod roster_limit;
 #[path = "support/transfer.rs"]
 #[allow(dead_code)]
 mod support;
@@ -142,6 +144,7 @@ async fn authorized_histories_roster_and_csv_share_committed_audit_gates() {
             .get::<_, String>(0),
         "active"
     );
+    roster_limit::saturated_writes(&h, &app, person).await;
     let mut body = h.request();
     body["recipient"] = json!(destination.to_string());
     let (status, prepared) = json_response(&app, "/transfer", "test-user", Some(body)).await;

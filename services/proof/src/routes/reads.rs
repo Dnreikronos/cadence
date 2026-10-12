@@ -235,6 +235,11 @@ async fn set_amount(
     crate::solana::wrap::amount(&body.amount)?;
     let (service, user) = state.authenticate(&headers).await?;
     service.runs.require_admin(&user).await?;
+    let _permit = service
+        .proof_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| AppError::TransferRateLimited)?;
     let client = service.keys.connect().await?;
     owner_reads::set_amount(&client, &user, &person, &body.amount).await?;
     Ok(Json(json!({"status":"saved"})))
