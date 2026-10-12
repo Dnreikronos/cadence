@@ -204,9 +204,11 @@ impl Harness {
             include_str!("../../../../supabase/migrations/20261004000000_unwrap_requests.sql"),
             include_str!("../../../../supabase/migrations/20261010000000_chain_indexer.sql"),
             include_str!("../../../../supabase/migrations/20261010000003_transparent_fallback.sql"),
+            include_str!("../../../../supabase/migrations/20261010000002_auditor_grants.sql"),
             include_str!(
                 "../../../../supabase/migrations/20261011000001_confidential_accounts.sql"
             ),
+            include_str!("../../../../supabase/migrations/20261011000002_owner_reads.sql"),
         ] {
             admin.batch_execute(migration).await.unwrap();
         }

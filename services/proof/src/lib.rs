@@ -22,6 +22,7 @@ pub mod routes {
     pub mod accounts;
     pub mod audit;
     pub mod health;
+    pub mod reads;
     pub mod runs;
     mod runs_confirm;
     mod runs_prepare;
@@ -86,6 +87,7 @@ pub fn router_with_audit(
     let runs = routes::runs::router(state.rpc.clone(), transfer.clone());
     let unwrap = routes::unwrap::router(state.rpc.clone(), transfer.clone());
     let accounts = routes::accounts::router(state.rpc.clone(), transfer.clone());
+    let reads = routes::reads::router(state.rpc.clone(), transfer.clone());
     let transfer = routes::transfer::router(state.rpc.clone(), transfer);
     Router::new()
         .route("/health", get(routes::health::health))
@@ -95,5 +97,6 @@ pub fn router_with_audit(
         .merge(runs)
         .merge(unwrap)
         .merge(accounts)
+        .merge(reads)
         .merge(routes::audit::router(audit))
 }
