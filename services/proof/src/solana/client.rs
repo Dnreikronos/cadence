@@ -183,6 +183,31 @@ impl RpcClient {
                 ]),
             )
             .await?;
+        Self::parse_account(&result)
+    }
+
+    pub async fn finalized_account(
+        &self,
+        address: &Address,
+        min_slot: Option<u64>,
+    ) -> Result<(u64, Option<Account>), AppError> {
+        let mut config = json!({"encoding":"base64","commitment":"finalized"});
+        if let Some(slot) = min_slot {
+            config["minContextSlot"] = json!(slot);
+        }
+        let result = self
+            .call("getAccountInfo", json!([address.to_string(), config]))
+            .await?;
+        let slot = result["context"]["slot"]
+            .as_u64()
+            .ok_or(AppError::RpcUnavailable)?;
+        if min_slot.is_some_and(|min| slot < min) {
+            return Err(AppError::RpcUnavailable);
+        }
+        Ok((slot, Self::parse_account(&result)?))
+    }
+
+    fn parse_account(result: &Value) -> Result<Option<Account>, AppError> {
         let value = result.get("value").ok_or(AppError::RpcUnavailable)?;
         if value.is_null() {
             return Ok(None);
