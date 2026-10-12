@@ -1,4 +1,7 @@
-use crate::{database::Database, error::AppError};
+use crate::{
+    database::{Database, Session},
+    error::AppError,
+};
 use serde::{Deserialize, Serialize};
 use tokio_postgres::{Client, Row};
 
@@ -59,6 +62,77 @@ impl RunStore {
         let client = self.database.connect().await.map_err(|_| unavailable())?;
         read(&client, user, id).await
     }
+    pub async fn require_admin(&self, user: &str) -> Result<String, AppError> {
+        let client = self.database.connect().await.map_err(|_| unavailable())?;
+        client.query_opt("SELECT company_id::text FROM public.memberships WHERE user_id=$1::text::uuid AND role='admin'", &[&user])
+            .await.map_err(|_| unavailable())?.map(|row| row.get(0)).ok_or(AppError::ForbiddenRole)
+    }
+
+    /// The lock spans proof generation and commit, so concurrent requests cannot build two runs.
+    pub async fn creation(
+        &self,
+        user: &str,
+        key: &str,
+    ) -> Result<(Session, Option<Run>), AppError> {
+        let client = self.database.connect().await.map_err(|_| unavailable())?;
+        client
+            .batch_execute("BEGIN")
+            .await
+            .map_err(|_| unavailable())?;
+        client
+            .query_one(
+                "SELECT pg_advisory_xact_lock(hashtextextended('run-create:' || $1::text, 0))",
+                &[&user],
+            )
+            .await
+            .map_err(|_| unavailable())?;
+        let existing = by_key(&client, user, key).await?;
+        Ok((client, existing))
+    }
+
+    pub async fn outstanding(
+        &self,
+        client: &Client,
+        user: &str,
+        destinations: &[String],
+    ) -> Result<(), AppError> {
+        let exists: bool = client.query_one("SELECT EXISTS (SELECT 1 FROM public.payments p JOIN public.runs r ON r.id=p.run_id WHERE r.user_id=$1::text::uuid AND p.status='prepared' AND p.destination=ANY($2::text[]))", &[&user, &destinations])
+            .await.map_err(|_| unavailable())?.get(0);
+        if exists {
+            Err(AppError::Conflict("outstanding_payments"))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub async fn by_key(&self, user: &str, key: &str) -> Result<Run, AppError> {
+        let client = self.database.connect().await.map_err(|_| unavailable())?;
+        by_key(&client, user, key)
+            .await?
+            .ok_or(AppError::RunNotFound)
+    }
+
+    pub async fn list(
+        &self,
+        user: &str,
+        limit: i32,
+        cursor: Option<&str>,
+    ) -> Result<(Vec<Run>, Option<String>), AppError> {
+        let client = self.database.connect().await.map_err(|_| unavailable())?;
+        let mut ids = client.query("SELECT id::text FROM public.runs WHERE user_id=$1::text::uuid AND ($2::text IS NULL OR id>$2::text::uuid) ORDER BY id LIMIT $3::integer", &[&user, &cursor, &(limit+1)])
+            .await.map_err(|_| unavailable())?.into_iter().map(|r| r.get::<_, String>(0)).collect::<Vec<_>>();
+        let next = if ids.len() > limit as usize {
+            ids.pop();
+            ids.last().cloned()
+        } else {
+            None
+        };
+        let mut runs = Vec::with_capacity(ids.len());
+        for id in ids {
+            runs.push(read(&client, user, &id).await?);
+        }
+        Ok((runs, next))
+    }
     pub async fn prepare(
         &self,
         user: &str,
@@ -71,10 +145,24 @@ impl RunStore {
             .batch_execute("BEGIN")
             .await
             .map_err(|_| unavailable())?;
-        let id: String = client.query_one(
-            "INSERT INTO public.runs (user_id, company_wallet, sender) VALUES ($1::text::uuid, $2, $3) RETURNING id::text",
-            &[&user, &wallet, &sender],
-        ).await.map_err(|_| unavailable())?.get(0);
+        self.prepare_in(&client, user, wallet, sender, payments, None)
+            .await
+    }
+
+    pub async fn prepare_in(
+        &self,
+        client: &Client,
+        user: &str,
+        wallet: &str,
+        sender: &str,
+        payments: &[Payment],
+        key: Option<&str>,
+    ) -> Result<Run, AppError> {
+        let id: String = if let Some(key) = key {
+            client.query_one("INSERT INTO public.runs (user_id, company_wallet, sender, idempotency_key) VALUES ($1::text::uuid, $2, $3, $4::text::uuid) RETURNING id::text", &[&user, &wallet, &sender, &key]).await
+        } else {
+            client.query_one("INSERT INTO public.runs (user_id, company_wallet, sender) VALUES ($1::text::uuid, $2, $3) RETURNING id::text", &[&user, &wallet, &sender]).await
+        }.map_err(|_| unavailable())?.get(0);
         for p in payments {
             client.execute(
                 "INSERT INTO public.payments (run_id, position, destination, request_id, transaction, last_valid_block_height, status, error, transparent) \
@@ -86,7 +174,7 @@ impl RunStore {
             .batch_execute("COMMIT")
             .await
             .map_err(|_| unavailable())?;
-        read(&client, user, &id).await
+        read(client, user, &id).await
     }
     pub async fn retry(&self, user: &str, id: &str, payments: &[Payment]) -> Result<Run, AppError> {
         let client = self.database.connect().await.map_err(|_| unavailable())?;
@@ -170,6 +258,15 @@ impl RunStore {
         } else {
             Err(AppError::Conflict("payment_attempt_changed"))
         }
+    }
+}
+
+async fn by_key(client: &Client, user: &str, key: &str) -> Result<Option<Run>, AppError> {
+    let id = client.query_opt("SELECT id::text FROM public.runs WHERE user_id=$1::text::uuid AND idempotency_key=$2::text::uuid", &[&user, &key])
+        .await.map_err(|_| unavailable())?;
+    match id {
+        Some(row) => read(client, user, &row.get::<_, String>(0)).await.map(Some),
+        None => Ok(None),
     }
 }
 
