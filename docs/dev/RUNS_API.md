@@ -15,12 +15,32 @@ viewing key and an applied available balance. Amounts and the 16-byte AES key
 remain transient. One audited source-key read covers each confidential batch build, attributed
 to the verified user. The backend never signs or submits transactions.
 
+## Authorization and recovery
+
+Creation and retry require company-admin membership and wallet ownership.
+`POST /runs` requires a nonnil UUID `idempotency_key`; identical keys recover the
+original committed intent, including signing payloads, without rebuilding.
+Changed wallet/source/ordered destinations return `409 idempotency_conflict`.
+Amounts are not stored or fingerprinted for replay comparison. A new key cannot
+repay a destination with an unresolved prepared payment for that owner.
+
+`GET /runs` lists owner metadata with ascending UUID cursors (default 20/max 100).
+`GET /runs/by-key/:key` and `GET /runs/:id/prepared` recover the original prepared
+payloads and expiry. All run responses are no-store. See [WEB3_API.md](WEB3_API.md)
+for the account mapping and enrollment APIs and the five deployment migrations.
+
+Public fallback requires `allow_transparent: true` on create or retry. Its default
+is false; proof-program unavailability then returns
+`409 transparent_consent_required` before public preparation.
+
 ## Prepare
 
 Send `Authorization: Bearer <Supabase access token>` to `POST /runs`:
 
 ```json
 {
+  "idempotency_key": "63000000-0000-4000-8000-000000000001",
+  "allow_transparent": false,
   "company_wallet": "<wallet public key>",
   "sender": "<source token account>",
   "aes_key": "<base64 balance key>",

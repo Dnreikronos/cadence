@@ -2,30 +2,32 @@
 
 Issue [#63](https://github.com/Dnreikronos/cadence/issues/63). This is what the
 web app builds and mocks against (#79), so the frontend and the proof service
-agree on one shape before the remaining routes exist.
+agree on the backend shapes and their integration requirements.
 
-**Status: working draft, nothing here is fixed.** The frontend wrote this so it can
-keep building screens against mocks while the backend routes do not exist. The
-backend owner is free to change any 🟡 proposal, including its shape, path or error
-codes; when that happens the client and the mocks follow, and this file is updated.
-Merging it is not a sign-off. Every route is marked:
+Read this when implementing a service route, updating frontend schemas or mocks,
+or deciding whether a screen can use the real API.
 
-- ✅ **Implemented.** Described from [`WRAP_API.md`](WRAP_API.md),
-  [`TRANSFER_API.md`](TRANSFER_API.md) and `services/proof/src`. Changing these is a
-  breaking change.
+Status: backend/web3 implementation updated on 2026-10-11; remaining proposals and frontend/backend
+agreement remain open. Review owners are the backend owner and João/frontend,
+as named in #63. This describes the backend branch on top of the merged
+#58–#60 work; it does not establish that those changes are deployed. Every route is marked:
+
+- ✅ **Implemented.** Described from `services/proof/src` and the linked
+  per-route references. The wire shape is available in the service; this label
+  does not mean the frontend's current schema or mock matches it.
 - 🟡 **Proposed.** The route does not exist yet. The shape below is the
   frontend's request, derived from the open issue that will build it. It is a
   starting point, not a commitment, and the questions that need an answer are
   collected in [Open questions](#open-questions).
 
-A client and a mock service (#110) already implement the shapes of the proposed
-routes as written below, and every screen of the web app is built on them (see
+A client and a mock service (#110) implement the frontend shapes recorded below,
+and the screens are built on them (see
 [`frontend/README.md`](../../frontend/README.md#screens)). Problems found in those
 shapes are therefore recorded in
 [Design review findings to resolve before building](#design-review-findings-to-resolve-before-building)
 as proposals, not applied silently to the shapes.
 
-Last synced with the client and the mock on 2026-10-04 (see
+Backend shapes updated on 2026-10-12. Frontend observations retain their recorded dates (see
 [Revisions](#revisions)). Where this file says what "the web app" or "the mock"
 does, it means `frontend/src/lib/api` (`schemas.ts`, `client.ts`, `errors.ts`,
 `sign.ts`, `mocks/handlers.ts`) and the flows under `frontend/src/lib` at that date.
@@ -36,37 +38,122 @@ assume without the backend having said so is in
 
 Nothing here changes a confidential-transfer rule. The user's wallet signs every
 transaction that moves the user's funds, and no customer wallet signing key reaches
-Cadence (ADR B9). No off-chain store holds a readable amount (ADR B12). Three
+Cadence (ADR B9). Confidential amounts have no plaintext off-chain amount column
+(ADR B12). Transparent fallback stores the public transaction, whose amount is
+already visible on chain; it adds no separate amount column. Three
 details are easy to over-read, so they are stated exactly:
 
 - The ✅ routes sign and submit nothing. A Cadence fee payer (#66, 🟡) would
   **co-sign** as fee payer; #66 itself asks to record that as a clarification of B9
   ("no _customer_ signing key reaches our infrastructure").
-- The browser does not hold a viewing key, but the service does. Proof generation
+- The intended browser key boundary is to retain no viewing key. Proof generation
   runs server-side and Cadence holds customers' ElGamal secrets in Vault (ADR B17).
-- Two values the browser sends are key-equivalent and must be handled like
-  secrets: the `aes_key` on `/transfer`, and the key-derivation signature on
+- Two values in the contract are key-equivalent and must be handled like
+  secrets: the `aes_key` on `/transfer`, `/runs`, run retry and `/unwrap`, and the
+  key-derivation signature on
   `/keys/enroll` (the signature derives both the ElGamal and the AES key).
+
+## Implemented routes and frontend compatibility
+
+The accepted backend implementation is described in [WEB3_API.md](WEB3_API.md),
+including account discovery/enrollment, configure/apply, private reads, encrypted
+roster amounts, CSV, consent and durable run recovery. The older frontend/mock
+observations below are retained for their team; frontend files were not changed.
+
+Registration is authoritative: [`lib.rs`](../../services/proof/src/lib.rs) merges
+the wrap, transfer, runs, unwrap, account, read, export and audit routers.
+There are 39 registered HTTP method/path pairs. ✅ records service availability in this checkout; 🟡 sections
+retain the current mock proposals for future backend work.
+
+| HTTP route | Authentication and result | Frontend integration notes |
+| --- | --- | --- |
+| `GET /health` | Public; health body on 200 or 503 | Compatible shape; no screen calls it. |
+| `POST /wrap` | Public; v0 prepare, `destination`, `mint`, `deposit_state` | Supports private/public funding; setup artifacts are not built by the screens. |
+| `POST /wrap/confirm` | Public; standalone finalized receipt | Compatible core shape. |
+| `POST /transfer` | JWT + wallet association; v1 prepare plus `sender`, `destination`, `mint`, `transparent` | Requires explicit fallback consent; clients must retain `transparent`. |
+| `POST /transfer/confirm` | JWT + request ownership; receipt plus `transparent` | Clients must retain the public payment flag. |
+| `POST /runs` | JWT + admin membership + wallet association; required creation key; token-account payments, positional v1 prepare | Positional client/mock requests now need the required creation key and consent policy. |
+| `GET /runs/:id` | JWT + run ownership; metadata without transaction bytes or amounts | Positional metadata is available; clients must retain unresolved submissions. |
+| `POST /runs/:id/confirm` | JWT + run ownership; batch positions, updated run and optional item errors | Use batch confirmation by position. |
+| `POST /runs/:id/retry` | JWT + admin membership + run/wallet ownership; AES key, amounts, original signatures; rebuilt positions only | Use run-level retry and keep original signatures for unresolved attempts. |
+| `POST /unwrap` | JWT + wallet association; AES key, acknowledgement; v1 prepare and reveal risk | Client must supply transient AES key and first-use wallet association proof. |
+| `POST /unwrap/check` | JWT + wallet association; reveal risk without a transaction | Use the documented backend path. |
+| `POST /unwrap/confirm` | JWT + request ownership; standalone receipt | Core success shape matches; mock uses different not-found/already-confirmed codes. |
+| `GET /audit/:company_id/payments` | JWT + auditor membership + company grant; amount-bearing page, no-store | Request path matches; nullable counterparty IDs and ascending UUID cursors differ from the mock. |
+| `GET /company/auditor-grants` | JWT + admin membership; grant page, no-store | Missing from client/mock. |
+| `POST /company/auditor-grants` | JWT + admin membership; `{auditor_id}`, 201 grant | Missing from client/mock; `/company/auditors` is an email-invite proposal. |
+| `POST /company/auditor-grants/:id/revoke` | JWT + admin membership; bodyless, 200 `{status: "revoked"}` | Missing from client/mock; their revoke path refers to an auditor/invite ID. |
+
+| `GET /runs` | Owner metadata pages, no-store | New HTTP listing; frontend migration belongs to its team. |
+| `GET /runs/by-key/:key` | Owner recovery by creation key, prepared payloads | New recovery route. |
+| `GET /runs/:id/prepared` | Owner recovery by run ID, prepared payloads | New recovery route. |
+| `POST /accounts/discover` | JWT + member + wallet ownership; validated account and canonical derivation message | New onboarding route; supports auxiliary accounts. |
+| `GET /keys/message` | JWT + wallet/account ownership; base64 SDK message | Replaces the mock-only message assumption. |
+| `POST /keys/enroll` | JWT + wallet/account ownership; canonical derivation signature; encrypted Vault keys | Requires `token_account`, absent from the current client request. |
+| `POST /accounts/configure` | JWT + wallet ownership; standard unsigned v1 prepare | Backend uses enrolled canonical keys. |
+| `POST /accounts/configure/confirm` | JWT + request ownership; durable receipt | Existing frontend path; backend verifies finalized account state. |
+| `POST /accounts/apply-pending` | JWT + wallet ownership; v1 apply prepare | Backend uses audited keys and the actual pending credit counter. |
+| `POST /accounts/apply-pending/confirm` | JWT + request ownership; durable receipt/counter mismatch | Existing frontend path; uncertainty retains the original request. |
+| `GET /me/status` | JWT + member; finalized activation/account status | Backend enrollment includes AES material for private reads. |
+| `GET /company/accounts` | JWT + admin; source mapping or null | New explicit sender-account read. |
+| `GET /company/people/accounts` | JWT + admin; nullable verified recipient mappings | New explicit recipient-account read. |
+| `GET /me/balance` | JWT + recipient; audited finalized balance, no-store | Core shape matches; real wallet/account enrollment remains frontend work. |
+| `GET /company/balance` | JWT + admin; audited finalized private balance | Core read shape matches. |
+| `GET /me/payments` | JWT + recipient; audited finalized incoming payment page | Nullable counterparty IDs and UUID paging require alignment. |
+| `GET /company/payments` | JWT + admin; audited finalized company payment page | Same paging/nullable-ID differences. |
+| `GET /company/people/amounts` | JWT + admin; encrypted roster amount page | Unset amounts and unready account mappings are null. |
+| `PUT /company/people/:id/amount` | JWT + admin; encrypted amount write | Current path is now callable through CORS. |
+| `POST /company/people/:id/amount` | Same write and authorization | Alternative POST route. |
+| `GET /company/export.csv` | JWT + admin; one audited complete bounded export | Six-decimal amounts, CRLF, quoting and formula neutralization. |
+| `GET /me/export.csv` | JWT + recipient; same export rules | Same headers and complete-export rules. |
+| `GET /audit/:company_id/export.csv` | JWT + auditor grant; one audited bounded export | Same CSV rules and live grant checks. |
+
+Email invitations, `/audit/access-log`, fee sponsorship and CSV filters remain
+proposals. The implemented read/activation/export shapes are authoritative in
+[WEB3_API.md](WEB3_API.md); the historical UI assumptions below do not override them.
+
+### Backend answers to the issue's frontend questions
+
+These answer the [2026-10-06 frontend comment](https://github.com/Dnreikronos/cadence/issues/63#issuecomment-6019477340)
+from the implementation. Account discovery and enrollment are implemented; frontend integration and shared sign-off remain open.
+
+1. **Recipient accounts.** `GET /company/people/accounts`, the roster read and
+   `public.people_accounts` expose nullable validated mappings. Accounts remain
+   null until confidential readiness is verified; runs still take token accounts.
+2. **Sender and keys.** `GET /company/accounts` returns the mapped source, including
+   auxiliary accounts. Discovery/message/enrollment use the SDK's exact
+   account-specific bytes and authenticated ownership. Vault encrypts ElGamal
+   and AES material for authorized backend reads; payment AES inputs stay transient.
+3. **Later positions after failure.** Stop sending after a preceding failure.
+   Original signatures are retained, and missing history does not release an
+   attempt. A new run cannot repay a destination with an unresolved prepared
+   payment. Eligible verified failures can still rebuild through retry.
+4. **Lost create response.** A required owner-scoped `idempotency_key`, run listing,
+   lookup by key and explicit prepared-payload recovery prevent duplicate creation.
+   Replaying a key recovers the original committed payload, including its original amount.
+5. **Expiry.** Blockhash expiry still does not establish nonexecution. Confirm,
+   retry and indexer keep unknown outcomes prepared; recovery returns original
+   bytes and expiry. There is no automatic release endpoint.
 
 ## Conventions
 
 | Topic            | Rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Base URL         | The web app reads `NEXT_PUBLIC_API_MODE` (`mock` or `real`) and, in real mode, `NEXT_PUBLIC_PROOF_API_URL`, which must be https unless it points at localhost, because the bearer token and the confidential keys travel in the requests. The service is a separate origin, so CORS applies (next row). In mock mode the base URL is the fixed origin `http://mock.cadence.test`, answered in the browser by MSW.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| CORS             | `PROOF_CORS_ORIGINS` defaults to `*` when unset (any origin, no credentials). An explicitly empty value disables cross-origin access. Otherwise it is a comma-separated list of exact origins. Allowed methods are **GET and POST only**. Allowed request headers are `Content-Type` and `Authorization`. Preflight is cached for 600 s (`cors.rs:13-43`). `PUT`, `PATCH` and `DELETE` fail preflight today. The web app's `Content-Security-Policy` also names this service's origin in `connect-src`, taken from `NEXT_PUBLIC_PROOF_API_URL` at build time, so a service that moves to another origin needs a new web build, not only a CORS entry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Format           | JSON in and out, `Content-Type: application/json`. Bodies are limited to 8 KiB by a `DefaultBodyLimit` on the wrap and transfer routers and to 32 KiB on the runs router (not on `/health`). An oversize body, a missing or wrong `Content-Type`, malformed JSON, a wrong field type and an unknown field all return `400 invalid_request`. The service never returns 413 or 415. The web app sends `Content-Type` only when a request has a body: the 🟡 `POST` routes that take none (revoke, retry, invite) send none (see question 34).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| CORS             | `PROOF_CORS_ORIGINS` defaults to `*` when unset (any origin, no credentials). An explicitly empty value disables cross-origin access. Otherwise it is a comma-separated list of exact origins. Allowed methods are **GET, POST and PUT**; `Retry-After` is exposed. Allowed request headers are `Content-Type` and `Authorization`. Preflight is cached for 600 s (`cors.rs:13-43`). `PATCH` and `DELETE` remain unavailable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Format | JSON in and out, `Content-Type: application/json` for bodies. Wrap, transfer, unwrap and audit accept 8 KiB bodies; runs accept 32 KiB. Registered JSON handlers convert oversize, missing/wrong content type, malformed JSON, wrong types and unknown fields to `400 invalid_request`, without echoing input. Bodyless grant revocation needs neither a body nor Content-Type. Proposed invite/retry POSTs currently omit both; their eventual handlers must define that behaviour (Q34). |
 | Amounts          | **Integer base units as a decimal string**, six decimals: `"1000000"` is 1 USDC. Never a JSON number (that is `400 invalid_request`), never `"1.5"`. The server accepts 1 to 15 ASCII digits whose value is `1` to `2^48 - 1` (`281474976710655`); an empty string, more than 15 characters, a non-digit, `0` or a larger value is `400 invalid_amount`. The server accepts leading zeros today (`"0001"` is 1). The web app is stricter on purpose and never sends them. The web app converts at the edge with exact integer math and never uses floats for money.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Identifiers      | `request_id` is 64 **lowercase** hexadecimal characters, the SHA-256 of the transaction wire bytes (uppercase is `400 invalid_request_id`). `company_wallet` must be a base58 public key that is on the ed25519 curve. Other wallet and account fields are base58 public keys. Signatures are base58 transaction signatures. Ids of runs, payments, people, auditors and companies are UUIDs (the client accepts any GUID shape).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Time             | RFC 3339 UTC.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Cluster          | Devnet only today. On another cluster `/wrap` and `/wrap/confirm` fail with `wrap_requires_devnet`. Only `/transfer` and `/transfer/confirm` remap it to `transfer_requires_devnet` (`client.rs:68`, `transfer.rs:335-340`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Rate limits      | Fixed 60 s windows, held in memory per service instance and reset on restart. The wrap routes and the transfer routes each have their own limiter, so a wrap call does not spend transfer quota. Per window and limiter: 120 requests in total, 30 per direct socket peer, and (prepare only) 10 per `company_wallet`. Forwarded IP headers are ignored, so behind a proxy all users share the proxy's peer quota. These are **not** windows: at most 8 requests in flight per limiter, and on `/transfer` at most 4 proof workers. Every limit returns `429` with `Retry-After: 60` and the route's `wrap_rate_limited` or `transfer_rate_limited` code, concurrency caps included. A confirm call spends the same peer and global quota as a prepare call, so polling uses budget. The runs routes use the transfer codes, have their own 120 and 30 per window and share the four proof workers with `/transfer` (see [`RUNS_API.md`](RUNS_API.md)). `/transfer` and `/transfer/confirm` also give up after 30 s with `503 transfer_timeout` (`wrap_limits.rs:41-115`, `transfer.rs:89`). `/health` is not limited. |
+| Cluster | Devnet only. Wrap emits `wrap_requires_devnet`; transfer emits `transfer_requires_devnet`; runs emits `runs_requires_devnet`; unwrap emits `unwrap_requires_devnet`. Auditor reads use stored receipts and make no RPC call. A previously stored terminal receipt can be returned without another cluster/RPC check. |
+| Rate limits | Wrap, transfer, runs and unwrap each have an independent per-instance limiter: fixed 60 s windows, 120 requests globally, 30 per direct socket peer, ten prepare/check/retry requests per wallet, and eight concurrent requests. Forwarded IP headers are ignored. Transfer, runs and unwrap share four CPU proof permits. Limits return `429` plus `Retry-After: 60`: wrap uses `wrap_rate_limited`, transfer/runs use `transfer_rate_limited`, unwrap uses `unwrap_rate_limited`. Transfer/runs and unwrap have 30 s HTTP timeouts using `transfer_timeout` or `unwrap_timeout`; wrap has no outer HTTP timeout. Audit allows four concurrent payment-page reads, with `503 audit_unavailable` at capacity; it has no minute-based limiter. Health is not limited. See the per-route references and finding 11 for wallet-quota check order. |
 | `Retry-After`    | CORS sets no `expose_headers`, and `Retry-After` is not a CORS-safelisted response header, so cross-origin browser code reads `null` for it. Until the backend exposes it, the web app waits a fixed 60 s on any `429` whose `Retry-After` it cannot read (60 is the only value the service sends) and does not auto-retry in a loop: `ApiError.retryAfter` is 60 then, or the header's value when it is readable (the mock sends it from the same origin, so it is readable there only). **Backend request:** add `Access-Control-Expose-Headers: Retry-After`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Caching          | `Cache-Control: no-store` on every response that carries an amount. The web app fetches every request, downloads included, with `cache: "no-store"` and keeps amounts in memory only (React Query's cache; the only thing written to `localStorage` is the saved submission records, which hold no amount except a withdrawal's, kept until its outcome is final or it is pruned, and kept across a sign-out while it is unresolved). The service sets no `Cache-Control` on any route today (the only response header it sets itself is `Retry-After`), so this is a backend request.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Caching | The frontend fetches with `cache: "no-store"` and keeps amounts in memory only. The implemented audit router sets `Cache-Control: no-store` on payment reads, grant operations and errors. Runs, account lifecycle, owner reads/writes and all exports also set no-store on success and error; wrap, transfer and unwrap retain their existing header behavior. Persisted submission records contain no amount or confidential key. |
 | Request checks   | The client parses every request body with a strict schema before it leaves the browser, so an unknown field or a malformed value throws in the browser and nothing is sent. Amounts: `1` to `2^48 - 1`, digits only, no leading zero (a read may be `"0"`). Wallets, accounts and `company_wallet`: base58, 32 to 44 characters; the curve is not checked. Request signatures (`signature`, `wallet_signature`): base58, 43 to 88 characters. `request_id`: 64 lowercase hex. `aes_key`: base64 of exactly 16 bytes (22 characters, a last one of `A`, `Q`, `g` or `w`, then `==`). `setup` artifacts: base64. A path segment that is not a GUID is refused before the call, so `..` or `/` never reaches a path. Responses are checked too: one that does not match its schema is a `ContractError`, not an `ApiError`.                                                                                                                                                                                                                                                                                               |
 | Retryable errors | `ApiError.isRetryable` is true for `transaction_not_finalized`, any `429`, `502` to `504` (so `503` too) and `network_error` (the browser could not reach the server). It is false for `500`, every other `4xx` and a `ContractError`. Confirm polling and the screens' "Try again" use that one flag. React Query retries a failed read once, and never a `4xx`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Compatibility    | Additive only. See [Evolving the contract](#evolving-the-contract).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
-### Authentication ✅ for `/transfer`, 🟡 for everything else
+### Authentication ✅ for transfer, runs, unwrap and audit
 
 Send the Supabase session's access token:
 
@@ -91,14 +178,18 @@ the token body.
   fixed string `mock-token`, and the mock only checks that some `Bearer` value is
   present. Nothing in the client signs the user out on an API error: a `401` shows
   "Your session ended" and the route guard decides the rest.
-- **Order of checks on `/transfer` and `/transfer/confirm`.** Rate limits come
+- **Order of checks on `/transfer` and `/transfer/confirm`.** Peer/global rate limits come
   first. Then body validation (`400`) and `503 transfer_unavailable` (the routes are
   not configured) run **before** the token check. An unauthenticated, malformed
   request therefore gets `400`, not `401`, and an unauthenticated request to an
-  unconfigured service gets `503`, not `401` (`transfer.rs:129-152`,
-  `transfer.rs:274-291`).
+  unconfigured service gets `503`, not `401`. Prepare charges the wallet quota
+  after authentication but before wallet association (finding 11). Run prepare
+  uses the same ordering. Unwrap authorizes the wallet before charging its quota;
+  audit authenticates before validating pagination. The mock's shared guard is
+  not an exact model of these route-specific check orders.
 
-**Wallet association (✅).** The first `/transfer` for a wallet carries
+**Wallet association (✅).** The first `/transfer`, `/runs`, `/unwrap` or
+`/unwrap/check` for a wallet carries
 `wallet_signature`, a signature over exactly these UTF-8 bytes with no trailing
 newline:
 
@@ -116,7 +207,14 @@ and so is a `sender` account the wallet does not own (see
 [Transfer](#transfer-one-confidential-payment-)). This is a different message from
 the key-derivation message; the two are never interchangeable.
 
-**Roles (🟡).** Routes under `/me`, `/company` and `/audit` authorize from the
+**Roles.** Implemented auditor reads require an auditor membership and an explicit
+grant for the requested company; missing or wrong-company grants are
+`404 audit_not_found`. Implemented `/company/auditor-grants*` routes require admin
+membership (`403 forbidden_role`). Payment routes authorize a wallet/run owner
+without imposing a company role. See [AUDIT_API.md](AUDIT_API.md).
+
+For the remaining 🟡 routes, the proposal is that `/me`, `/company` and `/audit`
+authorize from the
 caller's `memberships` row (admin, recipient or auditor, one company each). The
 web app's route guard only chooses which page to show. The service enforces the
 role itself on every call and reads it from the database each time. The browser
@@ -135,20 +233,27 @@ ships them (see [Open questions](#open-questions)).
 
 ## Errors
 
-Every error from a route is a fixed JSON object:
+The base error envelope from a registered route is a fixed JSON object:
 
 ```json
 { "error": "<stable_code>" }
 ```
 
-The only exceptions are routing errors: an unknown path is `404` and a wrong method
+Routing errors have no JSON envelope: an unknown path is `404` and a wrong method
 is `405`, both with an empty body, because no fallback handler is registered
-(`lib.rs:56-61`).
+([router registration](../../services/proof/src/lib.rs)).
+
+`409 reveal_risk_not_acknowledged` additionally carries `reveal_risk` with its
+level and payment IDs/dates, never amounts. Run confirm/retry return per-position
+fixed errors in an HTTP 200 `errors` array; the caller must inspect it even when
+the HTTP request succeeded. See [Unwrap](#unwrap-private-usdc-to-public-with-the-reveal-risk-flag-)
+and [Payroll run](#payroll-run-one-approval-many-recipients-).
 
 - The code is the contract. The message shown to people is written by the web app
   per code, so copy can change without a backend release.
-- **No error ever contains an amount, a key, a token, a signature or any value from
-  the request.** Rejected JSON cannot echo what was sent.
+- **No error contains an amount, key, token, signature or raw rejected input.**
+  Structured payment references and run positions are allowed; rejected JSON
+  cannot echo the submitted body.
 - Statuses are fixed per code: `400` malformed, `401` unauthenticated, `403` not
   allowed, `404` unknown (or, for `/transfer/confirm`, not yours), `409` a rule or
   chain state conflicts, `429` rate limited, `500` `internal_error`, `503` a
@@ -161,16 +266,16 @@ is `405`, both with an empty body, because no fallback handler is registered
 
 ### Codes in use ✅
 
-| Status | Codes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 400    | `invalid_request`, `invalid_account`, `invalid_wallet`, `invalid_amount`, `invalid_transfer`, `invalid_balance_key`, `invalid_request_id`, `invalid_signature`, `invalid_confidential_setup`, `invalid_payments`, `invalid_payment`, `invalid_run_id`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| 401    | `authentication_required`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| 403    | `wallet_access_denied`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| 404    | `transfer_not_found`, `wrap_not_found`, `run_not_found`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| 409    | `wrap_requires_devnet`, `transfer_requires_devnet`, `wallet_link_required`, `sender_account_missing`, `recipient_account_missing`, `invalid_sender_account`, `invalid_confidential_state`, `proof_generation_failed`, `transaction_not_finalized`, `transaction_failed`, `transaction_mismatch`, `transfer_already_confirmed`, `wrap_already_confirmed`, `confidential_setup_required`, `wrapped_mint_missing`, `invalid_wrapped_mint`, `usdc_source_missing`, `invalid_usdc_source`, `insufficient_usdc`, `invalid_wrap_destination`, `confidential_destination_unavailable`, `confidential_key_mismatch`, `runs_requires_devnet`, `outstanding_payments`, `original_signature_required`, `transaction_history_unavailable`, `payment_already_resolved`, `payment_attempt_changed`, `payment_not_prepared` |
-| 429    | `transfer_rate_limited`, `wrap_rate_limited` (both with `Retry-After: 60`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| 500    | `internal_error`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| 503    | `transfer_unavailable`, `auth_unavailable`, `key_storage_unavailable`, `transfer_storage_unavailable`, `wrap_storage_unavailable`, `rpc_unavailable`, `transfer_timeout`, `run_storage_unavailable`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Status | Codes |
+| --- | --- |
+| 400 | `invalid_request`, `invalid_account`, `invalid_wallet`, `invalid_amount`, `invalid_transfer`, `invalid_balance_key`, `invalid_request_id`, `invalid_signature`, `invalid_confidential_setup`, `invalid_payments`, `invalid_payment`, `invalid_run_id` |
+| 401 | `authentication_required` |
+| 403 | `wallet_access_denied`, `forbidden_role` |
+| 404 | `transfer_not_found`, `wrap_not_found`, `run_not_found`, `unwrap_not_found`, `audit_not_found` |
+| 409 | `wrap_requires_devnet`, `transfer_requires_devnet`, `runs_requires_devnet`, `unwrap_requires_devnet`, `wallet_link_required`, `sender_account_missing`, `recipient_account_missing`, `invalid_sender_account`, `invalid_confidential_state`, `proof_generation_failed`, `transaction_not_finalized`, `transaction_failed`, `transaction_mismatch`, `transfer_already_confirmed`, `wrap_already_confirmed`, `unwrap_already_confirmed`, `confidential_setup_required`, `wrapped_mint_missing`, `invalid_wrapped_mint`, `usdc_source_missing`, `invalid_usdc_source`, `insufficient_usdc`, `invalid_wrap_destination`, `confidential_destination_unavailable`, `confidential_key_mismatch`, `outstanding_payments`, `original_signature_required`, `transaction_history_unavailable`, `payment_already_resolved`, `payment_attempt_changed`, `payment_not_prepared`, `reveal_risk_not_acknowledged`, `withdrawal_balance_unavailable`, `auditor_already_active`, `invalid_token_account`, `token_account_frozen`, `insufficient_public_balance`, `non_confidential_credits_disabled` |
+| 429 | `transfer_rate_limited`, `wrap_rate_limited`, `unwrap_rate_limited` (all with `Retry-After: 60`) |
+| 500 | `internal_error` |
+| 503 | `transfer_unavailable`, `auth_unavailable`, `key_storage_unavailable`, `transfer_storage_unavailable`, `wrap_storage_unavailable`, `rpc_unavailable`, `transfer_timeout`, `run_storage_unavailable`, `unwrap_unavailable`, `unwrap_storage_unavailable`, `unwrap_timeout`, `reveal_history_unavailable`, `audit_unavailable` |
 
 Which route emits what, where it is not obvious:
 
@@ -196,9 +301,10 @@ Which route emits what, where it is not obvious:
 - `internal_error` covers configuration and transaction-assembly failures
   (`error.rs:36-81`).
 
-### Codes this contract adds 🟡
+### Codes for proposed routes 🟡
 
-Statuses and routes are part of the proposal.
+Statuses and routes are part of the proposal. Some codes already exist on other
+implemented routes; their use here does not make these proposed routes available.
 
 | Status | Code                                      | Where                                                                                                                                                                                                                                                                                                 |
 | ------ | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -257,21 +363,22 @@ touch ADR B9.
 sequenceDiagram
   participant W as Web app
   participant S as Proof service
-  participant T as Turnkey wallet
+  participant T as User wallet
   participant C as Solana RPC
-  W->>S: POST /{action} (JWT for /transfer, params)
+  W->>S: POST /{action} (params, JWT except wrap)
   S-->>W: request_id, unsigned transaction, signers, blockhash
   W->>T: sign the exact bytes
   T-->>W: signed transaction
   W->>C: send the signed transaction
-  W->>S: POST /{action}/confirm (request_id, signature)
+  W->>S: POST /{action}/confirm (standalone pair or run batch)
   S->>C: read the finalized transaction
   S-->>W: receipt (signature, slot, finalized)
 ```
 
 ### Prepare response ✅
 
-All prepare routes return the same core fields, plus route-specific ones:
+Standalone `/wrap`, `/transfer` and `/unwrap` prepare routes return these core
+fields, plus route-specific ones. Runs use a batch envelope described below:
 
 ```json
 {
@@ -288,12 +395,17 @@ All prepare routes return the same core fields, plus route-specific ones:
   bytes to the signer and signs **unchanged**. It never edits the message,
   replaces the blockhash or adds instructions: confirmation is bound to that
   message, and a changed one fails with `transaction_mismatch`.
-- `transaction_version` is `0` for `/wrap` and `1` for `/transfer` and `/runs`. The signer must
-  support the version it is given. Extension wallets do not sign version 1 yet, so
-  every user signs through a Turnkey embedded wallet (#77). Never fall back to
-  signing the bytes as a message.
+- `transaction_version` is `0` for `/wrap` and `1` for `/transfer`, `/runs` and
+  `/unwrap`, including transparent transfer/run attempts. The serialized unsigned
+  transaction has zero-filled signature slots. `v0::compile_unsigned` and
+  `v1::compile_unsigned` enforce wire limits of 1,232 and 4,096 bytes respectively.
+  The signer must support the returned version; never sign transaction bytes as a
+  message. Production wallet integration remains open: the current real-mode
+  frontend wallet is unavailable (`frontend/src/lib/wallet/types.ts`).
 - `required_signers` lists every key that must sign, in the order the service
-  expects. Today it holds only the company wallet. The web app signs only for keys
+  expects: the first `num_required_signatures` static message account keys, in
+  signature-slot order. Today it holds only the initiating company/recipient wallet,
+  which is also the fee payer. The web app signs only for keys
   it controls and **fails loudly if it is asked to sign for a key that is not the
   user's wallet** (see [Open questions](#open-questions) on a service fee payer,
   #66): `signAndConfirm` throws `UnexpectedSignerError` before anything is signed
@@ -316,9 +428,13 @@ All prepare routes return the same core fields, plus route-specific ones:
   [web app's README](../../frontend/README.md#api-client-and-mocks), with what they cannot
   check (confidential amounts, proof contents). The service must keep building
   transactions inside them, and a new instruction, account or program is a contract change.
-  `/accounts/configure` and `/accounts/apply-pending` must act on the wallet's associated
-  Token-2022 account for the wrapped mint.
+  `/accounts/configure` and `/accounts/apply-pending` act on the backend-validated
+  Token-2022 account for the wrapped mint, which may be an auxiliary account.
+  Clients must verify that returned mapping rather than always guessing an ATA.
 - Returning bytes does not move funds. Signing is the authorization.
+
+Wire construction: [`v0.rs`](../../services/proof/src/solana/v0.rs#L14) and
+[`v1.rs`](../../services/proof/src/solana/v1.rs#L15).
 
 **The Signer.** The web app needs two things from the user's wallet, and nothing
 else (`Signer` in `sign.ts`):
@@ -337,6 +453,11 @@ else (`Signer` in `sign.ts`):
   It belongs to the wallet object, not to the `Signer`.
 
 ### Confirm ✅
+
+The following pair/receipt applies to `/wrap/confirm`, `/transfer/confirm` and
+`/unwrap/confirm`. `/runs/:id/confirm` accepts a batch and returns a run, not this
+standalone receipt. Transfer prepare and confirm additionally include the stored
+`transparent` boolean.
 
 ```json
 {
@@ -360,7 +481,9 @@ receipt:
 - The service reads the transaction at finalized commitment with
   `maxSupportedTransactionVersion: 1`, and records a receipt only if execution
   succeeded, the message matches what it prepared, and the wallet's signature
-  verifies.
+  verifies. Standalone confirm persists the submitted signature before
+  the RPC lookup. The [indexer](INDEXER.md) can recover receipts without a browser
+  confirm; neither path treats missing RPC history as a failed execution.
 - `409 transaction_not_finalized` means "not yet". The service returns it whenever
   the finalized read finds nothing, so it also covers a signature that was never
   submitted or has been dropped. The web app retries `/confirm` with a short
@@ -376,15 +499,18 @@ receipt:
 - `409 transaction_failed` means the transaction with that signature executed with
   an error. `409 transaction_mismatch` means the transaction with that signature is
   not the prepared message, or its signature does not verify for the wallet. Both
-  are final **for that signature**, not for the `request_id`: the record stays
-  unsigned, so the genuine signature can still confirm it. In practice the user
-  starts again from prepare.
+  concern the supplied signature, not proof that the intended request never landed.
+  A mismatch alone cannot authorize replacement of an unresolved payment; confirm
+  the genuine submitted signature. The submitted-signature record remains available
+  to the indexer, and run failures are recorded as terminal failed attempts.
 - A different signature for a request that already has a receipt is
   `409 transfer_already_confirmed` (`/transfer/confirm`) or
-  `409 wrap_already_confirmed` (`/wrap/confirm`).
-- **`/transfer/confirm` only:** another user's `request_id` is `404
-transfer_not_found`, because transfer records are looked up by `request_id` and
-  `user_id`. **`/wrap/confirm` has no user:** a wrap record is looked up by
+  `409 wrap_already_confirmed` (`/wrap/confirm`) or
+  `409 unwrap_already_confirmed` (`/unwrap/confirm`).
+- **Authenticated confirms:** another user's `request_id` is `404
+  transfer_not_found` or `404 unwrap_not_found`, and another user's run is
+  `404 run_not_found`, because records are scoped by the verified user.
+  **`/wrap/confirm` has no user:** a wrap record is looked up by
   `request_id` alone, and anyone holding an id may confirm it. That only records
   the public fact that the wallet's own signed transaction landed
   (`wrap_store.rs:144-158`).
@@ -437,17 +563,22 @@ transfer_not_found`, because transfer records are looked up by `request_id` and
 
 - **Wrap records are deleted.** The service removes unsigned wrap records whose
   blockhash has expired and that are more than 24 hours old
-  (`20260930000001_wrap_cleanup.sql`). Confirming the earlier `request_id` after
+  and whose `submitted_signature` is null. The indexer migration replaces the
+  earlier cleanup function (`20261010000000_chain_indexer.sql`). Confirming the
+  earlier `request_id` after
   that can return `404 wrap_not_found`, and that is **not** evidence that the
   deposit failed ([`WRAP_API.md`](WRAP_API.md)). Reconcile by the chain
   signature, and confirm within 24 hours. Confirmed receipts are never deleted.
   Transfer records have no cleanup job.
 - **`request_id` is not a stable key for a payment.** It is the SHA-256 of the wire
   bytes. For `/wrap`, two preparations produce the same `request_id` only when they
-  get the same blockhash, and then they cannot erase an earlier confirmation. Each
-  `/transfer` prepare yields a new `request_id`, because the proofs are randomized.
-  It also costs a Vault key read, a decryption audit row and one of the wallet's 10
-  prepares per minute, so the client does not prepare "just to check".
+  get the same blockhash, and then they cannot erase an earlier confirmation. A
+  confidential
+  `/transfer` prepare yields fresh randomized proofs and a new `request_id`, and
+  costs a Vault key read, a decryption audit row and one wallet preparation.
+  Transparent attempts contain no randomized proofs or Vault read and may repeat
+  identical bytes with the same blockhash. Neither is a payment idempotency key;
+  the client does not prepare "just to check".
 
 #### The sent-failure rule
 
@@ -625,8 +756,8 @@ both base64). If the account is already configured, omit it.
 The prepare response adds `destination` (the Token-2022 account), `mint` and
 `deposit_state: "pending_after_confirmation"`. The wrapped amount lands in the
 **pending** balance. It is only spendable after the owner applies it with
-`POST /accounts/apply-pending`, which is 🟡 proposed (#68) and does not exist yet:
-today no service route applies pending credits. The web app must not call the
+`POST /accounts/apply-pending`, now implemented with authenticated enrollment
+and durable confirmation; see [WEB3_API.md](WEB3_API.md#configure-and-apply-pending). The web app must not call the
 deposit "available" before that step: the Deposit screen runs the wrap, then the
 apply, and says the deposit is private only after both. A deposit is public by
 design.
@@ -722,18 +853,113 @@ they are.
   `transaction_mismatch`, `payment_attempt_changed`, `payment_already_resolved`, ...)
   are in an optional `errors` list.
 - `POST /runs/:id/retry` takes the `aes_key` again, the intended `amount` of each
-  position to rebuild and, for every prepared attempt whose blockhash has not expired,
-  its original signature. It refuses the whole retry while such an attempt can still
-  land (`outstanding_payments`, `original_signature_required`,
-  `transaction_not_finalized`), keeps finalized payments, leaves expired prepared ones
-  unresolved (`transaction_history_unavailable`, never rebuilt) and rebuilds `failed`,
-  `expired` and `preparation_failed` ones with `attempt + 1`.
-- `GET /runs/:id` returns the run without transactions, amounts or people. Payment
-  `status` is `prepared`, `finalized`, `failed`, `expired` or `preparation_failed`; the
-  run's is `prepared`, `partial_failure` or `completed`. Another user's run is
-  `404 run_not_found`.
-- No idempotency key, and no role check beyond the user and the wallet's ownership of
-  the sender.
+  position to rebuild and, for every attempt whose blockhash has not expired, its
+  original wallet signature. It keeps finalized payments, rebuilds the unpaid ones
+  against fresh sender state in the same run, and increments `attempt`. A run is never
+  restarted for a recipient who might already be paid.
+- `GET /runs/:id` returns the ordered metadata (`position`, `destination`, `attempt`,
+  `request_id`, `status`, `signature`, `slot`, `error`), no amounts and no transaction
+  bytes. Another user's run is `404 run_not_found`. Payment `status` is `prepared`,
+  `finalized`, `failed`, `expired` or `preparation_failed`; the run's is `prepared`,
+  `partial_failure` or `completed`.
+- Limits: 1 to 100 recipients, a 32 KiB body, the transfer rate-limit and timeout
+  codes, ten preparations or retries per wallet per minute and the four proof workers
+  shared with `/transfer`. New codes are in [Codes in use](#codes-in-use-).
+- It never signs or submits, and no response carries an amount or a key.
+
+The implemented request and one prepared payment response are:
+
+```json
+{
+  "company_wallet": "<wallet public key>",
+  "sender": "<owned wrapped-USDC token account>",
+  "aes_key": "<base64 16-byte balance key>",
+  "wallet_signature": "<first-use wallet association signature>",
+  "idempotency_key": "<nonnil owner-scoped UUID>",
+  "allow_transparent": false,
+  "payments": [{ "recipient": "<recipient token account>", "amount": "1000000" }]
+}
+```
+
+```json
+{
+  "run_id": "<uuid>",
+  "company_wallet": "<wallet public key>",
+  "sender": "<source token account>",
+  "mint": "<wrapped-USDC mint>",
+  "status": "prepared",
+  "transaction_version": 1,
+  "required_signers": ["<wallet public key>"],
+  "payments": [{
+    "position": 0,
+    "destination": "<recipient token account>",
+    "attempt": 0,
+    "request_id": "<64-character hash>",
+    "status": "prepared",
+    "signature": null,
+    "slot": null,
+    "error": null,
+    "transparent": false,
+    "transaction": "<base64 unsigned v1 wire transaction>",
+    "last_valid_block_height": 123
+  }]
+}
+```
+
+Version and signers belong to the run envelope, not each payment. The blockhash
+is encoded in each transaction; run payments have no separate `recent_blockhash`.
+`request_id` may be null for a preparation failure, which also omits transaction
+and expiry fields. A status/confirm response omits signing payloads entirely.
+
+`POST /runs/:id/confirm`:
+
+```json
+{
+  "payments": [{ "position": 0, "request_id": "<attempt hash>", "signature": "<original signature>" }]
+}
+```
+
+`POST /runs/:id/retry`:
+
+```json
+{
+  "aes_key": "<base64 16-byte balance key>",
+  "payments": [{ "position": 0, "amount": "1000000", "signature": "<original signature when required>" }]
+}
+```
+
+Both return the run envelope above. Item errors appear as
+`errors: [{ "position": 0, "error": "transaction_history_unavailable" }]` and
+the field is omitted when empty. Retry returns transaction/expiry fields only for
+positions rebuilt in that request. Preserve unresolved attempts and their
+signatures; an HTTP 200 with item errors is not confirmation that every payment
+landed. See [`RUNS_API.md`](RUNS_API.md#retry-unpaid-positions) for live-position
+requirements and finalized expiry handling.
+
+| Topic            | Implemented (`RUNS_API.md`)                                                                    | Client and mock today                                                                                  |
+| ---------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Who is paid      | `recipient` token accounts, distinct                                                           | `person_id`s                                                                                           |
+| Request          | `company_wallet`, `sender`, `aes_key`, `wallet_signature`, `payments`                          | `company_wallet`, `payments`, `idempotency_key`                                                        |
+| Idempotency      | none; a second run for an unresolved recipient must not be started                             | `idempotency_key`, one per attempt                                                                     |
+| A payment is     | a `position` in the run                                                                        | a `payment_id` and a `person_id`                                                                       |
+| Confirm          | `POST /runs/:id/confirm`, a batch of `{ position, request_id, signature }`                     | `POST /runs/:run_id/payments/:payment_id/confirm { signature }`                                        |
+| Retry            | `POST /runs/:id/retry` with `aes_key`, amounts and the original signatures of live attempts    | `POST /runs/:run_id/payments/:payment_id/retry`, no body                                               |
+| Read             | `run_id`, `status`, `payments[]` as above; no `created_at`, no person                          | `run_id`, `created_at`, `payments[{ payment_id, person_id, status, transparent, failure, signature }]` |
+| Payment statuses | `prepared`, `finalized`, `failed`, `expired`, `preparation_failed`                             | `pending`, `signed`, `confirmed`, `failed`, `expired`                                                  |
+| Errors           | `run_not_found`, `invalid_payments`, `outstanding_payments`, `transaction_history_unavailable` | `person_not_found`, `recipient_not_activated`, `payment_not_found`, `payment_not_retryable` (mock)     |
+| Body limit       | 32 KiB                                                                                         | 100 payments checked in the browser                                                                    |
+
+Creation/signing gaps for the web app: it needs each person's token account and
+the company's source account (nothing returns them to it), it would have to send the
+`aes_key` (which no screen sends today), it has no `idempotency_key` to lean on for a
+double click, and its run screen reads statuses and per-payment ids that the service
+does not have. The real-mode `api.runs.get` adapter now reads owner-scoped Supabase
+metadata, orders payments by position and maps `prepared` to `pending`, `finalized`
+to `confirmed`, and `preparation_failed` to `failed`. It preserves `transparent`,
+uses the stored `payment_id`, returns `person_id: null` and exposes `destination`.
+This does not adapt create, confirm or retry to the implemented HTTP API.
+The sections below that name the proposal's routes and codes describe
+what the client and the mock do, not what the service answers.
 
 **What the web app does with it.**
 
@@ -780,7 +1006,7 @@ key; how a never-sent position after a failure is released (the service keeps it
 `expired`, which the service never writes, and confirm never classifying an expired
 attempt.
 
-#### Recipient accounts 🟡
+#### Recipient accounts ✅
 
 `GET /company/people/accounts`, admin only, paged like the amounts read:
 `{ items: [{ person_id, token_account | null }], next_cursor }`. No amount. A person
@@ -816,6 +1042,9 @@ The response carries a **structured flag**, not a rendered message:
   "required_signers": ["<wallet>"],
   "recent_blockhash": "<blockhash>",
   "last_valid_block_height": 123,
+  "source": "<wallet's wrapped-USDC ATA>",
+  "destination": "<wallet's ordinary-USDC ATA>",
+  "mint": "<ordinary-USDC mint>",
   "reveal_risk": {
     "level": "none | near | exact",
     "matches": [{ "payment_id": "<uuid>", "paid_at": "2026-10-03T19:00:00Z" }]
@@ -843,7 +1072,8 @@ The response carries a **structured flag**, not a rendered message:
 - **What the withdraw screen does with it.** It always asks first with
   `acknowledge_reveal_risk: false`. Only a `409 reveal_risk_not_acknowledged` on that
   first ask turns into the question "This amount can be linked to a payment you
-  received", worded without a `level` because the `409` carries none (finding 6); the
+  received", worded without a `level` because the current client discards that
+  metadata and the mock omits it. The implemented `409` does carry the flag; the
   box has to be ticked for that amount, and a new amount asks again. An acknowledged
   ask that still answers it, and every other failure, is shown as an error. The
   `level` of the prepared transaction is shown while it is signed and on the result.
@@ -853,7 +1083,7 @@ The response carries a **structured flag**, not a rendered message:
   request has no destination field, so a withdrawal goes to the person's own wallet
   (#87 asks for "or any address").
 
-### Accounts: configure and apply pending 🟡
+### Accounts: configure and apply pending ✅
 
 For recipient activation (#67, #68, #80).
 
@@ -873,7 +1103,7 @@ For recipient activation (#67, #68, #80).
   nothing on the browser's side to refuse it. The service must refuse an apply it has
   already done, for every caller, and not leave it to the client.
 
-Both take `{ "wallet": "<public key>" }` and no amount. Neither route exists today.
+Both take `{ "wallet": "<public key>" }` and optional `wallet_signature`, with no amount. Both routes are implemented after authenticated account discovery/enrollment.
 Their `confirm` takes `{ request_id, signature }` and returns the receipt.
 
 **What the screens do with `credit_counter_mismatch`.** They do not ask the person
@@ -891,10 +1121,12 @@ and this code, like any other failure after the send, offers a try again that
 prepares another apply (which cannot wrap twice). The mock's `credit-mismatch`
 scenario exercises the `/me` path.
 
-### Key enrollment 🟡
+### Key enrollment ✅
 
-`POST /keys/enroll` stores the encrypted viewing key material (#50). Today only a
-library function exists (`vault::enroll`); there is no HTTP route. The key
+`POST /keys/enroll` is implemented with wallet/account authorization and encrypted
+ElGamal plus AES material. The current request and idempotent success behavior
+are in [WEB3_API.md](WEB3_API.md#account-discovery-and-enrollment). The paragraphs
+below record the older frontend/mock enrollment assumptions for migration. The key
 derivation is per **token account**, not per wallet: the signed message is the SDK's
 derivation message for one token account (`elgamal.rs:20-35`). The request carries
 the **signature** of that canonical key-derivation message, which the web app
@@ -914,7 +1146,12 @@ wallet-association signature here, and treat the derivation signature as a secre
 it derives the ElGamal and the AES key. See
 [findings 2 and 3](#design-review-findings-to-resolve-before-building).
 
-### Reading data 🟡
+### Reading data ✅
+
+The balance, owner-payment and roster routes are implemented. Exact finalized
+read, nullable-field, audit and pagination rules are in [WEB3_API.md](WEB3_API.md#private-reads-and-roster-amounts). Owner and auditor history contains finalized
+payments; unresolved progress is read from run metadata. All implemented
+collections use bounded ascending UUID cursors, unlike the older offset mocks.
 
 The service decrypts server-side (ADR B17) and answers only for the caller's own
 data or their own company. **Each of these calls writes one row to the decryption
@@ -931,7 +1168,7 @@ one route polled for status, `GET /runs/:run_id`, carries no amount (see
 
 Every response from these routes carries `Cache-Control: no-store`.
 
-All collection routes are paged: `?limit=50&cursor=<opaque>`, newest first, and
+Proposed collection routes are paged: `?limit=50&cursor=<opaque>`, newest first, and
 return `{ "items": [...], "next_cursor": "<opaque> | null" }`. The client asks for
 `limit` 20 (recipient history, auditor lists), 25 (company receipts), 50 (auditors) and
 100 (roster amounts, the 24-hour "recently paid" read, a one-page auditor check), and
@@ -952,13 +1189,10 @@ so when the cap cut a list short. The mock uses an offset as the cursor, clamps
 | `PUT /company/people/:person_id/amount` | company admin                        | set one amount, `{ "amount": "<base units>" }`, stored encrypted                                                                                     |
 | `GET /audit/:company_id/payments`       | auditor with a grant on that company | decrypted amounts for that company                                                                                                                   |
 
-**Blocked: `PUT` fails CORS preflight.** The service allows only GET and POST
-(see [Conventions](#conventions)), so a browser cannot call
-`PUT /company/people/:person_id/amount` until CORS allows `PUT`. The alternative is
-to make the route a `POST`; this document does not change the shape, and the choice
-is in [Open questions](#open-questions). The client sends a `PUT` and the mock
-accepts it (a mock answers without a preflight), so saving a person's amount works in
-mock mode and would fail in a browser against the real service today.
+**CORS implemented.** GET/POST/PUT are allowed, and `Retry-After` is exposed.
+The existing wildcard/configured-origin policy and disabled cookies are retained.
+The roster amount write also accepts POST. Historical frontend paging defaults
+above remain observations; backend reads default to 20, cap at 100, and use UUIDs.
 
 A payment item:
 
@@ -987,17 +1221,24 @@ An auditor with a grant on company A who asks for company B gets `404`.
 **Implemented auditor read (#59).** See [AUDIT_API.md](AUDIT_API.md) for
 `GET /audit/:company_id/payments`, its dedicated database role, one committed audit
 row per page, and admin grant create/list/revoke endpoints. This route returns
-finalized confidential payroll and standalone payments with UUID cursor
-pagination. Where recipient metadata is unavailable, `counterparty.id` is null
+finalized confidential and transparent payroll and standalone payments, ordered
+by UUID ascending. `limit` defaults to 20, accepts 1–100, and the cursor is the
+last returned payment UUID when another page exists. Invalid/unknown/duplicate
+query fields and malformed or nil UUIDs return `400 invalid_request`.
+Missing/revoked/wrong-company grants return `404 audit_not_found`. Every response
+sets `Cache-Control: no-store`. Where recipient metadata is unavailable,
+`counterparty.id` is null
 and its name is the destination address; the current client schema must accept
 that before connecting this read. The email invitation routes below remain
 proposed; the implemented grant API acts on existing auditor identities.
 
-### CSV export 🟡
+### CSV export ✅
 
 `GET /company/export.csv`, `GET /me/export.csv` and `GET /audit/:company_id/export.csv`
-(#70). Columns are `date,counterparty,amount,status,signature`. Each export writes
-one audit row.
+(#70), implemented with the rules in [WEB3_API.md](WEB3_API.md#csv-exports).
+Columns are `date,counterparty,amount,status,signature`. Each export writes one
+audit row and either exports at most 10,000 finalized payments completely or
+returns `409 export_too_large` before key access.
 
 Rules for the file:
 
@@ -1015,7 +1256,7 @@ Rules for the file:
 - **Headers.** `Content-Type: text/csv; charset=utf-8`,
   `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and
   `Cache-Control: no-store`.
-- **Filters (proposal).** Optional `from` and `to` (RFC 3339 dates, inclusive of
+- **Filters (proposal; currently rejected).** Optional `from` and `to` (RFC 3339 dates, inclusive of
   `from`, exclusive of `to`) and `run_id` query parameters. Without them the export
   is the full history.
 
@@ -1195,6 +1436,7 @@ other role gets `403 forbidden_role`. It returns four booleans and nothing else:
 
 - It sends amounts only as base-unit strings, and only to the routes above.
 - It never sends a wallet private key, ElGamal secret, AES key outside `/transfer`,
+  `/runs`, run retry and `/unwrap`,
   or a key-derivation signature anywhere but `/keys/enroll`. The last two are
   key-equivalent: it holds them only as long as the call needs, never stores them,
   and keeps them out of logs, Sentry and analytics.
@@ -1215,8 +1457,10 @@ other role gets `403 forbidden_role`. It returns four booleans and nothing else:
 
 ## Mocks (#79)
 
-The typed client is written against this document and every route above has a mock
-handler, including each failure that changes the UI:
+The typed client is written against the frontend shapes in this document. Its
+handlers cover the mock proposals and compatible standalone routes, not every
+implemented service route. The compatibility map above names the differences.
+The mock includes these failures that change the UI:
 
 - Prepare then confirm for wrap, transfer, run payments, unwrap, configure and
   apply-pending, with `transaction_not_finalized` on the first two confirm calls
@@ -1262,8 +1506,10 @@ handler, including each failure that changes the UI:
   which makes a recipient who has done none; it leaves balances, credits and requests
   already in flight alone.
 
-A handler returns an error body with **only** `{ "error": code }`, so a mock cannot
-teach a screen to depend on a field the real service will not send. A mock that
+A handler returns an error body with **only** `{ "error": code }`. That differs
+from the implemented reveal-risk 409, which also returns the structured flag.
+The current client's `ApiError` retains only status, code and retry delay, so
+the warning metadata is discarded. A mock that
 sends `Retry-After` shows a behaviour a cross-origin browser cannot see against the
 real service until the header is exposed.
 
@@ -1297,7 +1543,9 @@ and each one is a place where a screen has only been exercised against the mock.
   `transfer_rate_limited` on the routes that prepare or confirm a transaction
   (`/transfer`, `/runs` and its confirm and retry, `/unwrap`, `/accounts/configure` and
   `/accounts/apply-pending`), and `rate_limited` on every other route, so reads and the
-  people and invite routes use a code the draft does not assign them.
+  people and invite routes use a code the draft does not assign them. The live
+  unwrap routes instead use `unwrap_rate_limited`; live audit concurrency uses
+  `503 audit_unavailable`, not the mock's `429 rate_limited`.
 - **Paging.** The cursor is an offset, `limit` is clamped at 100, and a malformed
   `limit` or `cursor` is `400 invalid_request` instead of `invalid_cursor`.
 - **People and invites.** `POST /company/people/:id/invite` always answers `sent`
@@ -1322,13 +1570,10 @@ and each one is a place where a screen has only been exercised against the mock.
 
 ## Design review findings to resolve before building
 
-A design review of the proposed routes found the problems below. **Everything in
-this section is a proposal. None of it is reflected in the shapes above, in the
-client or in the mock service (#110), except the three routes added on 2026-10-04
-that findings 9 and 10 ask for: [Auditors](#auditors-), the
-[access log](#access-log-) and [account status](#account-status-), and the 100-payment
-limit of finding 1 (`max_payments`).** Each item gives
-the problem, why it is real, and the suggested change. The backend owner decides.
+The numbered findings were recorded against the original proposals. Current
+backend answers are called out below; historical text explains the earlier
+concern and must not override the implemented contract. Suggestions without an
+implemented answer remain proposals for the backend/frontend owners.
 
 1. **A payroll run cannot prepare its payments together.** _Backend answer, since
    this finding was written:_ `/runs` (#55, [`RUNS_API.md`](RUNS_API.md)) builds each
@@ -1369,9 +1614,13 @@ the problem, why it is real, and the suggested change. The backend owner decides
    version) and drop `aes_key` from `/transfer`. Decide how `pending` is shown
    (slow decrypt, or not shown as an amount).
 
-3. **`/keys/enroll` can be squatted.**
-   _Problem._ An attacker can enroll a victim's token account first. The victim then
-   gets `key_already_enrolled`, and their transfers fail.
+3. **Enrollment must authorize token-account ownership — implemented.**
+   The new handler verifies identity, wallet ownership, mint/account ownership and
+   the canonical derivation signature before Vault storage. The following was
+   the original prospective risk, now addressed by [WEB3_API.md](WEB3_API.md): A handler that
+   trusts wallet/account fields could let an attacker enroll a victim's account
+   first; the victim would then get `key_already_enrolled` and fail to load a key.
+   The existing library explicitly leaves ownership authorization to its caller.
    _Why it is real._ `viewing_keys` is keyed by `token_account` alone
    (`20260929000000_encrypted_viewing_keys.sql:17`) and `store_viewing_key` does not
    check that the wallet owns the account (lines 40-63; `vault.rs:47-48` leaves that
@@ -1384,38 +1633,35 @@ the problem, why it is real, and the suggested change. The backend owner decides
    a per-user rate limit and `Cache-Control: no-store`. The derivation is per token
    account, so a wallet with several accounts enrolls each one.
 
-4. **Recipients have no way to link a wallet, and `wallet` fields are not bound to
-   the caller.**
-   _Problem._ Only `/transfer` accepts `wallet_signature`
-   (`transfer.rs:101,158`), and recipients never call it. The other wallet routes
-   take a bare `wallet`.
-   _Why it is real._ Without a link, `/unwrap` cannot tell whose `matches` it is
-   returning, and a caller could pass another person's wallet and read their payment
-   ids and dates.
+4. **Every proposed wallet route must bind its wallet to the caller.**
+   _Implemented answer._ `/transfer`, `/runs`, `/unwrap` and `/unwrap/check`
+   accept first-use `wallet_signature` and enforce wallet ownership. Unwrap risk
+   checks therefore cannot read another user's wallet history from a bare field.
+   Enrollment, configure, apply and status routes are still absent; their mock
+   bodies alone do not establish ownership or a production activation sequence.
    _Suggested change._ Add `POST /wallets/link`, or accept `wallet_signature` on
    every wallet route. Bind every `wallet` field to the caller's linked wallet and
    answer `403 wallet_access_denied` otherwise.
 
-5. **Retry and duplicate handling are undefined.**
-   _Problem._ Nothing says how many prepare attempts a payment may have or when a
-   retry is safe. A new `/transfer` prepare always gives a new `request_id`, so
-   retrying while the first may still land pays twice.
-   _Suggested change._ Define attempts per payment. Allow a retry only after the
-   indexer shows the previous attempt expired: its blockhash is past and the
-   signature is absent at finalized commitment. Bind `idempotency_key` to the user
-   and the key together with a hash of the payload, and answer a reused key with a
-   different payload with `409 idempotency_key_reused`. Reframe question 2:
-   submission is not signing, so ADR B9 is unaffected if the service submits and
-   records the signature.
+5. **Run creation recovery and standalone replacement need durable intent.**
+   _Implemented answer._ Runs keep attempts and archive replaced terminal attempts.
+   Verified failures/preparation failures can rebuild in the same run; a missing
+   finalized lookup after expiry preserves the unresolved attempt. The indexer
+   recovers landed receipts, but cannot prove an absent signature never executed.
+   This supersedes the original suggestion to retry from absence plus expiry.
+   _Remaining proposal._ Bind a creation `idempotency_key` to the verified user
+   and a payload hash, reject changed intent with `409 idempotency_key_reused`, and
+   provide recovery for lost create responses. Neither that key nor an HTTP run
+   list/release route exists today. Submission and signing remain separate actions.
 
 6. **The reveal-risk warning has nowhere to come from.**
    _Resolved by #56._ `/unwrap/check` returns the flag before preparation, and
    a risky unacknowledged `/unwrap` returns it alongside the fixed 409 code.
    Withdrawal goes to the authenticated wallet's normal-USDC ATA. Arbitrary
    destination routing remains a separate frontend/backend integration decision.
-   _Problem._ The flow says `409 reveal_risk_not_acknowledged` makes the app show a
-   warning from `level`, but a 409 carries only a code (`error.rs:80`), not `level`
-   or `matches`.
+   _Remaining frontend gap._ The client's error adapter discards `reveal_risk`,
+   the mock sends only the code, and neither exposes `/unwrap/check`. The service
+   already returns the metadata; warning detail needs client/mock integration.
    _Suggested change._ A check call (for example `POST /unwrap/check`) returns `200`
    with `{ "requires_acknowledgement": true, "reveal_risk": { ... } }` before
    prepare. `acknowledge_reveal_risk: true` can be sent up front, so it is advisory
@@ -1446,8 +1692,13 @@ the problem, why it is real, and the suggested change. The backend owner decides
    not checked: the source account fixes it. Wrap, unwrap, configure and apply pending
    have no destination check yet.
 
-9. **The auditor model does not match the tenancy schema.**
-   _Problem._ `/audit/:company_id` and the company picker in #88 assume an auditor
+9. **The original auditor proposal did not match the tenancy schema.**
+   _Implemented answer (#59)._ Membership still binds a user to one company;
+   an explicit company grant now gates payment reads. Admins can create/list/revoke
+   grants for existing auditor identities. Revocation preserves membership but
+   removes amount access. Email invites and multi-company membership remain
+   separate proposals; `/company/auditors` is not the grant API.
+   _Historical problem._ `/audit/:company_id` and the company picker in #88 assume an auditor
    serves several companies, and there is no way to add or remove one.
    _Why it is real._ `memberships` has `user_id` as primary key, so one user has one
    role in one company (`20261001000000_tenancy.sql:13-18`): the company id in the
@@ -1472,19 +1723,21 @@ the problem, why it is real, and the suggested change. The backend owner decides
     keyset pagination on an immutable `created_at` (with the id as a tie-breaker), a
     documented maximum `limit`, and `400 invalid_cursor`.
 
-11. **A user can burn another wallet's prepare quota.**
-    _Problem._ In `/transfer`, `limits.wallet(wallet)` runs after authentication but
-    **before** `authorize_wallet` (`transfer.rs:152-159`). Any signed-in user can send
-    prepares naming a victim's `company_wallet` and use up its 10 per minute. `/wrap`
-    has the same property with no authentication at all (`wrap.rs:76`).
-    _Suggested change._ Run the wallet quota after `authorize_wallet`. Key the quotas
-    for the run routes on the authorized user, not on a field of the request.
+11. **An authenticated user can burn another wallet's prepare quota.**
+    _Current problem._ Transfer and run prepare charge `limits.wallet(wallet)`
+    after authentication but before `authorize_wallet`. A signed-in caller naming
+    an unowned wallet can spend its ten preparations per minute before rejection.
+    Wrap charges the wallet quota without authentication. Unwrap already authorizes
+    the wallet before charging its quota.
+    _Suggested change._ Run transfer/run wallet quotas after wallet authorization.
+    Decide wrap authentication (Q5). Verify rejected ownership with the same router
+    across callers, because rebuilding it resets the limiter.
 
-12. **There is no machine-readable schema, and the B13 wording was inverted.**
+12. **There is no shared machine-readable schema; the B13 wording is corrected.**
     _Problem._ This document, the client's schemas and the mock handlers can drift
     apart, and nothing checks them against the Rust tests.
     _Suggested change._ Publish an OpenAPI or JSON Schema file that both the mocks and
-    the Rust tests validate. The ADR B13 note is fixed in [Roles](#authentication--for-transfer--for-everything-else):
+    the Rust tests validate. The ADR B13 note is fixed in [Roles](#authentication--for-transfer-runs-unwrap-and-audit):
     B13 makes RLS the boundary because the client reads Postgres directly, and these
     service routes rely on the service's own checks.
 
@@ -1554,7 +1807,11 @@ Each points to the [open question](#open-questions) that asks it.
 
 ## Open questions
 
-These need an answer from the backend owner before the 🟡 routes are built.
+Review owners: backend owner and João/frontend. Review these before implementing
+the remaining 🟡 routes or enabling real signing; no review deadline or sign-off
+has been recorded. Numbering is retained for existing issue links. Items marked
+answered describe the current implementation; any remaining product decision is
+stated separately.
 
 1. **Fee payer (#66).** If Cadence co-signs as fee payer, `required_signers` has
    two keys and the transaction arrives partially signed. How does the web app tell
@@ -1567,16 +1824,21 @@ These need an answer from the backend owner before the 🟡 routes are built.
    is that a service that submits can record the signature itself and retry safely,
    at the cost of a second path to the network.
 3. **`aes_key` on `/transfer`.** Sending the balance key in each request puts a
-   long-lived secret in a browser request. Vault does not store it today (finding 2).
-   Should enroll derive and store it, so the field can be dropped?
-4. **Runs and blockhash expiry.** Signing N transactions in sequence takes time.
-   Does `POST /runs` return one blockhash per payment, and how long does a run's
-   signing window stay valid for a large roster? (Finding 1 suggests preparing one
-   payment at a time.)
+   long-lived secret in a browser request. Enrollment now stores canonical AES
+   material encrypted in Vault for private reads/account updates. Dropping the
+   existing payment-builder AES input remains a separate compatibility decision.
+4. **Runs and blockhash expiry — answered for implemented runs.** A batch uses
+   one fetched blockhash and each payment carries its last-valid height. Sign/send
+   in position order; stop after failure. Retry eligible positions with fresh
+   sender state and a fresh blockhash, retaining unresolved attempts. There is no
+   fixed wall-clock signing guarantee for a 100-payment run.
 5. **Auth on `/wrap`.** Require the bearer token and the wallet association, like
    `/transfer`?
-6. **Idempotency.** Is `idempotency_key` on `POST /runs` acceptable, and should
-   the other prepare routes take it too?
+6. **Run idempotency — answered.** Creation requires an owner-scoped UUID key.
+   Replay recovers the original committed intent and prepared payloads. A new
+   key cannot repay a destination with an unresolved prepared run payment.
+   Extending creation keys to standalone transfer/wrap is separate work.
+
 7. **Amount format in reads.** Base-unit strings everywhere, including CSV, or
    decimal strings in CSV only?
 8. **Pagination and limits** for `/company/payments` on a large roster.
@@ -1587,38 +1849,48 @@ These need an answer from the backend owner before the 🟡 routes are built.
     private available and pending balance, which the Deposit screen and the shell
     need as well as the recipient's `GET /me/balance`? And does the company's public
     USDC balance stay a direct chain read (RPC) rather than a service route?
-11. **Reveal-risk tolerance.** Is it a service constant, or something the response
-    should echo so the warning can say how close is "near"? (Finding 6 suggests
-    echoing `level` only.)
-12. **AES key at enroll.** Does `/keys/enroll` derive and store the AES balance key
-    next to the ElGamal secret, and how is `pending` shown (finding 2)?
+11. **Reveal-risk tolerance — answered.** `PROOF_REVEAL_RISK_TOLERANCE_BPS`
+    defaults to 100 (1%) and accepts 0–10000. Exact takes precedence over near;
+    near boundaries are inclusive relative to the received amount. Responses echo
+    `level` and payment references, not the tolerance or amounts.
+12. **AES key at enroll — answered.** Canonical enrollment derives ElGamal and
+    AES material and stores both encrypted in Vault. Private balance reads use
+    the AES available balance and decrypt the pending low/high ciphertexts.
+
 13. **Sequential preparation and proof time.** Is a run prepared one payment at a
     time, and what is the measured proof-generation time per transfer? The 30 s
     timeout and the 4 proof workers bound a large run.
-14. **Who sets `signed` and `expired`.** Is the indexer (#58) the writer, and what is
-    the state machine for a run payment? Until then the two states are undefined.
+14. **Who sets `signed` and `expired` — answered for current runs.** The service
+    has no `signed` state. Confirm/indexer write verified `finalized` or `failed`
+    outcomes; prepare/retry can write `preparation_failed`. `expired` is retained
+    in the schema but is not produced from blockhash expiry or missing history.
+    Open: proving/releasing an abandoned unsubmitted attempt (Q28).
 15. **Fee payer co-sign policy.** When does Cadence co-sign (before the bytes are
     returned or after the user signs), with what spend limits, and who pays rent for
     new token accounts (#66)?
-16. **Auditor cardinality, invitation and revocation.** Is an auditor tied to one
-    company (as `memberships` says), how is one invited by email, and how is an
-    accepted auditor revoked (finding 9)?
-17. **Transparent fallback consent.** Does a run carry `allow_transparent`, default
-    `false`, so the admin consents before any public payment (finding 7)?
-18. **Wallet-link route.** Is it `POST /wallets/link`, or does every wallet route
-    accept `wallet_signature` (finding 4)?
+16. **Auditor cardinality and revocation — implemented grant answer.** A user
+    has one company membership. Auditor reads require that membership and an
+    explicit grant; admin grant creation/list/revocation are implemented in
+    [AUDIT_API.md](AUDIT_API.md). Email invitation lifecycle remains proposed (Q24).
+17. **Transparent fallback consent — answered.** `allow_transparent` defaults
+    false on transfer, run create and retry. An outage without explicit true
+    consent returns `409 transparent_consent_required` before public preparation.
+
+18. **Wallet-link route — answered for payment routes.** Transfer, runs, unwrap
+    and unwrap/check accept first-use `wallet_signature` and enforce ownership.
+    There is no `POST /wallets/link`. Open: how the proposed activation/enrollment
+    routes establish the same association before confidential setup.
 19. **ATA or auxiliary account (#67).** Does a recipient's confidential account use
     the associated token account (it needs a reallocate) or an auxiliary account, as
     the #61 spike did?
 20. **Where configure artifacts come from.** Does the client build the pubkey
     validity proof and the zero-balance ciphertext (as `/wrap` `setup` does today),
     or does the service build them for `/accounts/configure`?
-21. **Rate-limit budgets for runs and invites.** What are the per-user and per-run
-    quotas, and the per-person, per-company and per-address invite limits? The
-    existing limiter is per instance and per peer (finding 11). Auditor invites
-    need the same per-company and per-address budgets as person invites, and the
-    auditor, access log and account status routes answer a limit with
-    `rate_limited`, not a wrap or transfer code.
+21. **Rate-limit budgets — implemented routes answered in Conventions.** Runs
+    have independent peer/global/wallet quotas and share four CPU slots with
+    transfer/unwrap. Audit payment reads allow four concurrent pages and return
+    `503 audit_unavailable` at capacity. Open: user/company/address budgets for
+    proposed invites, account status, access log and other amount reads.
 22. **Versioning.** Is "additive only, plus `api_version` on `/health`" acceptable,
     and where does a breaking change go?
 23. **CORS: `PUT` and `Retry-After`.** Will CORS allow `PUT`, or does
@@ -1641,18 +1913,21 @@ These need an answer from the backend owner before the 🟡 routes are built.
     read reflect a confirmed apply at once or after some seconds? Is
     `POST /accounts/apply-pending` with nothing pending rejected, and with which code,
     or does it succeed and change nothing?
-27. **`request_id` across creates and retries.** Answered for runs by the implemented
-    `/runs`: there is no idempotency key, and a retry gives a rebuilt position a new
-    attempt and `request_id`. Left open: may a
-    wrap or an apply be confirmed again by `request_id` and signature at any time, or
-    only while its record exists (`WRAP_API.md` says unsigned wrap records are deleted)?
-28. **What `expired` and "not finalized" prove.** For runs, the implemented retry
-    refuses while a prepared attempt is live and never rebuilds an expired one with
-    missing history; `expired` itself is never written (asked on #63). The client now
-    compares `last_valid_block_height` with the finalized block height it reads itself,
-    and asks the service again after seeing it past. Left open: can the service's
-    finalized read trail the browser's RPC, so that a transaction that landed in its
-    last blocks is still "not finalized" to the service on that ask?
+27. **`request_id` and recovery — run/account answer implemented.** Required
+    run creation keys, listing and prepared-payload recovery preserve original
+    signing bytes. Rebuilt terminal attempts still get a new hash and increment
+    `attempt`. Account prepare repeats recover the original unresolved operation.
+    Submitted signatures are retained and account requests are indexed. Wrap
+    retains its established cleanup of unsigned/no-known-submission records.
+
+28. **What expiry proves — answered; release policy remains open.** Expiry and
+    an absent finalized lookup do not prove nonexecution. Run confirm returns
+    `transaction_not_finalized` without expiry classification; retry classifies
+    missing history after finalized expiry as `transaction_history_unavailable`
+    and leaves that position prepared while eligible positions continue. The
+    browser's 90 s reconciliation budget returns `unknown`, preserving its lock.
+    Open: an evidence-backed release/cancel mechanism for abandoned attempts;
+    never start another payment merely from elapsed time or a missing receipt.
 29. **Person invite re-send.** Does `POST /company/people/:person_id/invite` write the
     invite row the people screen reads, and does a re-send replace the earlier row (and
     kill its link) or add a second one? After a person's email changes, what happens to
@@ -1673,23 +1948,27 @@ These need an answer from the backend owner before the 🟡 routes are built.
 33. **Run size.** Answered for the implemented `/runs`: 1 to 100 distinct recipients,
     a 32 KiB body, `400 invalid_payments`. Left open: the client's own 100 cap should
     follow whatever the service sets.
-34. **Bodyless `POST`s.** Do the routes that take no body (revoke, retry, invite)
-    accept a request without `Content-Type`, as the client sends them, or does the
-    shared JSON extractor of the wrap and transfer routers answer `400`?
-35. **Key-derivation message.** Where does the client get the canonical message for
-    `/keys/enroll` and the token account it is for: built from the SDK in the browser,
-    or returned by a route? The client has only a mock placeholder, and building it
-    throws outside mock mode.
-36. **Run recipients and sender.** The implemented `POST /runs` pays token accounts and
-    needs the source token account and the `aes_key`. Where does the web app get each
-    person's token account (the people table has none; the client proposes
-    `GET /company/people/accounts`) and the company's sender account, and how is the
-    sender's key derived and enrolled? Asked on #63, with how a never-sent position
-    after a failure is released and what a lost create response leaves behind.
-37. **Reconciling the run flow.** Answered: the frontend moved to the implemented
-    `/runs` (2026-10-06).
+34. **Bodyless `POST`s — grant revoke answered.** The implemented
+    `POST /company/auditor-grants/:id/revoke` accepts no body/Content-Type.
+    Implemented run retry requires a JSON body; its bodyless per-payment counterpart
+    does not exist. Proposed invite and email-auditor revoke handlers must still
+    agree with the current client's bodyless requests.
+35. **Key-derivation message — answered.** Discovery and `/keys/message` return
+    the SDK's exact account-specific message as base64 after ownership checks.
+    Enrollment verifies its signature separately from the wallet-link proof.
+36. **Run recipients and sender — answered.** Company/account and recipient
+    mapping reads return explicit validated accounts, with nullable unready
+    recipient mappings. Auxiliary source accounts remain supported. Existing
+    run AES inputs remain transient; canonical AES material is encrypted in Vault
+    for authorized private reads and account updates.
+37. **Reconciling the run flow — backend decision.** Retain positional
+    runs, batch confirm and evidence-based retry; add durable creation-key
+    recovery, admin authorization and explicit public consent. Frontend migration
+    and mocks belong to the frontend team.
 
 ## Revisions
+
+- 2026-10-11: implemented the accepted backend/web3 scope; added admin payroll authorization, public fallback consent, durable run recovery, account onboarding, audited owner/roster reads, CSV exports and account indexing. [Current backend reference](WEB3_API.md). Frontend integration and team sign-off remain with their owners.
 
 - 2026-10-03: first draft, written from the implemented wrap and transfer routes
   and the open backend issues. Awaiting review.
@@ -1727,3 +2006,14 @@ These need an answer from the backend owner before the 🟡 routes are built.
   retry, the wallet link, no idempotency key and no polling. Signing stops at the
   first payment that does not finalize. Proposed `GET /company/people/accounts`.
   Removed `payment_not_found`, `recipient_not_activated` and `payment_not_retryable`.
+
+- 2026-10-11: reconciled the current checkout for #63. Added the complete registered
+  route/compatibility map and source-backed answers to the frontend's five issues;
+  specified the positional run envelope and batch confirm/retry examples, unsigned
+  signer slots, v0/v1 limits, authenticated unwrap/audit, grant APIs and fixed codes.
+  Corrected structured reveal-risk errors, ascending auditor UUID pagination,
+  nullable counterparty IDs, no-store coverage and preserved submission locks.
+  Superseded the earlier absence-plus-expiry retry suggestion. Proposed read,
+  enrollment, activation, apply, invite and CSV routes remain open; frontend/backend
+  sign-off and incompatible mock migration are not claimed. See the
+  [reconciliation record](../plans/2026-10-11-063-api-contract.md).

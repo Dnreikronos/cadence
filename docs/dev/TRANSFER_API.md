@@ -35,6 +35,14 @@ may use plaintext. Connection/query timeouts are five seconds; HTTP work is
 limited to thirty seconds. Each key read uses its own autocommit connection.
 TLS-terminating Postgres proxies must preserve the configured database role.
 
+## Public payment consent
+
+`allow_transparent` defaults to false. During a proof-program outage, omitted or
+false consent returns `409 transparent_consent_required` before a public
+transaction is built or stored. Explicit true permits the existing public-balance
+fallback. Wallet ownership is authorized before charging the wallet quota.
+[WEB3_API.md](WEB3_API.md) documents the account enrollment and read APIs.
+
 ## POST /transfer
 
 Send `Authorization: Bearer <Supabase access token>` and JSON:
