@@ -54,7 +54,9 @@ const GRANT_COLUMNS: &str = "id::text, company_id::text, user_id::text AS audito
 
 /// Preserve the fixed scope-denial code and hide other database error details.
 fn database_error(error: tokio_postgres::Error) -> AppError {
-    if error.code().is_some_and(|code| code.code() == "CD404") {
+    if error.code().is_some_and(|code| code.code() == "CD413") {
+        AppError::Conflict("export_too_large")
+    } else if error.code().is_some_and(|code| code.code() == "CD404") {
         AppError::AuditNotFound
     } else {
         AppError::AuditUnavailable
@@ -126,6 +128,40 @@ impl AuditStore {
         .await
         .map_err(|_| AppError::AuditUnavailable)??;
         Ok(Page { items, next_cursor })
+    }
+
+    pub async fn export(
+        &self,
+        user: &str,
+        company: &str,
+        worker_permit: tokio::sync::OwnedSemaphorePermit,
+    ) -> Result<Vec<Payment>, AppError> {
+        let session = self.session(user).await?;
+        let permit: String = session
+            .query_one(
+                "SELECT cadence_private.audit_company_export($1)",
+                &[&company],
+            )
+            .await
+            .map_err(database_error)?
+            .get(0);
+        let rows = session
+            .query(
+                "SELECT * FROM cadence_private.read_company_export($1,$2)",
+                &[&company, &permit],
+            )
+            .await
+            .map_err(database_error)?;
+        if rows.len() > 10000 {
+            return Err(AppError::Conflict("export_too_large"));
+        }
+        drop(session);
+        tokio::task::spawn_blocking(move || {
+            let _permit = worker_permit;
+            rows.into_iter().map(payment).collect::<Result<Vec<_>, _>>()
+        })
+        .await
+        .map_err(|_| AppError::AuditUnavailable)?
     }
 
     /// Resolve the company from the verified user's current admin membership.

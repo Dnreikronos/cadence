@@ -98,6 +98,7 @@ impl Harness {
             ),
             include_str!("../../../../supabase/migrations/20261010000002_auditor_grants.sql"),
             include_str!("../../../../supabase/migrations/20261010000003_transparent_fallback.sql"),
+            include_str!("../../../../supabase/migrations/20261011000003_auditor_exports.sql"),
         ] {
             admin.batch_execute(migration).await.unwrap();
         }
