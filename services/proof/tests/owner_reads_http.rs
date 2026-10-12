@@ -216,6 +216,39 @@ async fn authorized_histories_roster_and_csv_share_committed_audit_gates() {
         accounts["items"][0]["token_account"],
         destination.to_string()
     );
+    for (path, token) in [
+        ("/company/export.csv", "test-user"),
+        ("/me/export.csv", "other-user"),
+    ] {
+        let before = h.audit_count().await;
+        let (status, headers, bytes) = response(&app, path, token, None).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "{}",
+            String::from_utf8_lossy(&bytes)
+        );
+        assert_eq!(headers["content-type"], "text/csv; charset=utf-8");
+        assert_eq!(headers["x-content-type-options"], "nosniff");
+        assert!(headers["content-disposition"]
+            .to_str()
+            .unwrap()
+            .starts_with("attachment;"));
+        let csv = String::from_utf8(bytes).unwrap();
+        assert!(csv.starts_with("date,counterparty,amount,status,signature\r\n"));
+        assert!(csv.contains(",4.200000,confirmed,"));
+        assert!(csv.ends_with("\r\n"));
+        if token == "other-user" {
+            assert!(csv.contains("\"'=formula,company\""));
+        }
+        assert_eq!(h.audit_count().await, before + 1);
+    }
+    assert_eq!(
+        json_response(&app, "/company/export.csv?limit=1", "test-user", None)
+            .await
+            .0,
+        StatusCode::BAD_REQUEST
+    );
     let url = std::env::var("TRANSFER_TEST_DATABASE_URL").unwrap();
     let mut key_url: reqwest::Url = url.parse().unwrap();
     key_url.set_username("cadence_key_service").unwrap();
