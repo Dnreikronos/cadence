@@ -75,8 +75,11 @@ impl RunStore {
         key: &str,
     ) -> Result<(Session, Option<Run>), AppError> {
         let client = self.database.connect().await.map_err(|_| unavailable())?;
+        // Another request may hold this lock while generating proofs within its 30s HTTP budget.
         client
-            .batch_execute("BEGIN")
+            .batch_execute(
+                "BEGIN; SET LOCAL statement_timeout = '30s'; SET LOCAL lock_timeout = '30s'",
+            )
             .await
             .map_err(|_| unavailable())?;
         client
@@ -84,6 +87,10 @@ impl RunStore {
                 "SELECT pg_advisory_xact_lock(hashtextextended('run-create:' || $1::text, 0))",
                 &[&user],
             )
+            .await
+            .map_err(|_| unavailable())?;
+        client
+            .batch_execute("SET LOCAL statement_timeout = '5s'; SET LOCAL lock_timeout = '5s'")
             .await
             .map_err(|_| unavailable())?;
         let existing = by_key(&client, user, key).await?;

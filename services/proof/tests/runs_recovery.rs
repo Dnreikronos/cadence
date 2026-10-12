@@ -1,3 +1,5 @@
+#[path = "support/run_creation.rs"]
+mod creation;
 #[path = "support/transfer.rs"]
 #[allow(dead_code)]
 mod support;
@@ -58,6 +60,8 @@ async fn concurrent_create_recovers_one_run_without_rebuilding_or_cross_owner_le
     assert_eq!(a.0, StatusCode::OK, "{}", a.1);
     assert_eq!(b.0, StatusCode::OK, "{}", b.1);
     assert_eq!(a.1, b.1);
+    assert_eq!(h.audit_count().await, 1);
+    creation::slow_owner(&h.admin, key).await;
     assert_eq!(h.audit_count().await, 1);
     assert_eq!(
         h.admin
