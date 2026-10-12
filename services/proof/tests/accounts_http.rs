@@ -2,6 +2,8 @@
 mod apply_confirmation;
 #[path = "support/account_confirmation.rs"]
 mod confirmation;
+#[path = "support/account_expiry.rs"]
+mod expiry;
 #[path = "support/transfer.rs"]
 #[allow(dead_code)]
 mod support;
@@ -188,6 +190,7 @@ async fn recipient_enrolls_configures_and_applies_with_durable_receipts() {
         before,
         "recovering an account preparation decrypts no key"
     );
+    expiry::retains_unknown(&h, &app, &body, &prepared, false).await;
     let (signature, result) = signed(&wallet, &prepared);
     let confirm = json!({"request_id":prepared["request_id"],"signature":signature});
     assert_eq!(
@@ -210,6 +213,7 @@ async fn recipient_enrolls_configures_and_applies_with_durable_receipts() {
         .await
         .unwrap()
         .get::<_, bool>(0));
+    expiry::retains_unknown(&h, &app, &body, &prepared, true).await;
     let (pair, aes) = derive_confidential_keys(&wallet, account.as_ref()).unwrap();
     let mut chain = h.fixture.sender.clone();
     let mut state = StateWithExtensionsMut::<Account>::unpack(&mut chain.data).unwrap();

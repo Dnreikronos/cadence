@@ -147,7 +147,16 @@ used. Both return the standard prepare envelope, plus `token_account`:
 One prepared request per user/operation is retained. Repeating prepare recovers
 the original bytes and expiry, including after a lost response; it does not
 rebuild an uncertain operation. PostgreSQL locking and a unique partial index
-enforce this across concurrent callers.
+enforce this across concurrent callers. Compare `last_valid_block_height` with
+finalized block height before signing; recovered bytes can already be expired.
+Expiry only prevents future inclusion. It does not prove that an earlier
+submission never executed, and the absence of `submitted_signature` means only
+that the backend has not received a confirm request. The wallet can submit and
+lose that request. A null RPC result is also inconclusive. Those cases retain
+the original request for indexer/confirmation recovery. A request that was truly
+never signed can remain blocked after expiry; no automatic retirement or manual
+release endpoint is implemented. Replacing it requires a separate safe release
+contract, not expiry plus missing history.
 
 The corresponding `/confirm` endpoints take `{request_id, signature}` and return
 `{request_id, signature, slot, status: "finalized"}`. Confirm persists the verified
