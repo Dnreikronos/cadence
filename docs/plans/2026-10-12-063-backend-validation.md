@@ -48,3 +48,23 @@ provider environment files and wallet keypairs are excluded from the branch.
 No hosted migration or deployment was performed. The disposable shipping test
 container was removed after validation; existing local Supabase stacks were
 preserved.
+
+## CI follow-up
+
+The first GitHub run had two actual failures. The tenant test reproduced an
+activation-trigger permission error because its shared SQL OR expression planned
+a protected account-table read even for service_role. Separate PL/pgSQL role
+branches preserve activation without granting account access. The tenant suite
+includes an explicit denial check and all 136 database assertions pass locally.
+
+The concurrent recovery job timed out at pg_advisory_xact_lock while the first
+request was generating proofs. A controlled six-second owner hold reproduces
+that failure. The lock wait now uses the existing 30-second HTTP budget, then
+restores five-second statement and lock limits before ordinary reads. The
+regression verifies the original payload, restored settings, cancellation
+cleanup, one run and one audited key read. It passes with the correction.
+
+The remaining eight red Vault jobs were cancelled by matrix fail-fast, rather
+than separate test failures. Compiler, formatter and Clippy checks passed again;
+account lifecycle and fresh-migration tenant checks were also rerun. No frontend
+or hosted-data changes were made.

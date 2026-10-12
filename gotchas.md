@@ -96,3 +96,13 @@
   receipt-view migrations in order, with auditor grants before public fallback,
   so a later view replacement cannot drop transparent metadata. Direct fixture
   connections need the same explicit loopback transport policy as the harness.
+
+- SQL boolean short-circuiting does not skip permission checks while planning an
+  expression. Put role-specific protected-table queries in separate PL/pgSQL
+  branches rather than granting a role extra access to satisfy a shared OR.
+  Run the tenant suite after changing a trigger used by existing service roles.
+
+- An owner creation lock spans proof generation, which can exceed the ordinary
+  five-second query timeout on CI or a busy server. Bound only the lock wait by
+  the HTTP budget, restore query limits after acquisition, and test a deliberately
+  slow owner plus cancelled waiters. Passing on a fast local machine misses this.

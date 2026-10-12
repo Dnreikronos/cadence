@@ -24,6 +24,11 @@ Changed wallet/source/ordered destinations return `409 idempotency_conflict`.
 Amounts are not stored or fingerprinted for replay comparison. A new key cannot
 repay a destination with an unresolved prepared payment for that owner.
 
+Creation is serialized per owner while proofs are built. A duplicate waits within
+the existing 30-second HTTP budget; only that advisory-lock wait uses a longer
+database timeout. Ordinary queries retain their five-second limit. Cancellation
+closes the waiting session and its transaction.
+
 `GET /runs` lists owner metadata with ascending UUID cursors (default 20/max 100).
 `GET /runs/by-key/:key` and `GET /runs/:id/prepared` recover the original prepared
 payloads and expiry. All run responses are no-store. See [WEB3_API.md](WEB3_API.md)
