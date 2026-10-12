@@ -30,6 +30,7 @@ pub struct Service {
     pub(super) keys: Database,
     pub(super) runs: crate::run_store::RunStore,
     pub(super) unwrap: crate::unwrap_store::UnwrapStore,
+    pub(super) accounts: crate::account_store::AccountStore,
     pub(super) reveal_tolerance_bps: u16,
     pub(super) proof_slots: Arc<Semaphore>,
 }
@@ -42,6 +43,7 @@ impl Service {
             keys: Database::new(keys_url, "cadence_key_service")?,
             runs: crate::run_store::RunStore::new(receipts_url)?,
             unwrap: crate::unwrap_store::UnwrapStore::new(receipts_url)?,
+            accounts: crate::account_store::AccountStore::new(receipts_url)?,
             reveal_tolerance_bps: 100,
             proof_slots: Arc::new(Semaphore::new(4)),
         })

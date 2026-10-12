@@ -18,6 +18,7 @@ pub mod keys {
     pub mod vault;
 }
 pub mod routes {
+    pub mod accounts;
     pub mod audit;
     pub mod health;
     pub mod runs;
@@ -83,6 +84,7 @@ pub fn router_with_audit(
     let wrap = routes::wrap::router(state.rpc.clone(), store);
     let runs = routes::runs::router(state.rpc.clone(), transfer.clone());
     let unwrap = routes::unwrap::router(state.rpc.clone(), transfer.clone());
+    let accounts = routes::accounts::router(state.rpc.clone(), transfer.clone());
     let transfer = routes::transfer::router(state.rpc.clone(), transfer);
     Router::new()
         .route("/health", get(routes::health::health))
@@ -91,5 +93,6 @@ pub fn router_with_audit(
         .merge(transfer)
         .merge(runs)
         .merge(unwrap)
+        .merge(accounts)
         .merge(routes::audit::router(audit))
 }
