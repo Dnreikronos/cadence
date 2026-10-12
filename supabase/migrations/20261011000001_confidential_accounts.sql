@@ -31,9 +31,13 @@ CREATE OR REPLACE FUNCTION public.guard_person_status() RETURNS trigger
 LANGUAGE plpgsql SET search_path = '' AS $$
 BEGIN
     IF NEW.status = OLD.status THEN RETURN NEW; END IF;
-    IF current_user = 'service_role' OR (current_user = 'cadence_transfer_service'
-        AND EXISTS (SELECT 1 FROM public.proof_accounts a WHERE a.user_id=NEW.user_id AND a.ready)) THEN
+    IF current_user = 'service_role' THEN
         IF OLD.status='pending' AND NEW.status='active' THEN RETURN NEW; END IF;
+    ELSIF current_user = 'cadence_transfer_service' THEN
+        IF OLD.status='pending' AND NEW.status='active'
+            AND EXISTS (SELECT 1 FROM public.proof_accounts a WHERE a.user_id=NEW.user_id AND a.ready) THEN
+            RETURN NEW;
+        END IF;
     ELSIF NEW.status='removed' THEN RETURN NEW;
     END IF;
     RAISE EXCEPTION 'invalid person status transition' USING ERRCODE='23514';

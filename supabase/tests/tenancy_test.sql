@@ -2,7 +2,7 @@
 -- table x every role sees only its own company, and forbidden writes fail.
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
-SELECT plan(65);
+SELECT plan(66);
 
 CREATE FUNCTION pg_temp.login(uid uuid) RETURNS void LANGUAGE sql AS $$
     SELECT set_config('request.jwt.claims',
@@ -120,6 +120,8 @@ RESET ROLE;
 
 -- Writes: service_role (invite sender and activation, #80)
 SET LOCAL ROLE service_role;
+SELECT throws_ok('SELECT wallet, token_account FROM public.proof_accounts',
+    '42501', NULL, 'service_role activation does not grant confidential account reads');
 SELECT lives_ok($$UPDATE public.people SET status = 'active' WHERE id = '00000000-0000-0000-0001-0000000000a5'$$,
     'service_role activates a pending person');
 SELECT throws_ok($$UPDATE public.people SET status = 'pending' WHERE id = '00000000-0000-0000-0001-0000000000a5'$$,
