@@ -187,7 +187,7 @@ original operation unresolved.
 | `GET /me/payments` | Recipient; finalized incoming payment page. |
 | `GET /company/payments` | Admin; finalized company payment page. |
 | `GET /company/people/amounts` | Admin; `{person_id, token_account, amount}` page. |
-| `PUT /company/people/:person/amount` | Admin; `{amount}` writes encrypted roster amount. |
+| `PUT /company/people/:person/amount` | Admin; `{amount}` writes encrypted roster amount and returns `{person_id, amount}` after storage succeeds. |
 | `POST /company/people/:person/amount` | Equivalent write for POST-only clients. |
 
 Amounts are decimal base-unit strings in authorized success responses. Balance
@@ -205,6 +205,9 @@ ascending UUIDs, `limit` 1–100/default 20, and the last returned ID as cursor.
 Unknown/duplicate query fields and malformed UUIDs are rejected.
 
 Roster amounts are encrypted in Vault with company/person context binding.
+Successful writes return the normalized UUID and canonical, non-null base-unit
+amount accepted for storage. The response echoes the write without decrypting
+Vault or adding a read audit. PUT and POST share this response contract.
 Unset amounts and unavailable recipient mappings are null. Removed or
 cross-company people cannot be written. Each private balance/page call commits
 one audit row before decryption, including empty pages. A read permit cannot be
