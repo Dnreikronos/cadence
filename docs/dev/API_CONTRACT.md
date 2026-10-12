@@ -939,8 +939,8 @@ requirements and finalized expiry handling.
 | Topic            | Implemented (`RUNS_API.md`)                                                                    | Client and mock today                                                                                  |
 | ---------------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | Who is paid      | `recipient` token accounts, distinct                                                           | `person_id`s                                                                                           |
-| Request          | `company_wallet`, `sender`, `aes_key`, `wallet_signature`, `payments`                          | `company_wallet`, `payments`, `idempotency_key`                                                        |
-| Idempotency      | none; a second run for an unresolved recipient must not be started                             | `idempotency_key`, one per attempt                                                                     |
+| Request          | `company_wallet`, `sender`, `aes_key`, optional `wallet_signature`, `payments`, required `idempotency_key`, optional `allow_transparent` | `company_wallet`, `payments`, `idempotency_key`                                                        |
+| Idempotency      | required owner-scoped UUID; recover the original run through `GET /runs/by-key/:key`                             | `idempotency_key`, one per attempt                                                                     |
 | A payment is     | a `position` in the run                                                                        | a `payment_id` and a `person_id`                                                                       |
 | Confirm          | `POST /runs/:id/confirm`, a batch of `{ position, request_id, signature }`                     | `POST /runs/:run_id/payments/:payment_id/confirm { signature }`                                        |
 | Retry            | `POST /runs/:id/retry` with `aes_key`, amounts and the original signatures of live attempts    | `POST /runs/:run_id/payments/:payment_id/retry`, no body                                               |
@@ -949,11 +949,14 @@ requirements and finalized expiry handling.
 | Errors           | `run_not_found`, `invalid_payments`, `outstanding_payments`, `transaction_history_unavailable` | `person_not_found`, `recipient_not_activated`, `payment_not_found`, `payment_not_retryable` (mock)     |
 | Body limit       | 32 KiB                                                                                         | 100 payments checked in the browser                                                                    |
 
-Creation/signing gaps for the web app: it needs each person's token account and
-the company's source account (nothing returns them to it), it would have to send the
-`aes_key` (which no screen sends today), it has no `idempotency_key` to lean on for a
-double click, and its run screen reads statuses and per-payment ids that the service
-does not have. The real-mode `api.runs.get` adapter now reads owner-scoped Supabase
+Creation/signing gaps for the web app: its adapters need to use the account mappings
+from `GET /company/people/accounts` and `GET /company/accounts`, send the transient
+`aes_key`, and retain the required owner-scoped `idempotency_key` before creation.
+After a timeout or lost response, recover with `GET /runs/by-key/:key`, or repeat
+`POST /runs` with that same key and intent. The first committed run wins; another
+key cannot bypass unresolved payments to the same destinations. The screen also
+needs to handle the service's positional payment protocol. The real-mode
+`api.runs.get` adapter now reads owner-scoped Supabase
 metadata, orders payments by position and maps `prepared` to `pending`, `finalized`
 to `confirmed`, and `preparation_failed` to `failed`. It preserves `transparent`,
 uses the stored `payment_id`, returns `person_id: null` and exposes `destination`.
@@ -991,9 +994,10 @@ what the client and the mock do, not what the service answers.
   otherwise (never signed here, so not paid in this run, and a new run is the way to pay
   that person); a payment that was sent and not confirmed is Checking, with "Check
   again" through the batch confirm. An unknown status is Unknown, with no action.
-- **No idempotency and no attempt records.** A create whose answer was lost leaves a
-  run of unsigned transactions that can never land, so nothing is kept for it and the
-  same people can be paid in a new run.
+- **Creation recovery.** Retain the owner-scoped creation key and recover the
+  original signing payloads after a lost answer. A missing response does not
+  establish whether the browser submitted a transaction; unresolved payments
+  keep the same destinations blocked under a new key.
 - **No polling.** The service changes a payment only on confirm or retry, so the run
   screen reads `GET /runs/:id` once and the confirm answers drive it. After a reload,
   the payments this browser sent (kept per viewer, see
@@ -1649,10 +1653,12 @@ implemented answer remain proposals for the backend/frontend owners.
    finalized lookup after expiry preserves the unresolved attempt. The indexer
    recovers landed receipts, but cannot prove an absent signature never executed.
    This supersedes the original suggestion to retry from absence plus expiry.
-   _Remaining proposal._ Bind a creation `idempotency_key` to the verified user
-   and a payload hash, reject changed intent with `409 idempotency_key_reused`, and
-   provide recovery for lost create responses. Neither that key nor an HTTP run
-   list/release route exists today. Submission and signing remain separate actions.
+   _Implemented recovery._ Creation requires an owner-scoped UUID key. Repeating
+   it recovers the original committed run; `GET /runs`, `GET /runs/by-key/:key`
+   and `GET /runs/:id/prepared` provide owner-scoped recovery. A changed wallet,
+   sender or ordered destinations returns `409 idempotency_conflict`. Amounts and
+   amount hashes are not stored for comparison. No release route exists.
+   Submission and signing remain separate actions.
 
 6. **The reveal-risk warning has nowhere to come from.**
    _Resolved by #56._ `/unwrap/check` returns the flag before preparation, and

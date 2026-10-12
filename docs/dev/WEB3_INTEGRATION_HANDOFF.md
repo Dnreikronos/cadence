@@ -82,8 +82,11 @@ destination blocks creation with another key.
 Confirm through `POST /runs/:id/confirm` using
 `{payments:[{position, request_id, signature}]}`. Retry through
 `POST /runs/:id/retry` with `aes_key`, optional `allow_transparent`, and
-`{payments:[{position, amount}]}`. Retain positional item errors and the
-`transparent` flag. The backend does not register per-payment confirm/retry paths.
+`{payments:[{position, amount, signature?}]}`. Each live prepared attempt requires
+its retained original wallet transaction `signature`, alongside `position` and
+`amount`; terminal attempts eligible for rebuilding do not require that field.
+Retain positional item errors and the `transparent` flag. The backend does not
+register per-payment confirm/retry paths.
 
 Public fallback requires explicit `allow_transparent: true`; do not silently add
 it on retry or network error. A controlled availability fixture is backend test
