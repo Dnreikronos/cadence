@@ -32,6 +32,8 @@ pub(super) struct RunRequest {
     aes_key: String,
     wallet_signature: Option<String>,
     idempotency_key: String,
+    #[serde(default)]
+    allow_transparent: bool,
     payments: Vec<Recipient>,
 }
 #[derive(Deserialize)]
@@ -55,6 +57,8 @@ impl Drop for RunRequest {
 #[serde(deny_unknown_fields)]
 pub(super) struct RetryRequest {
     aes_key: String,
+    #[serde(default)]
+    allow_transparent: bool,
     payments: Vec<RetryPayment>,
 }
 #[derive(Deserialize)]
@@ -175,7 +179,16 @@ pub(super) async fn prepare(
     if !state.limits.wallet(wallet) {
         return Err(AppError::TransferRateLimited);
     }
-    let payments = build(&state, &user, wallet, sender, aes, entries).await?;
+    let payments = build(
+        &state,
+        &user,
+        wallet,
+        sender,
+        aes,
+        entries,
+        request.allow_transparent,
+    )
+    .await?;
     let run = service
         .runs
         .prepare_in(
@@ -310,7 +323,16 @@ pub(super) async fn retry(
     }
     entries.sort_by_key(|p| p.position);
     let sender = runs::address(&run.sender)?;
-    let payments = build(&state, &user, wallet, sender, aes, entries).await?;
+    let payments = build(
+        &state,
+        &user,
+        wallet,
+        sender,
+        aes,
+        entries,
+        request.allow_transparent,
+    )
+    .await?;
     Ok(Json(runs::retry_response(
         service.runs.retry(&user, &id, &payments).await?,
         &rebuilt,
@@ -325,6 +347,7 @@ async fn build(
     sender: Address,
     aes: Zeroizing<AeKey>,
     entries: Vec<Entry>,
+    allow_transparent: bool,
 ) -> Result<Vec<Payment>, AppError> {
     let service = state.service.as_ref().ok_or(AppError::RunUnavailable)?;
     state.devnet().await?;
@@ -367,6 +390,9 @@ async fn build(
         account_errors.push(error);
     }
     let transparent = !fallback::available(&state.rpc).await?;
+    if transparent && !allow_transparent {
+        return Err(AppError::Conflict("transparent_consent_required"));
+    }
     let (blockhash, height) = state.rpc.blockhash_with_expiry().await?;
     let results = if transparent {
         fallback::build_batch(

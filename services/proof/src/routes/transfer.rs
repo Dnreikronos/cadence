@@ -115,6 +115,8 @@ struct TransferRequest {
     amount: String,
     aes_key: String,
     wallet_signature: Option<String>,
+    #[serde(default)]
+    allow_transparent: bool,
 }
 impl Drop for TransferRequest {
     fn drop(&mut self) {
@@ -167,13 +169,13 @@ async fn prepare(
         .service
         .ok_or(AppError::TransferUnavailable("transfer_unavailable"))?;
     let user = service.auth.user(&headers).await?;
-    if !state.limits.wallet(wallet) {
-        return Err(AppError::TransferRateLimited);
-    }
     service
         .store
         .authorize_wallet(&user, &wallet, request.wallet_signature.as_deref())
         .await?;
+    if !state.limits.wallet(wallet) {
+        return Err(AppError::TransferRateLimited);
+    }
     state.rpc.require_devnet().await.map_err(cluster_error)?;
     let mint = Addresses::for_usdc().wrapped_mint;
     let (mint_account, sender_account, recipient_account) = tokio::try_join!(
@@ -196,6 +198,9 @@ async fn prepare(
         return Err(AppError::Forbidden);
     }
     let transparent = !fallback::available(&state.rpc).await?;
+    if transparent && !request.allow_transparent {
+        return Err(AppError::Conflict("transparent_consent_required"));
+    }
     let (blockhash, last_valid_block_height) = state.rpc.blockhash_with_expiry().await?;
     let transaction = if transparent {
         fallback::build(&fallback::Transfer {
