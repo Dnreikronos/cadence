@@ -24,6 +24,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use zeroize::{Zeroize, Zeroizing};
 
+/// Mount private reads and roster writes with request limits and uncached responses.
 pub fn router(rpc: Arc<RpcClient>, service: Option<Arc<Service>>) -> Router {
     let limits = Arc::new(Limits::new());
     Router::new()
@@ -64,6 +65,7 @@ pub(super) struct Pagination {
     cursor: Option<String>,
 }
 impl Pagination {
+    /// Default to 20 rows, enforce the 1..=100 bound, and normalize the optional cursor.
     pub(super) fn validate(self) -> Result<(i32, Option<String>), AppError> {
         let limit = self.limit.unwrap_or(20);
         if !(1..=100).contains(&limit) {
@@ -72,6 +74,7 @@ impl Pagination {
         Ok((limit, self.cursor.as_deref().map(uuid).transpose()?))
     }
 }
+/// Parse a nonnil UUID and format it for database and response use.
 fn uuid(value: &str) -> Result<String, AppError> {
     uuid::Uuid::parse_str(value)
         .ok()
@@ -86,23 +89,29 @@ struct Balance {
     as_of_slot: u64,
 }
 impl Drop for Balance {
+    /// Erase both private amount strings when the response value is dropped.
     fn drop(&mut self) {
         self.available.zeroize();
         self.pending.zeroize();
     }
 }
+/// Route recipient balance reads through the shared authorization and audit path.
 async fn me_balance(
     state: State<AccountState>,
     headers: HeaderMap,
 ) -> Result<Json<Balance>, AppError> {
     balance(state.0, headers, false).await
 }
+/// Require company-admin authorization when reading the company's mapped balance.
 async fn company_balance(
     state: State<AccountState>,
     headers: HeaderMap,
 ) -> Result<Json<Balance>, AppError> {
     balance(state.0, headers, true).await
 }
+/// Decrypt one finalized account snapshot after loading its keys through an audit.
+///
+/// The worker keeps the proof permit until decryption finishes, even if the request ends.
 async fn balance(
     state: AccountState,
     headers: HeaderMap,
@@ -158,6 +167,7 @@ async fn balance(
         as_of_slot: slot,
     }))
 }
+/// Select the recipient's incoming receipts for the audited payment-page accessor.
 async fn me_payments(
     state: State<AccountState>,
     headers: HeaderMap,
@@ -165,6 +175,7 @@ async fn me_payments(
 ) -> Result<Json<Page<Payment>>, AppError> {
     payments(state.0, headers, query, "me").await
 }
+/// Select the admin's company receipts for the audited payment-page accessor.
 async fn company_payments(
     state: State<AccountState>,
     headers: HeaderMap,
@@ -172,6 +183,7 @@ async fn company_payments(
 ) -> Result<Json<Page<Payment>>, AppError> {
     payments(state.0, headers, query, "company").await
 }
+/// Validate pagination and load the caller's receipt page through a committed audit.
 async fn payments(
     state: AccountState,
     headers: HeaderMap,
@@ -193,6 +205,7 @@ async fn payments(
         owner_reads::payments(&client, &user, scope, limit, cursor.as_deref(), permit).await?,
     ))
 }
+/// Authenticate an admin and read their roster through the attributed audit gate.
 async fn roster(
     State(state): State<AccountState>,
     headers: HeaderMap,
@@ -220,6 +233,7 @@ struct AmountRequest {
     amount: String,
 }
 impl Drop for AmountRequest {
+    /// Erase the submitted amount after storage or an early return.
     fn drop(&mut self) {
         self.amount.zeroize();
     }
@@ -230,10 +244,14 @@ struct SavedAmount {
     amount: String,
 }
 impl Drop for SavedAmount {
+    /// Erase the saved amount string when its response value is dropped.
     fn drop(&mut self) {
         self.amount.zeroize();
     }
 }
+/// Commit the admin's normalized roster amount before returning the saved fields.
+///
+/// PUT and POST share this handler; the response does not decrypt Vault or add a read audit.
 async fn set_amount(
     State(state): State<AccountState>,
     headers: HeaderMap,
@@ -258,6 +276,7 @@ async fn set_amount(
     owner_reads::set_amount(&client, &user, &saved.person_id, &saved.amount).await?;
     Ok(Json(saved))
 }
+/// Page the admin's people and expose token accounts only for mappings marked ready.
 async fn people_accounts(
     State(state): State<AccountState>,
     headers: HeaderMap,
