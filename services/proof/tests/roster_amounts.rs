@@ -9,6 +9,10 @@ use cadence_proof::owner_reads;
 use roster::*;
 use serde_json::json;
 
+/// Verify encrypted writes, attributed reads and access denial in a fresh Vault fixture.
+///
+/// Requires an empty disposable database and its dump container; the harness applies
+/// migrations and this scenario changes roles, grants and audit constraints.
 #[tokio::test]
 #[ignore = "requires a fresh TRANSFER_TEST_DATABASE_URL with vault.sql and ROSTER_TEST_DUMP_CONTAINER"]
 async fn roster_amounts_remain_encrypted_and_require_attributed_company_access() {

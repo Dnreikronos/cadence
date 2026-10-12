@@ -20,6 +20,9 @@ pub const ORIGINAL: &str = "27182818284590";
 pub const UPDATED: &str = "31415926535897";
 pub const OTHER_AMOUNT: &str = "16180339887498";
 
+/// Add own-company, unset and foreign-company people to the disposable fixture.
+///
+/// Reassigns the harness's second user as an admin of the foreign company.
 pub async fn seed(h: &Harness) {
     h.admin
         .execute(
@@ -50,6 +53,7 @@ pub async fn seed(h: &Harness) {
     }
 }
 
+/// Issue a JSON request through the real router and require a no-store response.
 pub async fn request(
     app: &Router,
     method: Method,
@@ -77,6 +81,7 @@ pub async fn request(
     (status, serde_json::from_slice(&bytes).unwrap())
 }
 
+/// Assert a PUT's status and exact saved-amount fields when the write succeeds.
 pub async fn expect_write(
     app: &Router,
     person: &str,
@@ -104,6 +109,7 @@ pub async fn expect_write(
     body
 }
 
+/// Read a roster page and verify its new audit names the selected caller and company.
 pub async fn read(h: &Harness, app: &Router, path: &str, other: bool) -> Value {
     let before = h.audit_count().await;
     let (token, actor, company) = if other {
@@ -124,6 +130,7 @@ pub async fn read(h: &Harness, app: &Router, path: &str, other: bool) -> Value {
     page
 }
 
+/// Connect as the restricted key-service role with the harness's test-only credentials.
 pub async fn keys() -> Session {
     let mut url: reqwest::Url = std::env::var("TRANSFER_TEST_DATABASE_URL")
         .unwrap()
@@ -139,6 +146,9 @@ pub async fn keys() -> Session {
         .unwrap()
 }
 
+/// Fetch the fixture person's Vault ciphertext and the total secret count.
+///
+/// Uses the privileged fixture connection to inspect storage without decrypting it.
 pub async fn stored(admin: &Client) -> (String, String, i64) {
     let row = admin.query_one(
         "SELECT r.secret_id::text,s.secret,(SELECT count(*) FROM vault.secrets) FROM cadence_private.roster_amounts r JOIN vault.secrets s ON s.id=r.secret_id WHERE r.person_id=$1::text::uuid",
@@ -147,6 +157,9 @@ pub async fn stored(admin: &Client) -> (String, String, i64) {
     (row.get(0), row.get(1), row.get(2))
 }
 
+/// Check that role grants and RLS keep roster storage behind its audited accessors.
+///
+/// The service role retains its existing privileged Vault access outside this check.
 pub async fn direct_access_is_denied(admin: &Client) {
     let rls: bool = admin.query_one(
         "SELECT relrowsecurity FROM pg_class WHERE oid='cadence_private.roster_amounts'::regclass", &[],
@@ -210,6 +223,10 @@ pub async fn direct_access_is_denied(admin: &Client) {
     }
 }
 
+/// Inspect a real fixture dump for plaintext amounts and encoded roster payloads.
+///
+/// Requires ROSTER_TEST_DUMP_CONTAINER to name the disposable keys_test container;
+/// captures its dump without printing the data.
 pub fn dump_contains_no_amounts(secret_id: &str) {
     let container = std::env::var("ROSTER_TEST_DUMP_CONTAINER")
         .expect("ROSTER_TEST_DUMP_CONTAINER must name this suite's disposable Supabase container");
