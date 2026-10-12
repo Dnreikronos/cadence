@@ -119,7 +119,7 @@ async fn payments(
         .map_err(|_| AppError::BadRequest("invalid_request"))?
         .0
         .validate()?;
-    let _permit = service
+    let permit = service
         .slots
         .clone()
         .try_acquire_owned()
@@ -127,7 +127,7 @@ async fn payments(
     Ok(Json(
         service
             .store
-            .payments(&user, &company, limit, cursor.as_deref())
+            .payments(&user, &company, limit, cursor.as_deref(), permit)
             .await?,
     ))
 }

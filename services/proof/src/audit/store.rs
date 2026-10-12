@@ -95,6 +95,7 @@ impl AuditStore {
         company: &str,
         limit: i32,
         cursor: Option<&str>,
+        worker_permit: tokio::sync::OwnedSemaphorePermit,
     ) -> Result<Page<Payment>, AppError> {
         let session = self.session(user).await?;
         let permit = super::log::company_read_permit(&session, company, limit, cursor)
@@ -119,6 +120,7 @@ impl AuditStore {
         };
         drop(session);
         let items = tokio::task::spawn_blocking(move || {
+            let _permit = worker_permit;
             rows.into_iter().map(payment).collect::<Result<Vec<_>, _>>()
         })
         .await
