@@ -1,3 +1,4 @@
+pub mod account_store;
 pub mod audit {
     pub mod log;
     pub mod store;

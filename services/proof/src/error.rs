@@ -3,6 +3,8 @@ use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    #[error("account request not found")]
+    AccountNotFound,
     #[error("audit scope not found")]
     AuditNotFound,
     #[error("audit service is unavailable")]
@@ -55,6 +57,7 @@ impl AppError {
     /// Map domain failures to HTTP status without exposing their internal details.
     pub fn status(&self) -> StatusCode {
         match self {
+            Self::AccountNotFound => StatusCode::NOT_FOUND,
             Self::AuditNotFound => StatusCode::NOT_FOUND,
             Self::AuditUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::ForbiddenRole => StatusCode::FORBIDDEN,
@@ -111,6 +114,7 @@ impl IntoResponse for AppError {
                 .into_response();
         }
         let code = match self {
+            Self::AccountNotFound => "account_request_not_found",
             Self::AuditNotFound => "audit_not_found",
             Self::AuditUnavailable => "audit_unavailable",
             Self::ForbiddenRole => "forbidden_role",
