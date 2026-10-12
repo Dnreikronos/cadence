@@ -177,6 +177,11 @@ impl Harness {
             "use an empty disposable database"
         );
         for migration in [
+            include_str!("../../../../supabase/migrations/20260928000000_decryption_audit_log.sql"),
+            include_str!(
+                "../../../../supabase/migrations/20260929000000_encrypted_viewing_keys.sql"
+            ),
+            include_str!("../../../../supabase/migrations/20261001000000_tenancy.sql"),
             include_str!("../../../../supabase/migrations/20260929000001_wrap_requests.sql"),
             include_str!("../../../../supabase/migrations/20260930000001_wrap_cleanup.sql"),
             include_str!("../../../../supabase/migrations/20261003000000_transfer_requests.sql"),
@@ -187,6 +192,11 @@ impl Harness {
                 "../../../../supabase/migrations/20261010000001_indexer_scan_checkpoints.sql"
             ),
             include_str!("../../../../supabase/migrations/20261010000003_transparent_fallback.sql"),
+            include_str!("../../../../supabase/migrations/20261011000000_run_recovery.sql"),
+            include_str!(
+                "../../../../supabase/migrations/20261011000001_confidential_accounts.sql"
+            ),
+            include_str!("../../../../supabase/migrations/20261011000004_account_indexer.sql"),
         ] {
             db.batch_execute(migration).await.unwrap();
         }
@@ -227,6 +237,11 @@ impl Harness {
         let destination = Address::new_from_array([position as u8 + 20; 32]).to_string();
         let expiry = i64::try_from(p.last_valid_block_height).unwrap();
         match p.kind {
+            Kind::Account => {
+                self.db.execute("INSERT INTO public.proof_accounts(wallet,token_account,user_id) VALUES($1,$2,$3::text::uuid) ON CONFLICT DO NOTHING", &[&p.wallet,&Address::new_from_array([7;32]).to_string(),&USER]).await.unwrap();
+                self.db.execute("INSERT INTO public.account_requests(id,user_id,wallet,token_account,kind,transaction,last_valid_block_height,submitted_signature) VALUES($1,$2::text::uuid,$3,$4,'configure',$5,1,$6)", &[&p.id,&USER,&p.wallet,&Address::new_from_array([7;32]).to_string(),&p.transaction,&p.signature]).await.unwrap();
+            }
+
             Kind::Run => {
                 self.db.execute("INSERT INTO public.payments(run_id,position,destination,request_id,transaction,last_valid_block_height,status,submitted_signature) VALUES ($1::text::uuid,$2,$3,$4,$5,$7,'prepared',$6)",&[&RUN,&position,&destination,&p.id,&p.transaction,&p.signature,&expiry]).await.unwrap();
             }
@@ -256,6 +271,7 @@ impl Harness {
             Kind::Wrap => ("wrap_requests", "id"),
             Kind::Transfer => ("transfer_requests", "id"),
             Kind::Unwrap => ("unwrap_requests", "id"),
+            Kind::Account => ("account_requests", "id"),
         };
         let row = self
             .db

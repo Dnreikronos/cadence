@@ -24,7 +24,13 @@ use tokio_tungstenite::tungstenite::Message;
 #[test]
 fn exact_message_verification_covers_failures_and_rejects_forged_signatures() {
     let wallet = Keypair::new();
-    for kind in [Kind::Run, Kind::Wrap, Kind::Transfer, Kind::Unwrap] {
+    for kind in [
+        Kind::Run,
+        Kind::Wrap,
+        Kind::Transfer,
+        Kind::Unwrap,
+        Kind::Account,
+    ] {
         let (p, sig, result) = payment(&wallet, kind, 1, true, true);
         assert_eq!(
             verify::outcome(&p.id, &p.wallet, &p.transaction, &sig, &result).unwrap(),
@@ -247,6 +253,24 @@ async fn backfill_subscriptions_events_permissions_and_restart() {
     h.assert_status(&unknown, "finalized").await;
     startup::verify(&h).await;
     assert_eq!(h.events().await, 12);
+    for (nonce, failed) in [(60, false), (61, true)] {
+        let (account, signature, result) = payment(&h.wallet, Kind::Account, nonce, true, failed);
+        h.insert(&account, nonce as i16).await;
+        h.backend
+            .transactions
+            .lock()
+            .unwrap()
+            .insert(signature, result);
+        h.indexer.backfill().await.unwrap();
+        h.assert_status(&account, if failed { "failed" } else { "finalized" })
+            .await;
+    }
+    assert_eq!(
+        h.events().await,
+        12,
+        "account updates are receipts, not payroll events"
+    );
+
     history::verify(&h).await;
     scheduling::verify(&h).await;
     let events_before_permission_checks = h.events().await;
@@ -291,6 +315,7 @@ async fn backfill_subscriptions_events_permissions_and_restart() {
         events_before_permission_checks
     );
     let allowed = [
+        "idempotency_key",
         "run_id",
         "position",
         "destination",
