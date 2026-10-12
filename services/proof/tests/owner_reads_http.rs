@@ -253,6 +253,7 @@ async fn authorized_histories_roster_and_csv_share_committed_audit_gates() {
     let mut key_url: reqwest::Url = url.parse().unwrap();
     key_url.set_username("cadence_key_service").unwrap();
     key_url.set_password(Some("transfer54-test-only")).unwrap();
+    key_url.set_query(Some("sslmode=disable"));
     let client = cadence_proof::database::Database::new(key_url.as_str(), "cadence_key_service")
         .unwrap()
         .connect()
