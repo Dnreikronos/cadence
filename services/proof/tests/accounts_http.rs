@@ -1,3 +1,5 @@
+#[path = "support/account_confirmation.rs"]
+mod confirmation;
 #[path = "support/transfer.rs"]
 #[allow(dead_code)]
 mod support;
@@ -233,6 +235,7 @@ async fn recipient_enrolls_configures_and_applies_with_durable_receipts() {
         .lock()
         .unwrap()
         .insert(signature.clone(), result);
+    confirmation::index_configure(&h, &prepared, &signature).await;
     let (status, receipt) = request(
         &app,
         "/accounts/configure/confirm",
@@ -241,6 +244,7 @@ async fn recipient_enrolls_configures_and_applies_with_durable_receipts() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{receipt}");
+    confirmation::activated(&h).await;
     assert_eq!(
         request(
             &app,

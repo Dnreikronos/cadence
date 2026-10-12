@@ -462,6 +462,10 @@ async fn confirm(
         if record.signature.as_deref() != Some(&request.signature) {
             return Err(AppError::Conflict("account_already_confirmed"));
         }
+        if kind == "configure" {
+            verified_config(&state, &service, &record, slot as u64).await?;
+            service.accounts.ready(&user, &record.token_account).await?;
+        }
         slot as u64
     } else {
         service
@@ -493,16 +497,7 @@ async fn confirm(
                 .await?;
             return Err(AppError::Conflict("transaction_failed"));
         }
-        let wallet = address(&record.wallet)?;
-        let account = address(&record.token_account)?;
-        let (_, chain) = state.rpc.finalized_account(&account, Some(slot)).await?;
-        let chain = chain.ok_or(AppError::Conflict("token_account_missing"))?;
-        let client = service.keys.connect().await?;
-        let (public, _) = vault::metadata(&client, &wallet, &account)
-            .await
-            .map_err(|_| AppError::TransferUnavailable("key_storage_unavailable"))?
-            .ok_or(AppError::Conflict("key_not_enrolled"))?;
-        let config = accounts::configured(&chain, &wallet, &public)?;
+        let config = verified_config(&state, &service, &record, slot).await?;
         service
             .accounts
             .finish(
@@ -526,6 +521,28 @@ async fn confirm(
     Ok(Json(
         json!({"request_id":record.id,"signature":request.signature,"slot":slot,"status":"finalized"}),
     ))
+}
+/// Verify readiness against finalized state even when the indexer saved the receipt first.
+async fn verified_config(
+    state: &AccountState,
+    service: &Service,
+    record: &PreparedAccount,
+    slot: u64,
+) -> Result<
+    spl_token_2022_interface::extension::confidential_transfer::ConfidentialTransferAccount,
+    AppError,
+> {
+    state.rpc.require_devnet().await?;
+    let wallet = address(&record.wallet)?;
+    let account = address(&record.token_account)?;
+    let (_, chain) = state.rpc.finalized_account(&account, Some(slot)).await?;
+    let chain = chain.ok_or(AppError::Conflict("token_account_missing"))?;
+    let client = service.keys.connect().await?;
+    let (public, _) = vault::metadata(&client, &wallet, &account)
+        .await
+        .map_err(|_| AppError::TransferUnavailable("key_storage_unavailable"))?
+        .ok_or(AppError::Conflict("key_not_enrolled"))?;
+    accounts::configured(&chain, &wallet, &public)
 }
 async fn company_account(
     State(state): State<AccountState>,
