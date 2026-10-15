@@ -7,8 +7,8 @@
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
     "@solana/kit": "^8.4.0",
-    "@supabase/supabase-js": "^2.117.2",
-    "@turnkey/core": "^2.12.1",
+    "@supabase/supabase-js": "^2.117.3",
+    "@turnkey/core": "^2.12.2",
     "@turnkey/sdk-server": "^8.6.0",
     "bs58": "^6.0.0"
   }
